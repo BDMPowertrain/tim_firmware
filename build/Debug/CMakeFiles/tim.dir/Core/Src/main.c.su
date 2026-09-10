@@ -1,0 +1,17 @@
+/home/aidan/git/TIM/Firmware/tim/Core/Src/main.c:102:5:main	8	static
+/home/aidan/git/TIM/Firmware/tim/Core/Src/main.c:193:6:SystemClock_Config	88	static
+/home/aidan/git/TIM/Firmware/tim/Core/Src/main.c:239:13:MX_ADC1_Init	56	static
+/home/aidan/git/TIM/Firmware/tim/Core/Src/main.c:307:13:MX_ADC2_Init	40	static
+/home/aidan/git/TIM/Firmware/tim/Core/Src/main.c:366:13:MX_DAC1_Init	56	static
+/home/aidan/git/TIM/Firmware/tim/Core/Src/main.c:420:13:MX_FDCAN1_Init	8	static
+/home/aidan/git/TIM/Firmware/tim/Core/Src/main.c:463:13:MX_FDCAN2_Init	8	static
+/home/aidan/git/TIM/Firmware/tim/Core/Src/main.c:506:13:MX_I2C1_Init	8	static
+/home/aidan/git/TIM/Firmware/tim/Core/Src/main.c:554:13:MX_SPI2_Init	8	static
+/home/aidan/git/TIM/Firmware/tim/Core/Src/main.c:594:13:MX_SPI3_Init	8	static
+/home/aidan/git/TIM/Firmware/tim/Core/Src/main.c:634:13:MX_TIM1_Init	72	static
+/home/aidan/git/TIM/Firmware/tim/Core/Src/main.c:698:13:MX_TIM2_Init	40	static
+/home/aidan/git/TIM/Firmware/tim/Core/Src/main.c:750:13:MX_USART1_UART_Init	8	static
+/home/aidan/git/TIM/Firmware/tim/Core/Src/main.c:798:13:MX_GPIO_Init	48	static
+/home/aidan/git/TIM/Firmware/tim/Core/Src/main.c:894:6:StartDefaultTask	16	static
+/home/aidan/git/TIM/Firmware/tim/Core/Src/main.c:914:6:HAL_TIM_PeriodElapsedCallback	16	static
+/home/aidan/git/TIM/Firmware/tim/Core/Src/main.c:932:6:Error_Handler	4	static

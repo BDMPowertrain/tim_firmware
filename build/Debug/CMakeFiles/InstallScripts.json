@@ -1,0 +1,8 @@
+{
+	"InstallScripts" : 
+	[
+		"/home/aidan/git/TIM/Firmware/tim/build/Debug/cmake_install.cmake",
+		"/home/aidan/git/TIM/Firmware/tim/build/Debug/cmake/stm32cubemx/cmake_install.cmake"
+	],
+	"Parallel" : false
+}
