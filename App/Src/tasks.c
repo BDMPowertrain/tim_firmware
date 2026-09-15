@@ -9,6 +9,7 @@
 #include "task.h"
 
 #include "imu.h"
+#include "logger.h"
 #include "main.h"
 #include "print.h"
 #include "shell.h"
@@ -49,6 +50,7 @@ void tasks_init(void)
     print_init();
     shell_init();
     spi3_bus_init();
+    logger_init();
 
     const osThreadAttr_t printTask_attributes = {
         .name = "printTask",
@@ -84,6 +86,13 @@ void tasks_init(void)
         .stack_size = IMU_TASK_STACK_SIZE,
     };
     osThreadNew(imuTask, NULL, &imuTask_attributes);
+
+    const osThreadAttr_t loggerTask_attributes = {
+        .name = "loggerTask",
+        .priority = (osPriority_t)LOGGER_TASK_PRIORITY,
+        .stack_size = LOGGER_TASK_STACK_SIZE,
+    };
+    osThreadNew(loggerTask, NULL, &loggerTask_attributes);
 }
 
 /* Called by FreeRTOS the instant it detects a task has overrun its

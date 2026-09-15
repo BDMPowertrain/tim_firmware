@@ -95,6 +95,15 @@
 #define IMU_TASK_PRIORITY         osPriorityAboveNormal
 #define IMU_TASK_STACK_SIZE       1024u
 
+/* "Logging, slow sensing, stats" band per the reserved-priority table.
+   FatFS's f_mount/f_open/f_write call chain (ff.c) is known to be
+   stack-hungry even with long filenames disabled (_USE_LFN=0 in
+   ffconf.h) — starting at the same size that turned out right for
+   shellTask rather than guessing low; measure with `tasks` once
+   `log start` has actually written a file and adjust. */
+#define LOGGER_TASK_PRIORITY      osPriorityBelowNormal
+#define LOGGER_TASK_STACK_SIZE    2048u
+
 /* Creates every queue and task the running image needs, then returns.
    Called once from initTask, which terminates immediately afterward —
    see Documentation/tim-rtos-architecture.md section 3. */

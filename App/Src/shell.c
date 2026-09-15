@@ -13,6 +13,7 @@
 #include "cmsis_os2.h"
 
 #include "imu.h"
+#include "logger.h"
 #include "main.h"
 #include "print.h"
 #include "stats.h"
@@ -84,6 +85,7 @@ static int cmd_tasks(int argc, char **argv);
 static int cmd_imu(int argc, char **argv);
 static int cmd_imustream(int argc, char **argv);
 static int cmd_reset(int argc, char **argv);
+static int cmd_log(int argc, char **argv);
 
 /* Adding a command is one row here plus one handler function — nothing
    else in shell.c changes. */
@@ -93,6 +95,7 @@ static const shell_cmd_t commandTable[] = {
     { "imu",       cmd_imu,       "latest accel/gyro sample" },
     { "imustream", cmd_imustream, "live accel/gyro stream, any key to stop" },
     { "reset",     cmd_reset,     "software reset" },
+    { "log",       cmd_log,       "log start|stop|status|list|dump <file>" },
 };
 
 #define COMMAND_TABLE_COUNT (sizeof(commandTable) / sizeof(commandTable[0]))
@@ -208,6 +211,58 @@ static int cmd_reset(int argc, char **argv)
     shell_printf("resetting...\r\n");
     osDelay(50);
     NVIC_SystemReset();
+
+    return 0;
+}
+
+static const char *logger_state_name(logger_state_t state)
+{
+    switch (state) {
+    case LOGGER_IDLE:   return "idle";
+    case LOGGER_ACTIVE: return "active";
+    case LOGGER_ERROR:  return "error";
+    default:             return "unknown";
+    }
+}
+
+#define CMD_LOG_USAGE "usage: log start|stop|status|list|dump <file>\r\n"
+
+/* logger_request_*() only post to loggerTask's control queue and
+   return immediately — the actual f_mount()/f_open()/f_read()/
+   f_write()/f_close() happens over in loggerTask, never here. That's
+   why this can't report success/failure synchronously; run `log
+   status` (or just watch the output) a moment later to see how it
+   landed. `list`/`dump` are a testing-only readback path over this same
+   UART — see logger.h for why, and don't run `dump` while a session is
+   active. */
+static int cmd_log(int argc, char **argv)
+{
+    if (argc < 2) {
+        shell_printf(CMD_LOG_USAGE);
+        return 0;
+    }
+
+    if (strcmp(argv[1], "start") == 0) {
+        logger_request_start();
+        shell_printf("log: start requested\r\n");
+    } else if (strcmp(argv[1], "stop") == 0) {
+        logger_request_stop();
+        shell_printf("log: stop requested\r\n");
+    } else if (strcmp(argv[1], "status") == 0) {
+        shell_printf("log: %s, %lu records written\r\n",
+                     logger_state_name(logger_get_state()),
+                     (unsigned long)logger_get_record_count());
+    } else if (strcmp(argv[1], "list") == 0) {
+        logger_request_list();
+    } else if (strcmp(argv[1], "dump") == 0) {
+        if (argc < 3) {
+            shell_printf(CMD_LOG_USAGE);
+        } else {
+            logger_request_dump(argv[2]);
+        }
+    } else {
+        shell_printf(CMD_LOG_USAGE);
+    }
 
     return 0;
 }

@@ -46,6 +46,7 @@ target_link_directories(${CMAKE_PROJECT_NAME} PRIVATE
 target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     # Add user sources here
     App/Src/imu.c
+    App/Src/logger.c
     App/Src/print.c
     App/Src/shell.c
     App/Src/spi3_bus.c
