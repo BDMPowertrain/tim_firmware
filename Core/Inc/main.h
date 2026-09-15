@@ -101,6 +101,7 @@ void Error_Handler(void);
 #define SWO_GPIO_Port GPIOB
 #define IMU_INT_Pin GPIO_PIN_4
 #define IMU_INT_GPIO_Port GPIOB
+#define IMU_INT_EXTI_IRQn EXTI4_IRQn
 #define FDCAN2_STB_Pin GPIO_PIN_9
 #define FDCAN2_STB_GPIO_Port GPIOB
 
