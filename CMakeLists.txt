@@ -45,8 +45,12 @@ target_link_directories(${CMAKE_PROJECT_NAME} PRIVATE
 # Add sources to executable
 target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     # Add user sources here
+    App/Src/imu.c
     App/Src/print.c
     App/Src/shell.c
+    App/Src/spi3_bus.c
+    App/Src/stats.c
+    App/Src/tasks.c
 )
 
 # Add include paths

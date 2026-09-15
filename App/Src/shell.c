@@ -10,8 +10,12 @@
 #include <stddef.h>
 #include <string.h>
 
+#include "cmsis_os2.h"
+
+#include "imu.h"
 #include "main.h"
 #include "print.h"
+#include "stats.h"
 #include "stream_buffer.h"
 
 extern UART_HandleTypeDef huart1;
@@ -76,11 +80,19 @@ typedef struct {
 } shell_cmd_t;
 
 static int cmd_help(int argc, char **argv);
+static int cmd_tasks(int argc, char **argv);
+static int cmd_imu(int argc, char **argv);
+static int cmd_imustream(int argc, char **argv);
+static int cmd_reset(int argc, char **argv);
 
 /* Adding a command is one row here plus one handler function — nothing
    else in shell.c changes. */
 static const shell_cmd_t commandTable[] = {
-    { "help", cmd_help, "list commands" },
+    { "help",      cmd_help,      "list commands" },
+    { "tasks",     cmd_tasks,     "list tasks: state, priority, stack free" },
+    { "imu",       cmd_imu,       "latest accel/gyro sample" },
+    { "imustream", cmd_imustream, "live accel/gyro stream, any key to stop" },
+    { "reset",     cmd_reset,     "software reset" },
 };
 
 #define COMMAND_TABLE_COUNT (sizeof(commandTable) / sizeof(commandTable[0]))
@@ -93,6 +105,109 @@ static int cmd_help(int argc, char **argv)
     for (size_t i = 0; i < COMMAND_TABLE_COUNT; i++) {
         shell_printf("%-12s %s\r\n", commandTable[i].name, commandTable[i].help);
     }
+
+    return 0;
+}
+
+static int cmd_tasks(int argc, char **argv)
+{
+    (void)argc;
+    (void)argv;
+
+    stats_print_tasks();
+
+    return 0;
+}
+
+/* mg/mdps conversion done in integer math, not float: this project
+   links --specs=nano.specs without -u _printf_float (cmake/gcc-arm-none
+   -eabi.cmake), so newlib-nano's vsnprintf silently mis-renders %f.
+   IMU_GYRO_MDPS_PER_LSB (70) is already a whole number so raw*70 is
+   exact; IMU_ACCEL_MG_PER_LSB (0.244) is scaled by 1000 and truncated,
+   fine for a glance-at-it shell readout, not for logged data. */
+static int cmd_imu(int argc, char **argv)
+{
+    (void)argc;
+    (void)argv;
+
+    imu_sample_t accel;
+    imu_sample_t gyro;
+
+    if (imu_get_latest_accel(&accel)) {
+        shell_printf("accel  raw x=%6d y=%6d z=%6d  mg x=%6ld y=%6ld z=%6ld\r\n",
+                     accel.x, accel.y, accel.z,
+                     (long)accel.x * 244 / 1000, (long)accel.y * 244 / 1000, (long)accel.z * 244 / 1000);
+    } else {
+        shell_printf("accel  no sample yet\r\n");
+    }
+
+    if (imu_get_latest_gyro(&gyro)) {
+        shell_printf("gyro   raw x=%6d y=%6d z=%6d  mdps x=%6ld y=%6ld z=%6ld\r\n",
+                     gyro.x, gyro.y, gyro.z,
+                     (long)gyro.x * 70, (long)gyro.y * 70, (long)gyro.z * 70);
+    } else {
+        shell_printf("gyro   no sample yet\r\n");
+    }
+
+    uint16_t pending;
+    bool watermarkFlag;
+    if (imu_fifo_status(&pending, &watermarkFlag)) {
+        shell_printf("fifo   pending=%u watermark_flag=%u\r\n", pending, (unsigned)watermarkFlag);
+    }
+
+    return 0;
+}
+
+/* Prints the cached accel/gyro sample roughly once per imuTask drain
+   cycle (~100 ms, set by IMU_FIFO_WATERMARK in imu.c) until any key is
+   pressed. xStreamBufferReceive()'s timeout does double duty as both
+   the print-rate timer and the stop-key check, so there's no separate
+   polling loop and no busy-waiting — this task is fully blocked between
+   prints. The byte that stops the stream is consumed here and never
+   reaches shell_dispatch(), so it doesn't echo or get treated as a
+   command; the very next line is a fresh `> ` prompt. Raw counts only
+   (not mg/mdps) so the stream stays compact enough to actually watch
+   scroll by. */
+static int cmd_imustream(int argc, char **argv)
+{
+    (void)argc;
+    (void)argv;
+
+    uint8_t stopByte;
+
+    shell_printf("streaming - press any key to stop\r\n");
+
+    for (;;) {
+        imu_sample_t accel;
+        imu_sample_t gyro;
+
+        if (imu_get_latest_accel(&accel) && imu_get_latest_gyro(&gyro)) {
+            shell_printf("accel x=%6d y=%6d z=%6d  gyro x=%6d y=%6d z=%6d\r\n",
+                         accel.x, accel.y, accel.z, gyro.x, gyro.y, gyro.z);
+        }
+
+        if (xStreamBufferReceive(shellRxStreamBuf, &stopByte, 1, pdMS_TO_TICKS(100)) > 0) {
+            break;
+        }
+    }
+
+    return 0;
+}
+
+/* NVIC_SystemReset() never returns, so the osDelay() is what actually
+   matters here: shell_printf() only enqueues onto printQueue, it
+   doesn't wait for printTask to drain it, so without a delay this
+   message could be lost — the reset would fire before printTask ever
+   gets scheduled to transmit it. 50 ms is generous headroom for a
+   ~10-byte string at 115200 baud. */
+static int cmd_reset(int argc, char **argv)
+{
+    (void)argc;
+    (void)argv;
+
+    shell_printf("resetting...\r\n");
+    osDelay(50);
+    NVIC_SystemReset();
 
     return 0;
 }
