@@ -8,6 +8,7 @@
 #include "FreeRTOS.h"
 #include "task.h"
 
+#include "can_if.h"
 #include "imu.h"
 #include "logger.h"
 #include "main.h"
@@ -51,6 +52,7 @@ void tasks_init(void)
     shell_init();
     spi3_bus_init();
     logger_init();
+    can_if_init();
 
     const osThreadAttr_t printTask_attributes = {
         .name = "printTask",
@@ -93,6 +95,37 @@ void tasks_init(void)
         .stack_size = LOGGER_TASK_STACK_SIZE,
     };
     osThreadNew(loggerTask, NULL, &loggerTask_attributes);
+
+    /* canRxTask/canTxTask are each one function reused for both buses —
+       argument is the can_bus_t value itself (not a pointer), see
+       can_if.h. */
+    const osThreadAttr_t can1RxTask_attributes = {
+        .name = "can1RxTask",
+        .priority = (osPriority_t)CAN_RX_TASK_PRIORITY,
+        .stack_size = CAN_RX_TASK_STACK_SIZE,
+    };
+    osThreadNew(canRxTask, (void *)CAN_BUS_1, &can1RxTask_attributes);
+
+    const osThreadAttr_t can1TxTask_attributes = {
+        .name = "can1TxTask",
+        .priority = (osPriority_t)CAN_TX_TASK_PRIORITY,
+        .stack_size = CAN_TX_TASK_STACK_SIZE,
+    };
+    osThreadNew(canTxTask, (void *)CAN_BUS_1, &can1TxTask_attributes);
+
+    const osThreadAttr_t can2RxTask_attributes = {
+        .name = "can2RxTask",
+        .priority = (osPriority_t)CAN_RX_TASK_PRIORITY,
+        .stack_size = CAN_RX_TASK_STACK_SIZE,
+    };
+    osThreadNew(canRxTask, (void *)CAN_BUS_2, &can2RxTask_attributes);
+
+    const osThreadAttr_t can2TxTask_attributes = {
+        .name = "can2TxTask",
+        .priority = (osPriority_t)CAN_TX_TASK_PRIORITY,
+        .stack_size = CAN_TX_TASK_STACK_SIZE,
+    };
+    osThreadNew(canTxTask, (void *)CAN_BUS_2, &can2TxTask_attributes);
 }
 
 /* Called by FreeRTOS the instant it detects a task has overrun its

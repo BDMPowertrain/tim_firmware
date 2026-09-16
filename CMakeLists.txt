@@ -45,6 +45,7 @@ target_link_directories(${CMAKE_PROJECT_NAME} PRIVATE
 # Add sources to executable
 target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     # Add user sources here
+    App/Src/can_if.c
     App/Src/imu.c
     App/Src/logger.c
     App/Src/print.c

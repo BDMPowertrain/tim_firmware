@@ -80,7 +80,7 @@
 /* Measured via the `tasks` command itself: running `tasks` (builds a
    16-entry TaskStatus_t array on shellTask's own stack, on top of its
    line buffer and shell_dispatch()'s argv array) drove the high-water
-   mark down to ~688 B free out of 2048 — i.e. ~1360 B actually used at
+   Mark down to ~688 B free out of 2048 — i.e. ~1360 B actually used at
    the worst point seen so far. 2048 leaves real headroom; re-measure
    with `tasks` if more call depth gets added to this path later. */
 #define SHELL_TASK_STACK_SIZE     2048u
@@ -103,6 +103,20 @@
    `log start` has actually written a file and adjust. */
 #define LOGGER_TASK_PRIORITY      osPriorityBelowNormal
 #define LOGGER_TASK_STACK_SIZE    2048u
+
+/* "Hard hardware deadlines" band, reserved for CAN RX FIFO per the
+   reserved-priority table. Both canRxTask instances (CAN1, CAN2) share
+   it — the real deadline enforcement is the 3-deep hardware FIFO
+   drained fully per ISR, not either task's own scheduling latency once
+   woken. No SPI/FatFS-depth call chains in this path, just a HAL
+   struct decode and a mutex; measure with `tasks` after first hardware
+   test and adjust like every other *_STACK_SIZE here. */
+#define CAN_RX_TASK_PRIORITY      osPriorityHigh
+#define CAN_RX_TASK_STACK_SIZE    512u
+
+/* "Shell, CAN TX, general control" band, same table. */
+#define CAN_TX_TASK_PRIORITY      osPriorityNormal
+#define CAN_TX_TASK_STACK_SIZE    512u
 
 /* Creates every queue and task the running image needs, then returns.
    Called once from initTask, which terminates immediately afterward —
