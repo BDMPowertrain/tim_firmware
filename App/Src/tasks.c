@@ -41,6 +41,31 @@ static void blinkTask(void *argument)
     }
 }
 
+/* initTask (the one CubeMX-generated task, see Core/Src/main.c) has a
+   fixed 512-byte stack that isn't one of tasks.h's tunable *_STACK_SIZE
+   defines — it's set in CubeMX's FreeRTOS Tasks tab, outside any USER
+   CODE marker. tasks_init() runs entirely on THAT stack, not the new
+   task's own. At -O0 (this project's debug build), the compiler does
+   NOT reuse stack slots across sequential locals in one function scope
+   — every const osThreadAttr_t declared directly in tasks_init() stays
+   resident for the whole function, all of them simultaneously. Adding
+   CAN's 4 tasks brought the count to 10 (sizeof(osThreadAttr_t) == 36
+   bytes -> 360 bytes of just these structs against a 512-byte budget)
+   and overflowed initTask's stack — this helper exists specifically to
+   make that impossible regardless of task count: each call is a real
+   function boundary, so its local attr struct's frame is freed the
+   moment that call returns, before the next one is even built. */
+static void create_task(osThreadFunc_t func, void *argument, const char *name,
+                         osPriority_t priority, uint32_t stack_size)
+{
+    const osThreadAttr_t attributes = {
+        .name = name,
+        .priority = priority,
+        .stack_size = stack_size,
+    };
+    osThreadNew(func, argument, &attributes);
+}
+
 void tasks_init(void)
 {
     /* print_init() must run before any task that might call shell_printf()/
@@ -54,78 +79,30 @@ void tasks_init(void)
     logger_init();
     can_if_init();
 
-    const osThreadAttr_t printTask_attributes = {
-        .name = "printTask",
-        .priority = (osPriority_t)PRINT_TASK_PRIORITY,
-        .stack_size = PRINT_TASK_STACK_SIZE,
-    };
-    osThreadNew(printTask, NULL, &printTask_attributes);
-
-    const osThreadAttr_t shellTask_attributes = {
-        .name = "shellTask",
-        .priority = (osPriority_t)SHELL_TASK_PRIORITY,
-        .stack_size = SHELL_TASK_STACK_SIZE,
-    };
-    osThreadNew(shellTask, NULL, &shellTask_attributes);
-
-    const osThreadAttr_t heartbeatTask_attributes = {
-        .name = "heartbeatTask",
-        .priority = (osPriority_t)HEARTBEAT_TASK_PRIORITY,
-        .stack_size = HEARTBEAT_TASK_STACK_SIZE,
-    };
-    osThreadNew(heartbeatTask, NULL, &heartbeatTask_attributes);
-
-    const osThreadAttr_t blinkTask_attributes = {
-        .name = "blinkTask",
-        .priority = (osPriority_t)BLINK_TASK_PRIORITY,
-        .stack_size = BLINK_TASK_STACK_SIZE,
-    };
-    osThreadNew(blinkTask, NULL, &blinkTask_attributes);
-
-    const osThreadAttr_t imuTask_attributes = {
-        .name = "imuTask",
-        .priority = (osPriority_t)IMU_TASK_PRIORITY,
-        .stack_size = IMU_TASK_STACK_SIZE,
-    };
-    osThreadNew(imuTask, NULL, &imuTask_attributes);
-
-    const osThreadAttr_t loggerTask_attributes = {
-        .name = "loggerTask",
-        .priority = (osPriority_t)LOGGER_TASK_PRIORITY,
-        .stack_size = LOGGER_TASK_STACK_SIZE,
-    };
-    osThreadNew(loggerTask, NULL, &loggerTask_attributes);
+    create_task(printTask, NULL, "printTask",
+                (osPriority_t)PRINT_TASK_PRIORITY, PRINT_TASK_STACK_SIZE);
+    create_task(shellTask, NULL, "shellTask",
+                (osPriority_t)SHELL_TASK_PRIORITY, SHELL_TASK_STACK_SIZE);
+    create_task(heartbeatTask, NULL, "heartbeatTask",
+                (osPriority_t)HEARTBEAT_TASK_PRIORITY, HEARTBEAT_TASK_STACK_SIZE);
+    create_task(blinkTask, NULL, "blinkTask",
+                (osPriority_t)BLINK_TASK_PRIORITY, BLINK_TASK_STACK_SIZE);
+    create_task(imuTask, NULL, "imuTask",
+                (osPriority_t)IMU_TASK_PRIORITY, IMU_TASK_STACK_SIZE);
+    create_task(loggerTask, NULL, "loggerTask",
+                (osPriority_t)LOGGER_TASK_PRIORITY, LOGGER_TASK_STACK_SIZE);
 
     /* canRxTask/canTxTask are each one function reused for both buses —
        argument is the can_bus_t value itself (not a pointer), see
        can_if.h. */
-    const osThreadAttr_t can1RxTask_attributes = {
-        .name = "can1RxTask",
-        .priority = (osPriority_t)CAN_RX_TASK_PRIORITY,
-        .stack_size = CAN_RX_TASK_STACK_SIZE,
-    };
-    osThreadNew(canRxTask, (void *)CAN_BUS_1, &can1RxTask_attributes);
-
-    const osThreadAttr_t can1TxTask_attributes = {
-        .name = "can1TxTask",
-        .priority = (osPriority_t)CAN_TX_TASK_PRIORITY,
-        .stack_size = CAN_TX_TASK_STACK_SIZE,
-    };
-    osThreadNew(canTxTask, (void *)CAN_BUS_1, &can1TxTask_attributes);
-
-    const osThreadAttr_t can2RxTask_attributes = {
-        .name = "can2RxTask",
-        .priority = (osPriority_t)CAN_RX_TASK_PRIORITY,
-        .stack_size = CAN_RX_TASK_STACK_SIZE,
-    };
-    osThreadNew(canRxTask, (void *)CAN_BUS_2, &can2RxTask_attributes);
-
-    const osThreadAttr_t can2TxTask_attributes = {
-        .name = "can2TxTask",
-        .priority = (osPriority_t)CAN_TX_TASK_PRIORITY,
-        .stack_size = CAN_TX_TASK_STACK_SIZE,
-    };
-    osThreadNew(canTxTask, (void *)CAN_BUS_2, &can2TxTask_attributes);
+    create_task(canRxTask, (void *)CAN_BUS_1, "can1RxTask",
+                (osPriority_t)CAN_RX_TASK_PRIORITY, CAN_RX_TASK_STACK_SIZE);
+    create_task(canTxTask, (void *)CAN_BUS_1, "can1TxTask",
+                (osPriority_t)CAN_TX_TASK_PRIORITY, CAN_TX_TASK_STACK_SIZE);
+    create_task(canRxTask, (void *)CAN_BUS_2, "can2RxTask",
+                (osPriority_t)CAN_RX_TASK_PRIORITY, CAN_RX_TASK_STACK_SIZE);
+    create_task(canTxTask, (void *)CAN_BUS_2, "can2TxTask",
+                (osPriority_t)CAN_TX_TASK_PRIORITY, CAN_TX_TASK_STACK_SIZE);
 }
 
 /* Called by FreeRTOS the instant it detects a task has overrun its
