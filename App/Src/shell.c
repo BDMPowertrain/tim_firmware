@@ -271,7 +271,7 @@ static int cmd_log(int argc, char **argv)
     return 0;
 }
 
-#define CMD_CAN_USAGE "usage: can status|stby<1|2> on|off|term<1|2> on|off|send<1|2> <id> <hex> [fd] [brs]|stream<1|2>\r\n"
+#define CMD_CAN_USAGE "usage: can status[1|2]|stby<1|2> on|off|term<1|2> on|off|send<1|2> <id> <hex> [fd] [brs]|stream<1|2>\r\n"
 
 /* Matches "stby1"/"stby2", "term1"/"term2", etc. against a prefix and
    sets *bus from the trailing digit. Returns false (bus untouched) if
@@ -397,22 +397,26 @@ static int can_do_send(can_bus_t bus, int argc, char **argv)
     return 0;
 }
 
-/* Mirrors cmd_imustream()'s exact idiom: xStreamBufferReceive()'s
-   timeout does double duty as both the print-rate pacer and the
-   stop-key check. can_get_latest_rx() is a cached single-frame
-   snapshot, not the raw per-frame queue canRxTask drains -- this shows
-   "latest frame, refreshed periodically," not "every frame guaranteed",
-   same tradeoff imustream already makes and for the same reason (a
-   second consumer of canRxTask's own queue would race it). */
+/* Borrows cmd_imustream()'s idiom for the stop-key check
+   (xStreamBufferReceive()'s timeout), but prints only on a genuinely
+   new frame (can_get_new_rx()'s sequence check) rather than
+   re-printing the same cached one every poll -- unlike IMU's
+   continuous sampling, CAN traffic is event-driven, so a fixed-rate
+   "heartbeat" print was just noise. Still a cached single-frame
+   snapshot, not the raw per-frame queue canRxTask drains (a second
+   consumer of that queue would race it) -- a burst of several new
+   frames within one 100 ms poll interval still only shows the latest
+   of them. */
 static int can_stream(can_bus_t bus)
 {
     uint8_t stopByte;
+    uint32_t lastSeq = 0;
 
     shell_printf("streaming - press any key to stop\r\n");
 
     for (;;) {
         can_frame_t frame;
-        if (can_get_latest_rx(bus, &frame)) {
+        if (can_get_new_rx(bus, &frame, &lastSeq)) {
             shell_printf("id=0x%03lX %s%s len=%u data=",
                          (unsigned long)frame.id,
                          frame.is_extended ? "ext " : "std ",
@@ -446,6 +450,12 @@ static int cmd_can(int argc, char **argv)
     }
 
     can_bus_t bus;
+
+    if (parse_bus_suffix(argv[1], "status", &bus)) {
+        can_print_status(bus, (bus == CAN_BUS_1) ? "CAN1" : "CAN2");
+        return 0;
+    }
+
 
     if (parse_bus_suffix(argv[1], "stby", &bus)) {
         if (argc < 3) {

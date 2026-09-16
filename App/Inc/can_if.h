@@ -62,13 +62,17 @@ void can_if_init(void);
 bool can_send(can_bus_t bus, uint32_t id, const uint8_t *data, uint8_t len,
               bool is_extended, bool is_fd, bool is_brs);
 
-/* Copies the most recently received frame on this bus into *out.
-   Returns false if canRxTask hasn't received one yet. This is a cached
-   single-frame snapshot for shell inspection (`can stream`), not the
-   raw per-frame queue canRxTask itself drains -- a second consumer of
+/* Copies the most recently received frame on this bus into *out, but
+   only if it's genuinely new since the last call with this *last_seq --
+   pass a caller-owned uint32_t, zero-initialized, and this updates it
+   in place each time it returns true. This is what `can stream` uses to
+   print only on new arrivals rather than re-printing the same cached
+   frame on a timer. It's still a cached single-frame snapshot, not the
+   raw per-frame queue canRxTask itself drains (a second consumer of
    that queue would race canRxTask for frames and silently split
-   traffic between them. */
-bool can_get_latest_rx(can_bus_t bus, can_frame_t *out);
+   traffic between them) -- if multiple frames arrive within one poll
+   interval, only the latest of them is ever seen here. */
+bool can_get_new_rx(can_bus_t bus, can_frame_t *out, uint32_t *last_seq);
 
 bool can_get_status(can_bus_t bus, can_status_t *out);
 

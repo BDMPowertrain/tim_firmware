@@ -50,6 +50,12 @@ typedef struct {
     osMutexId_t           rxCacheMutex;
     can_frame_t           latestRx;
     bool                  haveRx;
+    uint32_t              rxSeq;      /* bumped each time canRxTask caches a
+                                          new frame. haveRx (above) is what
+                                          actually gates "nothing received
+                                          yet" -- rxSeq only has to differ
+                                          when something changes, so it
+                                          doesn't need special-cased at 0. */
 
     bool                  fdCapable;
     bool                  standby;
@@ -199,19 +205,20 @@ bool can_send(can_bus_t bus, uint32_t id, const uint8_t *data, uint8_t len,
     return true;
 }
 
-bool can_get_latest_rx(can_bus_t bus, can_frame_t *out)
+bool can_get_new_rx(can_bus_t bus, can_frame_t *out, uint32_t *last_seq)
 {
     can_bus_ctx_t *ctx = &canBuses[bus];
-    bool ok;
+    bool haveNew;
 
     osMutexAcquire(ctx->rxCacheMutex, osWaitForever);
-    ok = ctx->haveRx;
-    if (ok) {
+    haveNew = (ctx->haveRx && ctx->rxSeq != *last_seq);
+    if (haveNew) {
         *out = ctx->latestRx;
+        *last_seq = ctx->rxSeq;
     }
     osMutexRelease(ctx->rxCacheMutex);
 
-    return ok;
+    return haveNew;
 }
 
 bool can_get_status(can_bus_t bus, can_status_t *out)
@@ -251,14 +258,11 @@ void can_set_standby(can_bus_t bus, bool standby)
     ctx->standby = standby;
 }
 
-/* Polarity of "on" here is a best-effort guess (drive high = presumed
-   relay-closed) pending the hardware verification the plan's test
-   section calls for: measure resistance across CANH/CANL while
-   toggling this and correct this comment (and the WritePin level
-   below, if it turns out backwards) once confirmed — the schematic
-   strings search couldn't resolve exact relay polarity, only its
-   general topology (an opto-isolated TLP172AM switching two 59R
-   resistors in series across the bus). */
+/* Polarity confirmed on hardware (multimeter across CANH/CANL, both
+   buses): drive high closes the TLP172AM relay, connecting the two 59R
+   resistors in series (~120R) across the bus; drive low leaves it open.
+   The schematic strings search alone couldn't resolve this — only the
+   relay's general topology, not which GPIO level closes it. */
 void can_set_termination(can_bus_t bus, bool on)
 {
     can_bus_ctx_t *ctx = &canBuses[bus];
@@ -320,9 +324,17 @@ void canRxTask(void *argument)
         osMutexAcquire(ctx->rxCacheMutex, osWaitForever);
         ctx->latestRx = frame;
         ctx->haveRx = true;
+        ctx->rxSeq++;
         osMutexRelease(ctx->rxCacheMutex);
 
         ctx->rxCount++;
+
+        /* Activity LED: one shared LED per bus (no separate TX/RX
+           indicators), active-low per CLAUDE.md -- toggling on every
+           successfully-processed frame gives a visible blink at low
+           traffic rates and a flicker/dim look at high ones, the usual
+           "activity LED" behavior, with no extra timer needed. */
+        HAL_GPIO_TogglePin(ctx->led_port, ctx->led_pin);
     }
 }
 
@@ -346,6 +358,7 @@ void canTxTask(void *argument)
            established "never stall the producer" rule. */
         if (HAL_FDCAN_AddMessageToTxFifoQ(ctx->hfdcan, &hdr, frame.data) == HAL_OK) {
             ctx->txCount++;
+            HAL_GPIO_TogglePin(ctx->led_port, ctx->led_pin);
         } else {
             ctx->txDropCount++;
         }
