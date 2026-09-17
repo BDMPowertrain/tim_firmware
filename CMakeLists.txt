@@ -53,6 +53,7 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     App/Src/spi3_bus.c
     App/Src/stats.c
     App/Src/tasks.c
+    App/Src/vbat.c
 )
 
 # Add include paths

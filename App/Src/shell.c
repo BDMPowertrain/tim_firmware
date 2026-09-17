@@ -20,6 +20,7 @@
 #include "print.h"
 #include "stats.h"
 #include "stream_buffer.h"
+#include "vbat.h"
 
 extern UART_HandleTypeDef huart1;
 
@@ -89,6 +90,7 @@ static int cmd_imustream(int argc, char **argv);
 static int cmd_reset(int argc, char **argv);
 static int cmd_log(int argc, char **argv);
 static int cmd_can(int argc, char **argv);
+static int cmd_vbat(int argc, char **argv);
 
 /* Adding a command is one row here plus one handler function — nothing
    else in shell.c changes. */
@@ -100,6 +102,7 @@ static const shell_cmd_t commandTable[] = {
     { "reset",     cmd_reset,     "software reset" },
     { "log",       cmd_log,       "log start|stop|status|list|dump <file>" },
     { "can",       cmd_can,       "can status|stby<1|2>|term<1|2> on|off|send<1|2> <id> <hex> [fd] [brs]|stream<1|2>" },
+    { "vbat",      cmd_vbat,      "battery voltage" },
 };
 
 #define COMMAND_TABLE_COUNT (sizeof(commandTable) / sizeof(commandTable[0]))
@@ -496,6 +499,29 @@ static int cmd_can(int argc, char **argv)
     }
 
     shell_printf(CMD_CAN_USAGE);
+    return 0;
+}
+
+/* mg/mdps-style integer-only display, matching cmd_imu's rationale
+   exactly: --specs=nano.specs without -u _printf_float means %f
+   mis-renders, so the volts figure is built from plain integer
+   division/modulo instead of trusting vsnprintf with a float. */
+static int cmd_vbat(int argc, char **argv)
+{
+    (void)argc;
+    (void)argv;
+
+    uint32_t raw;
+    uint32_t mv;
+    if (!vbat_get_reading(&raw, &mv)) {
+        shell_printf("vbat: no sample yet\r\n");
+        return 0;
+    }
+
+    shell_printf("vbat  raw=%lu  mv=%lu  %lu.%02lu V\r\n",
+                 (unsigned long)raw, (unsigned long)mv,
+                 (unsigned long)(mv / 1000u), (unsigned long)((mv % 1000u) / 10u));
+
     return 0;
 }
 

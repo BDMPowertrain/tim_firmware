@@ -15,6 +15,7 @@
 #include "print.h"
 #include "shell.h"
 #include "spi3_bus.h"
+#include "vbat.h"
 
 /* Ladder exercise 1: two tasks toggling different GPIOs at different
    rates and priorities, so preemption is visible on a scope rather than
@@ -78,6 +79,7 @@ void tasks_init(void)
     spi3_bus_init();
     logger_init();
     can_if_init();
+    vbat_init();
 
     create_task(printTask, NULL, "printTask",
                 (osPriority_t)PRINT_TASK_PRIORITY, PRINT_TASK_STACK_SIZE);
