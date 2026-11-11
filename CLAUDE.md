@@ -54,3 +54,17 @@ Symptom if skipped: flash and verify succeed, nothing runs, PC sits in
 ## Regeneration ritual
 Commit before regenerating in CubeMX. Review `git diff` and commit the
 regeneration separately from your own changes.
+
+## Agent skills
+
+### Issue tracker
+
+Issues are tracked in GitHub Issues on BDMPowertrain/tim_firmware (via `gh`). See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Default five-role vocabulary (needs-triage, needs-info, ready-for-agent, ready-for-human, wontfix). See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context: one `GLOSSARY.md` + `docs/adr/` at the repo root. See `docs/agents/domain.md`.
