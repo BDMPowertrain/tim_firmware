@@ -10,8 +10,9 @@ Answers issue #6. Part TIM rev A: STM32G474RET3, LQFP64, 512 KB flash.
 | ST CMSIS device header `Drivers/CMSIS/Device/ST/STM32G4xx/Include/stm32g474xx.h` | CMSIS STM32G4 V1.2.6 (`stm32g4xx.h` L93-96) | Yes |
 | ST HAL/LL headers and sources in `Drivers/STM32G4xx_HAL_Driver/` | HAL V1.2.7 (`stm32g4xx_hal.c` L53-55) | Yes |
 | RM0440, STM32G4 reference manual (`Datasheets/rm0440-...pdf`, local, untracked) | **Rev 9, March 2025** (footer, p.1) | **Yes** (second pass) |
-| ES0430, STM32G471/473/474/483/484 errata sheet | none | **No** |
-| AN2606, STM32 system memory boot mode | none | **No** |
+| ES0430, STM32G471/473/474/483/484 errata sheet (`Datasheets/es0430-...pdf`, local, untracked) | **Rev 10, November 2026** (02-Nov-2026, revision history p.35) | **Yes** (third pass) |
+| AN2606, STM32 system memory boot mode (`Datasheets/an2606-...pdf`, local, untracked) | **Rev 71** (02-Nov-2026, revision history) | **Yes** (third pass): §4 general, §53 STM32G47xxx/48xxx, Tables 2, 3, 239, 240 |
+| ADM3055E/ADM3057E data sheet (`Datasheets/adm3055e-adm3057e.pdf`), for the bootloader pin analysis only | Rev. D | Pin table and dominant-timeout spec only |
 
 st.com did not respond from this machine: curl, PowerShell and WebFetch all
 timed out with 0 bytes received, while github.com answered at once. The site
@@ -23,20 +24,27 @@ read. ES0430 and AN2606 were tried again from st.com (WebFetch three times,
 curl twice): every attempt timed out or the connection was reset. Mirrors were
 deliberately not used. Both documents are still missing.
 
+**Third pass (2026-11-11).** ES0430 Rev 10 and AN2606 Rev 71 were supplied as
+local PDFs and read. §7 (errata) and the bootloader part of §1 now come from
+them. The pin collisions in §1 were cross-checked against `tim.ioc` in this
+branch.
+
 So the fallback was ST's own CMSIS/HAL source, which ships with the project.
 It is first-party ST material and authoritative for **register bit positions
 and option-byte encodings**. Its comments are secondary for **behaviour**, so
 behaviour facts taken only from a HAL comment are marked as such. Where
 RM0440 now covers the same fact, the RM citation is added.
 
-Anything that still needs ES0430 or AN2606 is marked **UNVERIFIED**. That
-covers the whole errata section and the bootloader pin states. Re-run those
-items once the two PDFs are in `Datasheets/`.
+Items still marked **UNVERIFIED** need a bench measurement or a document
+that is not in `Datasheets/`. They are listed at the end.
 
 Citation forms used below:
 - `DS p.N` is DS12288 Rev 6, printed page N of 236.
 - `RM §x p.N` is RM0440 Rev 9, section x, printed page N of 2140 (the page
   footer, which matches the PDF page number).
+- `ES §x p.N` is ES0430 Rev 10, section x, page N of 39.
+- `AN §x p.N` is AN2606 Rev 71, section x, page N of 584.
+- `ADM p.N` is the ADM3055E/ADM3057E data sheet Rev. D, page N of 27.
 - `CMSIS Lnnnn` is a line in `stm32g474xx.h`.
 - `HAL <file> Lnnn` is a line in the named HAL file.
 
@@ -187,15 +195,132 @@ category 3 FLASH chapter (RM §3, p.94-148).
   off; unless the RTC owns the pin, it goes to analog input (RM §9.3.14
   p.353).
 
-### During the system bootloader
-- **UNVERIFIED (needs AN2606).** The only DS statement is that the bootloader
-  can reprogram flash over USART, I2C, SPI and USB DFU (§3.7, DS p.21).
-  AN2606 gives the exact pins the G474 bootloader drives or samples (including
-  any I2C1 and FDCAN pins), plus its own GPIO and clock settings. Not
-  confirmed here.
-- RM0440 adds only that the system memory bootloader reprograms flash over
-  "USART, SPI, I2C, USB" (RM §3.3.1 p.95) and defers everything else to
-  AN2606 (RM §2.6.1 p.93). **Still UNVERIFIED; AN2606 is required.**
+### During the system bootloader (VERIFIED from AN2606 Rev 71)
+The first two passes had only the DS and RM statement that the bootloader uses
+"USART, SPI, I2C, USB" (DS p.21; RM §3.3.1 p.95). AN2606 §53 now gives the
+detail.
+
+**Identity.** Bootloader ID **0xD5**, stored at **0x1FFF 6FFE**; protocols
+USART V3.1, I2C V1.2, SPI V1.1, DFU V2.2 (AN Table 3 p.43). The ID's high
+nibble 0xD means "USART, DFU, I2C and SPI" (AN §4.2 p.38). Device ID 0x469
+(AN Table 239 p.550). Versions (AN Table 119 p.288-289):
+- V13.3 (0xD3): "Boot from bank2 is not working".
+- V13.4 (0xD4): CCM SRAM not supported.
+- V13.5 (0xD5): no known limitations.
+
+Read 0x1FFF 6FFE over SWD on a TIM board to learn which one it carries.
+
+**The G474 bootloader has no FDCAN interface and does not use I2C1.** Its
+interfaces are USART1/2/3, I2C2/3/4, SPI1/2 and USB DFU only (AN Table 3 p.43;
+AN Table 118 p.284-286). FDCAN1 (PA11/PA12 is shared with USB), FDCAN2
+(PB5/PB6) and I2C1 (PB8) are never configured as CAN or I2C by it.
+
+**Resources and pin configuration** (AN §53.1 Table 118 p.284-286):
+
+| Item | Bootloader setting |
+|---|---|
+| Clock | HSI + PLL, SYSCLK **72 MHz**; CRS + HSI48 for USB |
+| RAM | **16 KB from 0x2000 0000 used by the bootloader** |
+| IWDG | Prescaler set to maximum and refreshed periodically, in case the hardware IWDG option is on |
+| USART1/2/3 | 8 data bits, even parity, 1 stop bit. RX and TX pins in **AF push-pull with pull-up**: USART1 PA10/PA9, USART2 PA3/PA2, USART3 PC11/PC10 |
+| I2C2/3/4 | Target mode, 7-bit address **0b1010011x** (0x53), up to 1 MHz, analog filter on. SCL/SDA in **open-drain with pull-up**: I2C2 PC4/PA8, I2C3 PC8/PC9, I2C4 PC6/PC7 |
+| SPI1 | Slave, full duplex, 8-bit MSB, up to 8 MHz, CPOL 0/CPHA 0, hardware NSS. PA7 MOSI, PA6 MISO, PA5 SCK, PA4 NSS, all **with pull-down**; MISO is an output |
+| SPI2 | Same as SPI1: PB15 MOSI, PB14 MISO, PB13 SCK, PB12 NSS, all **with pull-down**; MISO is an output |
+| USB DFU | Forced device mode, no external pull-up needed; PA11 (DM) and PA12 (DP) in input, no pull |
+
+Footnote 1 to Table 118: SPI MISO is DMA-driven, and **"as soon as the bit
+DMATx enable ... is set ... the MISO line is set to 3.3 V"** (AN p.286). PA6
+and PB14 are therefore **driven high** while the bootloader runs.
+
+**Startup and detection sequence** (AN §53.2 Figure 69 p.287; Table 240
+p.556):
+1. After reset, set SYSCLK to 72 MHz from HSI, then initialise clock, GPIOs,
+   IWDG and SysTick.
+2. Configure USB device FS (HSI48 + CRS), then all I2Cx, SPIx and USARTx.
+   Minimum startup time is **0.390 ms**.
+3. Loop until one of these happens; the first interface to see its event
+   wins, and the others are disabled:
+   - **0x7F received** on any USARTx;
+   - its I2C address seen on any I2Cx;
+   - the SPI synchronisation sequence on any SPIx;
+   - a USB cable detected.
+- AN2606 warns: keep the RX pins of unused interfaces (USART_RX, SPI_MOSI,
+  CAN_RX) at a fixed level, and D+/D- at the same level, during detection.
+  "Leaving these pins floating during the detection phase can result in
+  activation of unused interfaces." A USB host must not be connected during
+  selection of another interface (AN §4.3 p.50).
+- Readout protection Level 2 blocks boot into system memory (AN §4.1 p.35).
+- On the **Go** command, the peripherals used by the bootloader are *not*
+  reset before the jump. The application must reconfigure them, including
+  the IWDG prescaler, which the bootloader left at maximum (AN §4.1 p.37).
+
+**Entry conditions: "Pattern 14"** (AN §53.1 p.284; AN Table 2 p.36). The
+bootloader runs when any of these holds:
+1. BOOT_LOCK = 0, nBOOT1 = 1, **PB8 pin = 1**, nSWBOOT0 = 1;
+2. BOOT_LOCK = 0, nBOOT1 = 1, nBOOT0 = 0, nSWBOOT0 = 0;
+3. BOOT_LOCK = 0, PB8 pin = 0, nSWBOOT0 = 1, **BFB2 = 1 and neither bank
+   holds valid code**;
+4. BOOT_LOCK = 0, nBOOT0 = 1, nSWBOOT0 = 0, **BFB2 = 1 and neither bank
+   holds valid code**.
+
+What this means:
+- **There is no plain empty-flash check on G47x.** The older "Pattern 13"
+  has "user flash empty" conditions; G47x uses Pattern 14, which has none
+  (AN Table 2 p.36). With BFB2 = 0, the factory setting, a blank or corrupt
+  part still boots main flash.
+- The only "no BOOT0" entry is the dual-bank-boot path: with **BFB2 = 1**
+  the device always starts in the bootloader. The bootloader checks bank 2
+  and then bank 1 for a first word (initial SP) that lies inside internal
+  SRAM, and jumps to the first valid bank with the bank swap set. If neither
+  is valid, it stays in the bootloader (AN §53.2 Figure 70 p.288). On V13.3
+  the jump to bank 2 does not work (Table 119).
+- **BOOT_LOCK = 1 blocks all four entry patterns** (RM §3.5.6 p.128; AN
+  Table 2 p.36).
+
+**What the bootloader would do to TIM's pins if entered by mistake**
+(Table 118 crossed with `tim.ioc`). An unexpected entry is not only the
+factory PB8 case: **if an option word fails its complement check at load,
+the user options are forced to all 1** (RM §3.4.2 p.119). That sets
+nSWBOOT0 = 1 and nBOOT1 = 1, and with PB8's 2 kΩ pull-up this is pattern 14
+row 1: **the board drops into the bootloader**.
+
+| TIM pin and function | Bootloader role | Effect (inference unless marked) |
+|---|---|---|
+| PA11 FDCAN1_RX | USB DM, input no pull | Transceiver RXD drives it; CAN traffic toggles a USB data line during detection. Whether the DFU "cable detected" check can fire on that is **UNVERIFIED**. |
+| PA12 FDCAN1_TX | USB DP, input no pull | Not driven by the MCU. The ADM3057E TXD has a weak internal pull-up that "holds the transceiver in the recessive state" (ADM pin table p.15, p.24). **CAN1 stays recessive.** |
+| PA8 FDCAN1_STB | I2C2_SDA, open drain + pull-up | Internal pull-up (25-55 kΩ, DS p.128) against the ADM3057E STBY internal pull-down (value not given, ADM p.15). The transceiver may go to standby. Either way CAN1 is not disturbed. |
+| PB5/PB6 FDCAN2_RX/TX, PB9 FDCAN2_STB | not used | Left in reset state (analog, undriven). **But see the PB6 hazard below.** |
+| PA9 / PA10 USART1_TX / RX | USART1, AF push-pull + pull-up | PA9 is driven high (TX idle). Anything sending **0x7F** on USART1 during detection selects the USART1 bootloader. |
+| PB12 SPI2_CS (microSD) | SPI2 NSS, input pull-down | CS is weakly pulled low, i.e. the card may be selected. |
+| PB13 / PB15 SPI2 SCK / MOSI | SPI2 slave inputs, pull-down | Held low. |
+| PB14 SPI2_MISO (card DO) | SPI2 MISO, **driven high** | **Possible contention** with the card's DO if the card drives it. |
+| PC10 / PC11 SPI3 SCK / MISO (IMU + mezzanine) | USART3 TX / RX, push-pull + pull-up | PC10 drives SPI3 SCK high; PC11 is pulled up. PD2 SPI3_CS and PC12 MOSI are not touched (floating unless pulled externally). |
+| PA2 / PA3 ADC1_IN3 / IN4 | USART2 TX / RX | **PA2 is driven high into an analog input net.** Check what source sits on PA2. PA3 gets a pull-up. |
+| PC4 ADC2_IN5 | I2C2_SCL, OD + pull-up | Pull-up loads the analog input. |
+| PA4 / PA5 / PA7 (COMP/DAC, GPIO_2) | SPI1 NSS / SCK / MOSI, pull-down | Pulled low. |
+| PA6 GPIO_1 (mezzanine) | SPI1 MISO, **driven high** | Contention if the daughterboard drives GPIO_1. |
+| PC6 / PC7 CAN LEDs, PC8 heartbeat LED | I2C4 SCL/SDA, I2C3 SCL, OD + pull-up | Active-low LEDs stay off. |
+| PC9 Can_Term_1 | I2C3_SDA, OD + pull-up | The termination switch input sees a weak high. Check whether high means termination on. |
+| PB8 BOOT0 / I2C1_SCL | not used | Analog after reset. |
+
+**PB6 / FDCAN2 hazard (inference from three documents; bench-test it).**
+- `PWR_CR3` resets to 0x0000 8000, so `UCPD1_DBDIS = 0` and the UCPD
+  dead-battery pull-downs are enabled after every reset (RM §6.4.3
+  p.254-255).
+- A high level on PA9 enables a 5.1 kΩ pull-down on **PB6 = FDCAN2_TX**
+  (DS Table 12 note 6, p.72).
+- The bootloader drives PA9 high as USART1_TX and leaves PB6 unconfigured
+  (AN Table 118 p.284). AN2606 does not say whether it sets UCPD1_DBDIS.
+- So 5.1 kΩ to ground fights the ADM3057E's *weak* TXD pull-up (ADM p.15).
+  That can hold TXD dominant, and the transceiver would drive **dominant on
+  CAN2 until its transmit dominant timeout** (t_DT 1175-4000 µs, ADM
+  Table 1 p.7) cuts the driver.
+- Expect a burst of error frames on CAN2 each time the bootloader starts.
+- The application is safe here: `HAL_PWREx_DisableUCPDDeadBattery()` is
+  called in `Core/Src/stm32g4xx_hal_msp.c:78`, but only once the application
+  runs.
+- Fix options: an external pull-up on FDCAN2_TX, BOOT_LOCK = 1, or moving
+  FDCAN2_TX off PB6 in a future revision.
 
 ---
 
@@ -297,6 +422,10 @@ WRP1A and WRP1B 0xFF00 FFFF (RM p.113-114), i.e. no WRP or PCROP.
 - **No empty-flash check appears in RM0440.** Table 5 has no row for it and
   the word does not occur in the boot or flash chapters. Whether the G474
   bootloader itself has an empty-check is AN2606 material: **UNVERIFIED**.
+  **Third pass: VERIFIED that there is none.** G47x uses AN2606 activation
+  "Pattern 14", which has no "user flash empty" condition; the only
+  code-validity check runs when BFB2 = 1 (§1, AN Table 2 p.36, AN Figure 70
+  p.288).
 - With `BFB2 = 1` and a main-flash boot configuration, the part actually
   boots the system-memory bootloader, which jumps to bank 2; system memory
   stays aliased at 0x0000 0000, so VTOR must be set (RM §2.6.1 p.91-92).
@@ -414,6 +543,11 @@ WRP1A and WRP1B 0xFF00 FFFF (RM p.113-114), i.e. no WRP or PCROP.
     to keep. Link the application into bank 1 and put any logged or
     configuration data in bank 2 pages; then erases do not stall the VCU
     torque path.
+  - **Errata that apply to this plan** (§7.1):
+    - ES §2.2.2: the D-cache can be corrupted during read-while-write, so
+      disable and reset it around every flash write (the HAL does).
+    - ES §2.2.3: after a reset or power-down mid-operation, re-erase the
+      page.
 - **Erase and program sequence constraints (VERIFIED, RM §3.3.5-3.3.7
   p.103-108):**
   - Flash program/erase is **only possible in voltage range 1**
@@ -721,6 +855,12 @@ WRP1A and WRP1B 0xFF00 FFFF (RM p.113-114), i.e. no WRP or PCROP.
     omission** and confirm on a board before a safety argument depends on it.
     The C start-up code zeroes `.bss` and copies `.data`, so a crash record
     needs its own `NOLOAD` section.
+  - Two later findings bear on this:
+    - ES §2.2.6 (third pass): the first SRAM write after a system reset can
+      be lost, so a dummy read is needed at reset (§7.1).
+    - The system bootloader uses **0x2000 0000-0x2000 3FFF** (AN Table 118
+      p.284), so a crash record there is lost if the board passes through
+      the bootloader.
   - **Parity (VERIFIED):** on category 3, parity covers the first 32 KB of
     SRAM1 and all of CCM SRAM; SRAM2 has none. A parity error raises an
     **NMI** (and can drive timer break inputs). ST advises initialising all
@@ -757,18 +897,224 @@ WRP1A and WRP1B 0xFF00 FFFF (RM p.113-114), i.e. no WRP or PCROP.
 
 ---
 
-## 7. Errata (ES0430): ALL UNVERIFIED
+## 7. Errata (ES0430 Rev 10, VERIFIED)
 
-ES0430 could not be fetched in either pass (st.com timed out or reset the
-connection on every attempt), so **no erratum is confirmed here**. RM0440
-does not list errata. The ticket
-asks for every erratum touching FDCAN, flash, ADC, SPI and the watchdog. That
-list must be built from ES0430 itself (latest revision, matched to the
-silicon revision read from `DBGMCU_IDCODE.REV_ID` on a TIM board).
+**Scope.** ES0430 Rev 10 (November 2026) covers STM32G474RE among the
+G471/473/474/483/484 part numbers (ES Table 1 p.1). It covers three silicon
+revisions (ES Table 2 p.1):
 
-Look in particular at the FDCAN, FLASH, ADC, SPI/I2S and IWDG/WWDG sections,
-and the "System" section (debug, boot and option-byte items). Do not take any
-erratum from memory into a design decision without the sheet.
+| Marking | `DBGMCU_IDCODE.REV_ID` |
+|---|---|
+| Z | 0x2001 |
+| Y | 0x2002 |
+| X | 0x2003 |
+
+**The TIM board's revision is not known yet: read `REV_ID` over SWD.** Status
+codes: A = workaround available, P = partial workaround, N = no workaround,
+"-" = not applicable (ES Table 3 p.2-4). Unless noted, an item applies to
+**all three revisions**.
+
+**Peripherals with no erratum at all in ES0430:** IWDG, WWDG, GPIO, the FLASH
+erase/program stall, FDCAN bus-off, and timer input capture. A full-text
+search for IWDG, WWDG, watchdog, bootloader, BOOT0, nSWBOOT0, DBANK and BFB2
+found nothing except the ADC analog watchdog.
+
+### 7.1 Errata that need a change in TIM firmware or design (ranked)
+
+1. **ES §2.2.6 SRAM write error (A), p.10.**
+   - *Condition:* in rare cases a system reset at a critical instant upsets
+     the SRAM state machine; the first access after reset restores it, but
+     **if that first access is a write, the write is lost**.
+   - *Workaround:* right after reset, do a dummy **read** of each 32 KB SRAM
+     instance used: 0x2000 0000, 0x2000 8000, 0x2001 0000, 0x2001 4000
+     (SRAM2), 0x1000 0000 (CCM SRAM). For instances with parity enabled, use
+     a dummy variable initialisation instead.
+   - *TIM:* `startup_stm32g474xx.s` `Reset_Handler` sets SP and calls
+     `SystemInit` with no dummy reads. **The startup code needs the
+     workaround.** This matters for IWDG resets and for any reset-surviving
+     crash record (§6).
+2. **ES §2.7.9 Wrong ADC result if the conversion comes more than 1 ms after
+   the previous conversion or calibration (A), p.17.**
+   - *Workaround:* do two consecutive conversions and keep only the second.
+   - *TIM:* `App/Src/vbat.c` does one software-triggered conversion every
+     500 ms (`VBAT_SAMPLE_PERIOD_MS`), so **every VBAT reading is in the
+     erratum's window**. Add a discarded first conversion.
+3. **ES §2.2.2 Data cache corrupted during flash read-while-write (A), p.8.**
+   - *Condition:* dual-bank mode, data cache on, a read from one bank while
+     writing the other.
+   - *Workaround:* clear DCEN before any flash write, then set and clear
+     DCRST before re-enabling DCEN.
+   - *TIM:* this is exactly the bank-2 data-storage plan in §3. The HAL
+     already does it: `HAL_FLASH_Program` and `HAL_FLASHEx_Erase` disable the
+     D-cache, and `FLASH_FlushCaches` resets it
+     (`stm32g4xx_hal_flash.c` L192-195, `stm32g4xx_hal_flash_ex.c` L620-641).
+     **Use only the HAL flash API, or copy the sequence.**
+4. **ES §2.2.3 FLASH_ECCR corrupted after a reset or power-down during
+   program/erase (A), p.8.**
+   - *Condition:* a reset or power-down during a program or erase, followed
+     by a read of the same location, may corrupt `FLASH_ECCR`.
+   - *Workaround:* erase the affected page(s).
+   - *TIM:* the logging scheme must detect an interrupted write (validity
+     marker, §3) and **re-erase that page**, not just skip it.
+5. **ES §2.2.5 Backup domain content corrupted after a missed power-on reset
+   (A), p.9.**
+   - *Condition:* if the backup-domain supply falls into a window between
+     100 mV and 700 mV during power-off and then rises again, the backup
+     domain reset may be missed; backup registers and RCC_BDCR hold
+     unpredictable values, which can even drive LSCO on PA2.
+   - *Workaround:* hold VDD and VBAT below 100 mV for more than 200 ms, or at
+     boot, if `BORRSTF` is set, reset the backup domain in software
+     (`RCC_BDCR` = 0x0001 0000, read it back, write 0, then RMVF).
+   - *TIM:* with VBAT floating (§1) the backup supply decays in an
+     uncontrolled way. Anything kept in TAMP backup registers must be guarded
+     (CRC), or the domain reset on every BOR.
+6. **ES §2.18.1 / §2.18.2 SPI BSY flag unreliable (A), p.29-30.**
+   - *Conditions:* BSY may stay high after SPI disable in master transmit
+     mode with TXE = 0, in master receive-only mode, or in slave mode when
+     NSS is removed. It may also stay high at the end of a slave transfer.
+   - *Workaround (TIM uses SPI2 and SPI3 as master):* disable SPI only when
+     TXE = 1 and BSY = 0; in receive-only mode ignore BSY. Do not rely on BSY
+     alone as end-of-transfer, which matters for the spi3Mutex hand-off
+     between the IMU and the mezzanine.
+7. **ES §2.7.11 One ADC instance may degrade another's accuracy (A),
+   p.17-18.**
+   - *Condition:* conversions on different ADC instances overlap.
+   - *Workaround:* do not overlap them, or use a supported clock setup. For
+     ADC1/ADC2 in normal mode, a synchronous clock with any prescaler is
+     supported. With a prescaler above 1, a hardware trigger's clock
+     prescaler must be a multiple of the ADC prescaler.
+   - *TIM:* ADC1 and ADC2 are `ADC_CLOCK_SYNC_PCLK_DIV4`, independent mode
+     (`Core/Src/main.c` L261, L283, L328): a supported configuration. If
+     ADC1/2 move to timer triggers, the trigger timer's prescaler must be a
+     multiple of 4.
+8. **ES §2.1.2 VDIV/VSQRT may not complete when very short ISRs are used (A,
+   Arm 776924), p.5-6.**
+   - *Condition:* FPU on, lazy stacking on (the default), and an ISR with no
+     FP instruction that returns within 14 cycles.
+   - *Workaround:* every ISR has more than 2 instructions besides the return,
+     or clear `FPCCR.LSPEN`.
+   - *TIM:* only a concern for hand-written minimal ISRs.
+9. **ES §2.1.3 Store-immediate overlapping exception return may vector to
+   the wrong interrupt (A, Arm 838869), p.6-7.**
+   - *Workaround:* set `ACTLR.DISDEFWBUF` (no MPU) or put a DSB before
+     exception return.
+   - *TIM:* consequence is that one handler runs twice and a level interrupt
+     re-pends; rare. Decide project-wide.
+
+### 7.2 FDCAN (both apply to all revisions)
+- **ES §2.19.1 Desynchronisation with edge filtering (A), p.30.** If
+  `CCCR.EFBI = 1` and the end of integration coincides with a falling edge on
+  RX, the first bit is mis-received, the CRC fails and an error frame
+  follows. *Workaround:* keep edge filtering off.
+  - *TIM:* the HAL only sets EFBI in `HAL_FDCAN_EnableEdgeFiltering()`
+    (`stm32g4xx_hal_fdcan.c` L1913), which TIM does not call, and the reset
+    value is 0 (RM p.1987). **Not triggered; do not enable it.**
+- **ES §2.19.2 Tx FIFO messages inverted (A), p.30-31.** Two consecutive Tx
+  FIFO frames can go out swapped when FDCAN uses **both a dedicated Tx buffer
+  and a Tx FIFO** and the dedicated buffer holds higher-priority frames.
+  - *Workarounds:* only one FIFO element pending at a time; use only the
+    FIFO; or ping-pong two dedicated buffers.
+  - *TIM:* the G4 FDCAN has **no dedicated Tx buffers**; its 3 buffers are
+    all FIFO/queue (RM §44.3.6 p.1973-1974). TIM uses
+    `FDCAN_TX_FIFO_OPERATION`. The trigger condition cannot be built on this
+    part as far as RM0440 shows. The erratum's workaround refers to "Tx
+    buffer 4 and 5", which the G4 does not have, so the text appears to be
+    inherited from the generic M_CAN.
+- No FDCAN erratum touches bus-off, error counters, RX FIFOs or filters.
+
+### 7.3 Flash and system (beyond §7.1)
+- **ES §2.2.1 Full JTAG without NJTRST (A), p.7.** 4-wire JTAG fails if PB4
+  is used for anything else. TIM uses PB4 as IMU_INT and debugs over SWD, so
+  this is **not affected**. Do not switch to 4-wire JTAG.
+- **ES §2.2.4 Unstable LSI when it clocks the RTC or CSS on LSE (P), p.8-9.**
+  - *Condition:* LSI clocking the RTC or the CSS on LSE, and VDD reset
+    without a backup-domain reset; with VBAT tied to VDD this includes a
+    VDD drop under 1 ms.
+  - *Effect:* LSI duty cycle off 50 % and frequency well above 32 kHz.
+  - *Workaround:* do not clock the RTC from LSI (or use the CSS on LSE), or
+    reset the backup domain at each power-up.
+  - *TIM:* the IWDG also runs on LSI. **Do not put the RTC on LSI**, or IWDG
+    timing (§5) could be affected. That IWDG link is my inference; the
+    erratum names only RTC and CSS.
+- **ES §2.2.7 Wrong instruction fetches after Sleep/Stop wake-up with debug
+  in low-power mode (A), p.10.** Only with `DBG_SLEEP`/`DBG_STOP` set.
+  *Workaround:* ISB after WFI/WFE. Debug builds only.
+- **ES §2.2.8 PC13 transitions disturb the LSE (N), p.10.** Applies to LQFP
+  packages, so TIM. Do not toggle PC13 if the LSE is used.
+- ES §2.2.9 (Standby with HSE bypass) does not apply: TIM uses an 8 MHz
+  crystal, not bypass.
+- **No erratum on flash erase stall, on option bytes, or on the dual-bank
+  boot.**
+
+### 7.4 ADC (ADC1/2 used, with DMA)
+- **ES §2.7.6 ADC slave data may be shifted (A), p.16.** Dual regular
+  simultaneous mode, one DMA channel, OVRMOD = 0. *Workaround:* OVRMOD = 1,
+  or one DMA channel per ADC. TIM is independent mode today; this matters if
+  dual mode is adopted.
+- **ES §2.7.10 ADC channel 0 converted instead of the requested channel (A,
+  Rev Y only), p.17.** It returns 0 in four cases:
+  1. an injected conversion while a regular one is in progress;
+  2. the first conversions after a dual-mode resume;
+  3. the first conversion after ADSTP/JADSTP;
+  4. the first conversion after a DMA end of transfer in one-shot DMA mode.
+
+  *Workaround:* a dummy conversion, or ADDIS/ADEN after a stop. Case 4 is
+  exactly "ADC + DMA one-shot": **relevant if the board is Rev Y**.
+- **ES §2.7.7 End of a 10/8/6-bit conversion disturbs other ADCs (A, Rev Z
+  only), p.16.** Use 12-bit everywhere, which TIM does.
+- **ES §2.7.8 Input channel switching disturbs ongoing conversions (P, Rev Z
+  only), p.16-17.** Up to a few LSB DNL with concurrent ADCs. *Workaround:*
+  bulb sampling for single-channel use, or convert each input twice and keep
+  the first.
+- Injected-mode items, relevant only if injected conversions are used:
+  - §2.7.1 context launched without trigger (JQDIS = 0, JQM = 0), p.14-15;
+  - §2.7.2 two contexts merged, p.15;
+  - §2.7.3 spurious regular conversion in dual interleaved mode, p.15;
+  - §2.7.5 injected data in the wrong JDRx after JADSTP (check JEOS first),
+    p.16.
+- **ES §2.7.4 `ADC_AWDy_OUT` reset by non-guarded channels (A), p.15-16.** Use
+  only the rising edge, or guard every converted channel.
+- ES §2.8.1 VREFBUF disturbed by PB10, PB11, PB13, PB14 toggling (P), p.18.
+  **PB13/PB14 are SPI2 SCK/MISO on TIM.** This matters only if VREFBUF is
+  enabled; it is not configured in `tim.ioc`.
+
+### 7.5 DMA and DMAMUX
+- **ES §2.3.1 DMA disable failure and error flag omission (A), p.11.** If
+  software clears GIFx (CGIFx) in the same cycle as a transfer error, the
+  channel is not auto-disabled and TEIFx is not set. *Workaround:* never clear
+  GIFx while a channel is active; use the HTIF/TCIF/TEIF clears (the HAL
+  already does this).
+- ES §2.4.1-2.4.4 DMAMUX (N, N, N, A), p.11-12: only in DMAMUX
+  synchronisation or request-generator modes. Not used by a plain ADC/SPI DMA
+  setup.
+
+### 7.6 Timers (TIM input capture)
+- **No input-capture erratum.** The TIM errata are about one-pulse
+  master/slave with MSM (§2.12.1, P), consecutive compare events in toggle
+  mode (§2.12.2, N), center-aligned + dithering (§2.12.3, N), OCREF clear
+  with external reset (§2.12.4, P), and bidirectional break with short pulses
+  (§2.12.5, N), p.21-22. None affects capture.
+
+### 7.7 I2C (I2C1 on PB8) and USART (USART1)
+- **ES §2.15.1 Wrong SDA sampling when tSU;DAT is under one I2CCLK period
+  (P), p.25-26.** I2CCLK must be at least 4 / 10 / 20 MHz for Standard /
+  Fast / Fast-mode Plus.
+- ES §2.15.2 spurious BERR in controller mode: clear it and carry on (A),
+  p.26.
+- **ES §2.15.5 transmission stalled after the first byte (A), p.27.** Happens
+  when APB/I2CCLK is between 1.5 and 3 and TXDR is written within 2 kernel
+  clocks. Pre-load TXDR or keep the ratio outside 1.5-3.
+- ES §2.15.3, §2.15.4, §2.15.6: target-mode only, p.26-27.
+- **ES §2.16.2 USART data corrupted by a glitch in the second half of the
+  stop bit (A), p.28.** Workaround: a clean or filtered RX line.
+- ES §2.16.1 (SPI-slave TC early), §2.16.3 (do not clear ABREN), §2.16.4 (NE
+  with ONEBIT, N), p.28.
+
+### 7.8 Not relevant to TIM
+FMC (§2.5), QUADSPI (§2.6), COMP (§2.9.1, Rev Z/Y), OPAMP (§2.10.1), HRTIM
+(§2.11), LPTIM (§2.13), RTC/TAMP (§2.14, unless the RTC is used), LPUART
+(§2.17), USB (§2.20), UCPD (§2.21), and the core LDR-SP item §2.1.1 (only
+with hand-written `LDR SP` assembly).
 
 ---
 
@@ -795,7 +1141,24 @@ Still open:
 8. PINRSTF set or not on internal resets: not stated in RM0440; measure on a
    board.
 9. Single-bank (4 KB) page erase time: not in DS12288 Table 47.
-10. **AN2606 (needed):** G474 bootloader interfaces, pins, pin states, and
-    whether it has an empty-flash check.
-11. **ES0430 (needed):** the complete errata list for FDCAN, flash, ADC, SPI
-    and watchdog.
+10. ~~AN2606: G474 bootloader interfaces, pins, pin states, and empty-flash
+    check.~~ Done, §1 (third pass).
+11. ~~ES0430: the complete errata list.~~ Done, §7 (third pass).
+
+Still open after the third pass (none of these is answered by ES0430 or
+AN2606):
+
+12. **Silicon revision of the TIM boards:** read `DBGMCU_IDCODE.REV_ID`
+    (0x2001 Z / 0x2002 Y / 0x2003 X). Rev Y adds ES §2.7.10; Rev Z adds
+    §2.7.7 and §2.7.8.
+13. **Bootloader version on the boards:** read 0x1FFF 6FFE (expect 0xD5).
+14. Whether the bootloader sets `PWR_CR3.UCPD1_DBDIS`, i.e. whether the PB6
+    / FDCAN2 dominant burst in §1 really happens: bench test (scope CAN2
+    while forcing a bootloader entry).
+15. Whether CAN traffic on PA11 (USB DM) can trigger the bootloader's DFU
+    "cable detected" path: not described in AN2606.
+16. ADM3057E STBY pull-down strength against the MCU pull-up on PA8 during
+    bootloader I2C2 operation: the value is not given (ADM p.15).
+17. Item 7 (VBAT floating), item 8 (PINRSTF) and item 9 (4 KB erase time)
+    are unchanged. ES0430 adds §2.2.5 (missed backup-domain POR), which makes
+    item 7 worse.
