@@ -80,3 +80,8 @@ target_link_libraries(${CMAKE_PROJECT_NAME}
 
     # Add user defined libraries
 )
+
+# Fail the link when the image outgrows its 224 KB of bank 1 (ADR 0014)
+set(IMAGE_LIMIT_SCRIPT ${CMAKE_CURRENT_SOURCE_DIR}/../../cmake/image_limit.ld)
+target_link_options(${CMAKE_PROJECT_NAME} PRIVATE -T ${IMAGE_LIMIT_SCRIPT})
+set_target_properties(${CMAKE_PROJECT_NAME} PROPERTIES LINK_DEPENDS ${IMAGE_LIMIT_SCRIPT})

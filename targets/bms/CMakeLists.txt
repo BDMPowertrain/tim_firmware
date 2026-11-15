@@ -45,11 +45,20 @@ target_link_directories(${CMAKE_PROJECT_NAME} PRIVATE
 # Add sources to executable
 target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     # Add user sources here
+    # App/common/ is compiled into both images, App/bms/ into this one only
+    # (ADR 0001). The logger, the CAN interface, VBAT and the SPI3 bus lock
+    # join when this project configures their peripherals.
+    ../../App/common/Src/print.c
+    ../../App/common/Src/shell.c
+    ../../App/common/Src/stats.c
+    ../../App/bms/Src/tasks.c
 )
 
 # Add include paths
 target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
     # Add user defined include paths
+    ../../App/common/Inc
+    ../../App/bms/Inc
 )
 
 # Add project symbols (macros)
@@ -66,3 +75,8 @@ target_link_libraries(${CMAKE_PROJECT_NAME}
 
     # Add user defined libraries
 )
+
+# Fail the link when the image outgrows its 224 KB of bank 1 (ADR 0014)
+set(IMAGE_LIMIT_SCRIPT ${CMAKE_CURRENT_SOURCE_DIR}/../../cmake/image_limit.ld)
+target_link_options(${CMAKE_PROJECT_NAME} PRIVATE -T ${IMAGE_LIMIT_SCRIPT})
+set_target_properties(${CMAKE_PROJECT_NAME} PROPERTIES LINK_DEPENDS ${IMAGE_LIMIT_SCRIPT})

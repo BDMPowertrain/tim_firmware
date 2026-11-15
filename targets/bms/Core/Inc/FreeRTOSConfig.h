@@ -168,6 +168,13 @@ standard names. */
 
 /* USER CODE BEGIN Defines */
 /* Section where parameter definitions can be added (for instance, to override default ones in FreeRTOS.h) */
+
+/* 2 = check both the exact watermark and the pattern fill at task-switch
+   time. Catches a task running off the end of its stack and calls
+   vApplicationStackOverflowHook() (App/bms/Src/tasks.c) instead of
+   leaving the corruption to surface later as an unrelated hard fault. */
+#define configCHECK_FOR_STACK_OVERFLOW 2
+
 /* USER CODE END Defines */
 
 #endif /* FREERTOS_CONFIG_H */

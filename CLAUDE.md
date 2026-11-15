@@ -13,9 +13,20 @@ Onboard: ASM330LHHG1TR IMU (SPI3), microSD (SPI2), 2x isolated CAN FD
     cmake --preset Debug
     cmake --build --preset Debug
 
+One preset builds both images (ADR 0001): build/<preset>/vcu/tim.elf and
+build/<preset>/bms/tim.elf. Both are named tim.elf, so check the folder
+before flashing. CI (.github/workflows/build.yml) runs the Debug and Release
+presets on every push and pull request to dev.
+
+The configure fails if the two CubeMX projects name different firmware
+packages. The link fails if an image exceeds 224 KB (ADR 0014,
+cmake/image_limit.ld).
+
 ## Flash
     openocd -f interface/stlink-dap.cfg -f target/stm32g4x.cfg \
       -c "program build/Debug/vcu/tim.elf verify reset exit"
+
+Use build/Debug/bms/tim.elf for a TIM in the BMS role.
 
 ## Debug
     openocd -f interface/stlink-dap.cfg -f target/stm32g4x.cfg
@@ -35,26 +46,35 @@ Symptom if skipped: flash and verify succeed, nothing runs, PC sits in
 0x1FFF____ instead of 0x0800____.
 
 ## Code layout — important
-- targets/vcu/ is the CubeMX project (ADR 0001) and everything in it is
-  CubeMX-generated. NEVER edit outside
+- targets/vcu/ and targets/bms/ are the two CubeMX projects, one per image
+  (ADR 0001), and everything in them is CubeMX-generated. NEVER edit outside
   /* USER CODE BEGIN */ ... /* USER CODE END */ markers. The one exception is
-  targets/vcu/CMakeLists.txt, generated once: it lists the App/ sources.
+  targets/<image>/CMakeLists.txt, generated once: it lists the App/ sources.
 - The root CMakeLists.txt builds each image as its own build tree; the ELF is
-  build/<preset>/vcu/tim.elf.
+  build/<preset>/<image>/tim.elf.
 - App/ is hand-written and CubeMX never touches it. New code goes here, in
   one of three areas (ADR 0001): App/common/ is compiled into both images,
   App/vcu/ and App/bms/ into one each.
 - Common code never checks which image it is built into: no #ifdef on the
   image. A file that needs an image switch belongs in App/vcu/ or App/bms/.
-- All VCU task priorities and stack sizes live in App/vcu/Inc/tasks.h. One
-  place per image.
-- targets/vcu/tim.ioc is the source of truth for pin and peripheral config.
+- All task priorities and stack sizes live in the image's tasks.h:
+  App/vcu/Inc/tasks.h and App/bms/Inc/tasks.h. One place per image.
+- The shell is common code. A command only one image has is registered by
+  that image with shell_register_commands() (App/vcu/Src/vcu_shell.c).
+- targets/<image>/tim.ioc is the source of truth for that image's pin and
+  peripheral config. Both projects must name the same firmware package.
+- The BMS project is minimal for now: clock, FreeRTOS, USART1, the heartbeat
+  LED and the IMU chip select held high. Its image links print, shell and
+  stats from App/common/; the other common modules join when their
+  peripherals are configured.
 
 ## Conventions
-- Tasks are created in App/vcu/Src/tasks.c, not in CubeMX. CubeMX creates only
-  initTask, which calls tasks_init() and then terminates.
-- osPriorityRealtime and osPriorityHigh are RESERVED for the VCU torque path
-  and hard hardware deadlines. Do not use them for test or logging tasks.
+- Tasks are created in the image's tasks.c (App/vcu/Src/tasks.c,
+  App/bms/Src/tasks.c), not in CubeMX. CubeMX creates only initTask, which
+  calls tasks_init() and then terminates.
+- osPriorityRealtime and osPriorityHigh are RESERVED for the image's control
+  step (the VCU torque path, the BMS Sweep and its checks) and hard hardware
+  deadlines. Do not use them for test or logging tasks.
 - LEDs are active LOW (3V3 -> 240R -> LED -> MCU pin).
 - SPI3 is shared between the onboard IMU and the mezzanine header — every
   access must take spi3Mutex.

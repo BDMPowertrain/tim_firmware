@@ -1,0 +1,42 @@
+name: build
+
+# Builds both images (ADR 0001) on every push and pull request to dev.
+# CubeMX never runs here: generated code is committed.
+
+on:
+  push:
+    branches: [dev]
+  pull_request:
+    branches: [dev]
+
+permissions:
+  contents: read
+
+jobs:
+  images:
+    name: Build both images (${{ matrix.preset }})
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        preset: [Debug, Release]
+    steps:
+      - uses: actions/checkout@v4
+
+      # Same compiler release the developers build with.
+      - name: Install the Arm GNU toolchain
+        uses: carlosperate/arm-none-eabi-gcc-action@v1
+        with:
+          release: '14.2.Rel1'
+
+      - name: Install Ninja
+        run: sudo apt-get update && sudo apt-get install -y ninja-build
+
+      # One configure covers both images. It also fails if the two CubeMX
+      # projects name different firmware packages; the link fails if an
+      # image exceeds 224 KB.
+      - name: Configure
+        run: cmake --preset ${{ matrix.preset }}
+
+      - name: Build the VCU and BMS images
+        run: cmake --build --preset ${{ matrix.preset }}
