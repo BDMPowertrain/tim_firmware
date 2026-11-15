@@ -16,6 +16,7 @@
 #include "shell.h"
 #include "spi3_bus.h"
 #include "vbat.h"
+#include "vcu_shell.h"
 
 /* Ladder exercise 1: two tasks toggling different GPIOs at different
    rates and priorities, so preemption is visible on a scope rather than
@@ -76,6 +77,7 @@ void tasks_init(void)
        shellTask afterward is what actually drains what it collects. */
     print_init();
     shell_init();
+    vcu_shell_register();
     spi3_bus_init();
     logger_init();
     can_if_init();

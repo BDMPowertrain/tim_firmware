@@ -14,7 +14,6 @@
 #include "cmsis_os2.h"
 
 #include "can_if.h"
-#include "imu.h"
 #include "logger.h"
 #include "main.h"
 #include "print.h"
@@ -75,30 +74,20 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 
 #define SHELL_MAX_ARGS 8u
 
-typedef int (*shell_cmd_fn_t)(int argc, char **argv);
-
-typedef struct {
-    const char     *name;
-    shell_cmd_fn_t  handler;
-    const char     *help;
-} shell_cmd_t;
-
 static int cmd_help(int argc, char **argv);
 static int cmd_tasks(int argc, char **argv);
-static int cmd_imu(int argc, char **argv);
-static int cmd_imustream(int argc, char **argv);
 static int cmd_reset(int argc, char **argv);
 static int cmd_log(int argc, char **argv);
 static int cmd_can(int argc, char **argv);
 static int cmd_vbat(int argc, char **argv);
 
-/* Adding a command is one row here plus one handler function — nothing
-   else in shell.c changes. */
+/* The commands every image has. Adding one is one row here plus one
+   handler function — nothing else in shell.c changes. A command only one
+   image has goes in that image's own table instead, see
+   shell_register_commands(). */
 static const shell_cmd_t commandTable[] = {
     { "help",      cmd_help,      "list commands" },
     { "tasks",     cmd_tasks,     "list tasks: state, priority, stack free" },
-    { "imu",       cmd_imu,       "latest accel/gyro sample" },
-    { "imustream", cmd_imustream, "live accel/gyro stream, any key to stop" },
     { "reset",     cmd_reset,     "software reset" },
     { "log",       cmd_log,       "log start|stop|status|list|dump <file>" },
     { "can",       cmd_can,       "can status|stby<1|2>|term<1|2> on|off|send<1|2> <id> <hex> [fd] [brs]|stream<1|2>" },
@@ -107,6 +96,24 @@ static const shell_cmd_t commandTable[] = {
 
 #define COMMAND_TABLE_COUNT (sizeof(commandTable) / sizeof(commandTable[0]))
 
+/* The running image's own commands, or none. Written once from
+   tasks_init() before shellTask exists, only read after that. */
+static const shell_cmd_t *imageCommands;
+static size_t imageCommandCount;
+
+void shell_register_commands(const shell_cmd_t *commands, size_t count)
+{
+    imageCommands = commands;
+    imageCommandCount = count;
+}
+
+bool shell_wait_key(uint32_t timeout_ms)
+{
+    uint8_t key;
+
+    return xStreamBufferReceive(shellRxStreamBuf, &key, 1, pdMS_TO_TICKS(timeout_ms)) > 0;
+}
+
 static int cmd_help(int argc, char **argv)
 {
     (void)argc;
@@ -114,6 +121,9 @@ static int cmd_help(int argc, char **argv)
 
     for (size_t i = 0; i < COMMAND_TABLE_COUNT; i++) {
         shell_printf("%-12s %s\r\n", commandTable[i].name, commandTable[i].help);
+    }
+    for (size_t i = 0; i < imageCommandCount; i++) {
+        shell_printf("%-12s %s\r\n", imageCommands[i].name, imageCommands[i].help);
     }
 
     return 0;
@@ -125,81 +135,6 @@ static int cmd_tasks(int argc, char **argv)
     (void)argv;
 
     stats_print_tasks();
-
-    return 0;
-}
-
-/* mg/mdps conversion done in integer math, not float: this project
-   links --specs=nano.specs without -u _printf_float (cmake/gcc-arm-none
-   -eabi.cmake), so newlib-nano's vsnprintf silently mis-renders %f.
-   IMU_GYRO_MDPS_PER_LSB (70) is already a whole number so raw*70 is
-   exact; IMU_ACCEL_MG_PER_LSB (0.244) is scaled by 1000 and truncated,
-   fine for a glance-at-it shell readout, not for logged data. */
-static int cmd_imu(int argc, char **argv)
-{
-    (void)argc;
-    (void)argv;
-
-    imu_sample_t accel;
-    imu_sample_t gyro;
-
-    if (imu_get_latest_accel(&accel)) {
-        shell_printf("accel  raw x=%6d y=%6d z=%6d  mg x=%6ld y=%6ld z=%6ld\r\n",
-                     accel.x, accel.y, accel.z,
-                     (long)accel.x * 244 / 1000, (long)accel.y * 244 / 1000, (long)accel.z * 244 / 1000);
-    } else {
-        shell_printf("accel  no sample yet\r\n");
-    }
-
-    if (imu_get_latest_gyro(&gyro)) {
-        shell_printf("gyro   raw x=%6d y=%6d z=%6d  mdps x=%6ld y=%6ld z=%6ld\r\n",
-                     gyro.x, gyro.y, gyro.z,
-                     (long)gyro.x * 70, (long)gyro.y * 70, (long)gyro.z * 70);
-    } else {
-        shell_printf("gyro   no sample yet\r\n");
-    }
-
-    uint16_t pending;
-    bool watermarkFlag;
-    if (imu_fifo_status(&pending, &watermarkFlag)) {
-        shell_printf("fifo   pending=%u watermark_flag=%u\r\n", pending, (unsigned)watermarkFlag);
-    }
-
-    return 0;
-}
-
-/* Prints the cached accel/gyro sample roughly once per imuTask drain
-   cycle (~100 ms, set by IMU_FIFO_WATERMARK in imu.c) until any key is
-   pressed. xStreamBufferReceive()'s timeout does double duty as both
-   the print-rate timer and the stop-key check, so there's no separate
-   polling loop and no busy-waiting — this task is fully blocked between
-   prints. The byte that stops the stream is consumed here and never
-   reaches shell_dispatch(), so it doesn't echo or get treated as a
-   command; the very next line is a fresh `> ` prompt. Raw counts only
-   (not mg/mdps) so the stream stays compact enough to actually watch
-   scroll by. */
-static int cmd_imustream(int argc, char **argv)
-{
-    (void)argc;
-    (void)argv;
-
-    uint8_t stopByte;
-
-    shell_printf("streaming - press any key to stop\r\n");
-
-    for (;;) {
-        imu_sample_t accel;
-        imu_sample_t gyro;
-
-        if (imu_get_latest_accel(&accel) && imu_get_latest_gyro(&gyro)) {
-            shell_printf("accel x=%6d y=%6d z=%6d  gyro x=%6d y=%6d z=%6d\r\n",
-                         accel.x, accel.y, accel.z, gyro.x, gyro.y, gyro.z);
-        }
-
-        if (xStreamBufferReceive(shellRxStreamBuf, &stopByte, 1, pdMS_TO_TICKS(100)) > 0) {
-            break;
-        }
-    }
 
     return 0;
 }
@@ -525,8 +460,8 @@ static int cmd_vbat(int argc, char **argv)
     return 0;
 }
 
-/* Splits line in place on spaces, looks argv[0] up in commandTable, and
-   calls its handler. An empty line or an unrecognised command both fail
+/* Splits line in place on spaces, looks argv[0] up in commandTable and
+   then in the image's own commands, and calls its handler. An empty line or an unrecognised command both fail
    safely — nothing crashes, the user just sees nothing or an error. */
 static void shell_dispatch(char *line)
 {
@@ -546,6 +481,13 @@ static void shell_dispatch(char *line)
     for (size_t i = 0; i < COMMAND_TABLE_COUNT; i++) {
         if (strcmp(argv[0], commandTable[i].name) == 0) {
             commandTable[i].handler(argc, argv);
+            return;
+        }
+    }
+
+    for (size_t i = 0; i < imageCommandCount; i++) {
+        if (strcmp(argv[0], imageCommands[i].name) == 0) {
+            imageCommands[i].handler(argc, argv);
             return;
         }
     }
