@@ -35,9 +35,12 @@ Symptom if skipped: flash and verify succeed, nothing runs, PC sits in
 0x1FFF____ instead of 0x0800____.
 
 ## Code layout — important
-- targets/vcu/ is the CubeMX project (ADR 0001). Core/, Drivers/, Middlewares/
-  there are CubeMX-generated. NEVER edit outside
-  /* USER CODE BEGIN */ ... /* USER CODE END */ markers.
+- targets/vcu/ is the CubeMX project (ADR 0001) and everything in it is
+  CubeMX-generated. NEVER edit outside
+  /* USER CODE BEGIN */ ... /* USER CODE END */ markers. The one exception is
+  targets/vcu/CMakeLists.txt, generated once: it lists the App/ sources.
+- The root CMakeLists.txt builds each image as its own build tree; the ELF is
+  build/<preset>/vcu/tim.elf.
 - App/ is hand-written and CubeMX never touches it. New code goes here.
 - All task priorities and stack sizes live in App/Inc/tasks.h. One place.
 - targets/vcu/tim.ioc is the source of truth for pin and peripheral config.

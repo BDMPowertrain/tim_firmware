@@ -31,6 +31,10 @@ function(add_image image)
         USES_TERMINAL_BUILD TRUE
         INSTALL_COMMAND ""
     )
+    # The image's objects live in its own build tree, which the top-level
+    # clean does not otherwise reach.
+    set_property(DIRECTORY APPEND PROPERTY
+        ADDITIONAL_CLEAN_FILES ${CMAKE_BINARY_DIR}/${image})
 endfunction()
 
 add_image(vcu)
