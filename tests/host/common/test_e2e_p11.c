@@ -1,11 +1,14 @@
 /*
  * Host tests for E2E Profile 11 (App/common/logic/Inc/e2e_p11.h).
  *
- * The expected bytes are the protect examples published in the AUTOSAR
- * "E2E Protocol Specification", E2E Profile 11, Data ID mode "both":
- * Data ID 0x0123, 8-byte frame, CRC in byte 0, counter in the low half of
- * byte 1, all signal bytes zero. Counter 0 gives CRC 0xCC, counter 1 gives
- * CRC 0x91.
+ * The expected bytes are the protect examples in the AUTOSAR "E2E Protocol
+ * Specification" (AUTOSAR_PRS_E2EProtocol, FO R1.5.1), section 6.9.9
+ * "E2E Profile 11 Protocol Examples", Data ID mode "both": 8-byte frame, CRC
+ * in byte 0, counter in the low half of byte 1, all signal bytes zero.
+ * Table 6.46: counter 0 gives CC 00 00 00 00 00 00 00.
+ * Table 6.47: counter 1 gives 91 01 00 00 00 00 00 00.
+ * Table 6.44 prints the Data ID as "0x01234", which is not a 16-bit value;
+ * the published results are the ones for 0x0123.
  */
 #include "e2e_p11.h"
 #include "unity.h"
@@ -58,19 +61,24 @@ static void test_protect_counter_goes_from_14_back_to_0(void)
 
 /*
  * The upper half of byte 1 belongs to a signal. The expected bytes are the
- * AUTOSAR example for Data ID mode "nibble" (Data ID 0x0123, counter 0:
- * CRC 0x2A, byte 1 0x10), which is the same calculation as mode "both" with
- * Data ID 0x0023 and the value 1 already in the upper half of byte 1.
+ * AUTOSAR examples for Data ID mode "nibble" (section 6.9.9.1, Data ID
+ * 0x0123: Table 6.48, counter 0, 2A 10 00...; Table 6.49, counter 1,
+ * 77 11 00...). That mode is the same calculation as mode "both" with Data ID
+ * 0x0023 and the value 1 already in the upper half of byte 1.
  */
 static void test_protect_keeps_and_covers_the_upper_half_of_byte_1(void)
 {
     e2e_p11_tx_t tx = {0};
-    uint8_t frame[8] = {0x00, 0x1F, 0, 0, 0, 0, 0, 0};
-    const uint8_t expected[8] = {0x2A, 0x10, 0, 0, 0, 0, 0, 0};
+    uint8_t first[8] = {0x00, 0x1F, 0, 0, 0, 0, 0, 0};
+    uint8_t second[8] = {0x00, 0x1F, 0, 0, 0, 0, 0, 0};
+    const uint8_t expected_first[8] = {0x2A, 0x10, 0, 0, 0, 0, 0, 0};
+    const uint8_t expected_second[8] = {0x77, 0x11, 0, 0, 0, 0, 0, 0};
 
-    e2e_p11_protect(&tx, 0x0023u, frame, sizeof frame);
+    e2e_p11_protect(&tx, 0x0023u, first, sizeof first);
+    e2e_p11_protect(&tx, 0x0023u, second, sizeof second);
 
-    TEST_ASSERT_EQUAL_HEX8_ARRAY(expected, frame, sizeof frame);
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(expected_first, first, sizeof first);
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(expected_second, second, sizeof second);
 }
 
 /* The two AUTOSAR example frames, as a receiver sees them. */
