@@ -15,6 +15,15 @@ cmake_minimum_required(VERSION 3.22)
 
 project(tim_firmware LANGUAGES NONE)
 
+# The host-tests presets build the host tests instead of the images: logic
+# compiled with the native GCC and run under CTest (ADR 0002).
+option(TIM_HOST_TESTS "Build the host tests instead of the images" OFF)
+if(TIM_HOST_TESTS)
+    enable_testing()
+    add_subdirectory(tests/host)
+    return()
+endif()
+
 include(ExternalProject)
 
 if(NOT CMAKE_BUILD_TYPE)

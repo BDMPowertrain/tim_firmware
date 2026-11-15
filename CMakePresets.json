@@ -20,6 +20,22 @@
             "cacheVariables": {
                 "CMAKE_BUILD_TYPE": "Release"
             }
+        },
+        {
+            "name": "host-tests",
+            "inherits": "default",
+            "cacheVariables": {
+                "TIM_HOST_TESTS": "ON",
+                "CMAKE_C_COMPILER": "gcc",
+                "CMAKE_BUILD_TYPE": "Debug"
+            }
+        },
+        {
+            "name": "host-tests-sanitize",
+            "inherits": "host-tests",
+            "cacheVariables": {
+                "TIM_HOST_SANITIZE": "ON"
+            }
         }
     ],
     "buildPresets": [
@@ -30,6 +46,31 @@
         {
             "name": "Release",
             "configurePreset": "Release"
+        },
+        {
+            "name": "host-tests",
+            "configurePreset": "host-tests"
+        },
+        {
+            "name": "host-tests-sanitize",
+            "configurePreset": "host-tests-sanitize"
+        }
+    ],
+    "testPresets": [
+        {
+            "name": "host-tests",
+            "configurePreset": "host-tests",
+            "output": {
+                "outputOnFailure": true
+            },
+            "execution": {
+                "noTestsAction": "error"
+            }
+        },
+        {
+            "name": "host-tests-sanitize",
+            "inherits": "host-tests",
+            "configurePreset": "host-tests-sanitize"
         }
     ]
 }

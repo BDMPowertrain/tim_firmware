@@ -16,11 +16,32 @@ Onboard: ASM330LHHG1TR IMU (SPI3), microSD (SPI2), 2x isolated CAN FD
 One preset builds both images (ADR 0001): build/<preset>/vcu/tim.elf and
 build/<preset>/bms/tim.elf. Both are named tim.elf, so check the folder
 before flashing. CI (.github/workflows/build.yml) runs the Debug and Release
-presets on every push and pull request to dev.
+presets and the host tests on every push and pull request to dev.
 
 The configure fails if the two CubeMX projects name different firmware
 packages. The link fails if an image exceeds 224 KB (ADR 0014,
 cmake/image_limit.ld).
+
+## Host tests
+    cmake --preset host-tests
+    cmake --build --preset host-tests
+    ctest --preset host-tests
+
+Logic (ADR 0002) compiled with the PC's own GCC and run under CTest with
+Unity (third_party/unity/), no TIM involved. Tests live in tests/host/, one
+executable per test file, added with add_host_test() in
+tests/host/CMakeLists.txt. Warnings are errors, and so is a float promoted
+to double.
+
+One-time setup: the host-tests presets need a native `gcc` on the PATH, next
+to the Arm toolchain.
+- Windows: `winget install BrechtSanders.WinLibs.POSIX.UCRT`, then open a new
+  terminal and check `gcc --version`.
+- Linux or WSL: `sudo apt install gcc cmake ninja-build`.
+
+CI uses the host-tests-sanitize preset, which adds ASan and UBSan. MinGW GCC
+on Windows has neither, so run that preset on Linux or in WSL. Do not share
+one build/host-tests folder between Windows and WSL: delete it when switching.
 
 ## Flash
     openocd -f interface/stlink-dap.cfg -f target/stm32g4x.cfg \
@@ -57,6 +78,12 @@ Symptom if skipped: flash and verify succeed, nothing runs, PC sits in
   App/vcu/ and App/bms/ into one each.
 - Common code never checks which image it is built into: no #ifdef on the
   image. A file that needs an image switch belongs in App/vcu/ or App/bms/.
+- Logic (ADR 0002) lives in App/common/logic/, App/vcu/logic/ and
+  App/bms/logic/, each a library (logic_common, logic_vcu, logic_bms) made by
+  add_logic_library() from cmake/logic.cmake. Logic includes no HAL,
+  CMSIS-RTOS, FreeRTOS or generated header: those paths are not given to it,
+  so the include fails to compile. The same libraries link into the images
+  and the host tests. Every logic module gets a host test.
 - All task priorities and stack sizes live in the image's tasks.h:
   App/vcu/Inc/tasks.h and App/bms/Inc/tasks.h. One place per image.
 - The shell is common code. A command only one image has is registered by

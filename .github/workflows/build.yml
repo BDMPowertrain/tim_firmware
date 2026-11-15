@@ -1,7 +1,8 @@
 name: build
 
-# Builds both images (ADR 0001) on every push and pull request to dev.
-# CubeMX never runs here: generated code is committed.
+# Builds both images (ADR 0001) and runs the host tests (ADR 0002) on every
+# push and pull request to dev. CubeMX never runs here: generated code is
+# committed.
 
 on:
   push:
@@ -40,3 +41,23 @@ jobs:
 
       - name: Build the VCU and BMS images
         run: cmake --build --preset ${{ matrix.preset }}
+
+  host-tests:
+    name: Host tests (ASan + UBSan)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      # The runner's native GCC compiles the logic and the tests.
+      - name: Install Ninja
+        run: sudo apt-get update && sudo apt-get install -y ninja-build
+
+      - name: Configure
+        run: cmake --preset host-tests-sanitize
+
+      - name: Build the host tests
+        run: cmake --build --preset host-tests-sanitize
+
+      # A failing test, a sanitizer report or an empty test list fails the job.
+      - name: Run the host tests
+        run: ctest --preset host-tests-sanitize

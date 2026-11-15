@@ -37,6 +37,11 @@ add_executable(${CMAKE_PROJECT_NAME})
 # Add STM32CubeMX generated sources
 add_subdirectory(cmake/stm32cubemx)
 
+# Logic libraries (ADR 0002): built with no HAL, RTOS or generated include
+# path, and the same ones the host tests link.
+add_subdirectory(../../App/common/logic logic/common)
+add_subdirectory(../../App/vcu/logic logic/vcu)
+
 # Link directories setup
 target_link_directories(${CMAKE_PROJECT_NAME} PRIVATE
     # Add user defined library search paths
@@ -79,6 +84,8 @@ target_link_libraries(${CMAKE_PROJECT_NAME}
     stm32cubemx
 
     # Add user defined libraries
+    logic_common
+    logic_vcu
 )
 
 # Fail the link when the image outgrows its 224 KB of bank 1 (ADR 0014)
