@@ -51,7 +51,7 @@ extern SPI_HandleTypeDef hspi2;
    written by): CMD0 -> CMD8 (probe SDv2 vs SDv1/MMC) -> ACMD41 poll
    (HCS set for SDv2) -> CMD58 (read OCR for the CCS/block-addressing
    bit). Called from loggerTask (via f_mount/f_open/f_write), never from
-   shellTask -- see App/Src/logger.c. */
+   shellTask -- see App/common/Src/logger.c. */
 
 /* Commands, already in SPI-mode framing (0x40 | command index) --
    sd_send_cmd() sends these bytes as-is. ACMD41 is not a real command

@@ -45,21 +45,24 @@ target_link_directories(${CMAKE_PROJECT_NAME} PRIVATE
 # Add sources to executable
 target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     # Add user sources here
-    ../../App/Src/can_if.c
-    ../../App/Src/imu.c
-    ../../App/Src/logger.c
-    ../../App/Src/print.c
-    ../../App/Src/shell.c
-    ../../App/Src/spi3_bus.c
-    ../../App/Src/stats.c
-    ../../App/Src/tasks.c
-    ../../App/Src/vbat.c
+    # App/common/ is compiled into both images, App/vcu/ into this one only
+    # (ADR 0001). The order is the link order, kept from before the split.
+    ../../App/common/Src/can_if.c
+    ../../App/vcu/Src/imu.c
+    ../../App/common/Src/logger.c
+    ../../App/common/Src/print.c
+    ../../App/common/Src/shell.c
+    ../../App/common/Src/spi3_bus.c
+    ../../App/common/Src/stats.c
+    ../../App/vcu/Src/tasks.c
+    ../../App/common/Src/vbat.c
 )
 
 # Add include paths
 target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
     # Add user defined include paths
-    ../../App/Inc
+    ../../App/common/Inc
+    ../../App/vcu/Inc
 )
 
 # Add project symbols (macros)

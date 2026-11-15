@@ -6,8 +6,9 @@ cmake_minimum_required(VERSION 3.22)
 # configured as its own build tree, because the generated build files assume
 # they are the top-level project (CMAKE_SOURCE_DIR locates the linker script,
 # CMAKE_PROJECT_NAME names the executable) and CubeMX owns them, so they cannot
-# be edited to fit under a shared top level. Hand-written code lives in App/ and is pulled in by the image's
-# own CMakeLists.txt.
+# be edited to fit under a shared top level. Hand-written code lives in App/
+# (App/common/ for both images, App/<image>/ for one) and is pulled in by the
+# image's own CMakeLists.txt.
 
 project(tim_firmware LANGUAGES NONE)
 

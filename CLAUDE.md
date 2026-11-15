@@ -41,12 +41,17 @@ Symptom if skipped: flash and verify succeed, nothing runs, PC sits in
   targets/vcu/CMakeLists.txt, generated once: it lists the App/ sources.
 - The root CMakeLists.txt builds each image as its own build tree; the ELF is
   build/<preset>/vcu/tim.elf.
-- App/ is hand-written and CubeMX never touches it. New code goes here.
-- All task priorities and stack sizes live in App/Inc/tasks.h. One place.
+- App/ is hand-written and CubeMX never touches it. New code goes here, in
+  one of three areas (ADR 0001): App/common/ is compiled into both images,
+  App/vcu/ and App/bms/ into one each.
+- Common code never checks which image it is built into: no #ifdef on the
+  image. A file that needs an image switch belongs in App/vcu/ or App/bms/.
+- All VCU task priorities and stack sizes live in App/vcu/Inc/tasks.h. One
+  place per image.
 - targets/vcu/tim.ioc is the source of truth for pin and peripheral config.
 
 ## Conventions
-- Tasks are created in App/Src/tasks.c, not in CubeMX. CubeMX creates only
+- Tasks are created in App/vcu/Src/tasks.c, not in CubeMX. CubeMX creates only
   initTask, which calls tasks_init() and then terminates.
 - osPriorityRealtime and osPriorityHigh are RESERVED for the VCU torque path
   and hard hardware deadlines. Do not use them for test or logging tasks.
