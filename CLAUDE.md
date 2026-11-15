@@ -15,11 +15,11 @@ Onboard: ASM330LHHG1TR IMU (SPI3), microSD (SPI2), 2x isolated CAN FD
 
 ## Flash
     openocd -f interface/stlink-dap.cfg -f target/stm32g4x.cfg \
-      -c "program build/Debug/tim.elf verify reset exit"
+      -c "program build/Debug/vcu/tim.elf verify reset exit"
 
 ## Debug
     openocd -f interface/stlink-dap.cfg -f target/stm32g4x.cfg
-    arm-none-eabi-gdb build/Debug/tim.elf     # .gdbinit connects automatically
+    arm-none-eabi-gdb build/Debug/vcu/tim.elf     # .gdbinit connects automatically
 
 ## First-time board setup — REQUIRED
 A factory-fresh G474 boots into the ST bootloader on this design: PB8 is
@@ -35,11 +35,12 @@ Symptom if skipped: flash and verify succeed, nothing runs, PC sits in
 0x1FFF____ instead of 0x0800____.
 
 ## Code layout — important
-- Core/, Drivers/, Middlewares/ are CubeMX-generated. NEVER edit outside
+- targets/vcu/ is the CubeMX project (ADR 0001). Core/, Drivers/, Middlewares/
+  there are CubeMX-generated. NEVER edit outside
   /* USER CODE BEGIN */ ... /* USER CODE END */ markers.
 - App/ is hand-written and CubeMX never touches it. New code goes here.
 - All task priorities and stack sizes live in App/Inc/tasks.h. One place.
-- tim.ioc is the source of truth for pin and peripheral config.
+- targets/vcu/tim.ioc is the source of truth for pin and peripheral config.
 
 ## Conventions
 - Tasks are created in App/Src/tasks.c, not in CubeMX. CubeMX creates only

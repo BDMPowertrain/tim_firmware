@@ -1,78 +1,36 @@
 cmake_minimum_required(VERSION 3.22)
 
+# Top-level build: one sub-build per image (ADR 0001).
 #
-# This file is generated only once,
-# and is not re-generated if converter is called multiple times.
-#
-# User is free to modify the file as much as necessary
-#
+# Each image is a complete CubeMX CMake project under targets/<image>/ and is
+# configured as its own build tree, because the generated build files assume
+# they are the top-level project (CMAKE_SOURCE_DIR locates the linker script,
+# CMAKE_PROJECT_NAME names the executable) and CubeMX rewrites them on every
+# regeneration. Hand-written code lives in App/ and is pulled in by the image's
+# own CMakeLists.txt.
 
-# Setup compiler settings
-set(CMAKE_C_STANDARD 11)
-set(CMAKE_C_STANDARD_REQUIRED ON)
-set(CMAKE_C_EXTENSIONS ON)
+project(tim_firmware LANGUAGES NONE)
 
+include(ExternalProject)
 
-# Define the build type
 if(NOT CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE "Debug")
 endif()
 
-# Set the project name
-set(CMAKE_PROJECT_NAME tim)
+# Adds the image under targets/<image>/ as a target named <image>.
+# Output: <build dir>/<image>/tim.elf
+function(add_image image)
+    set(image_dir ${CMAKE_CURRENT_SOURCE_DIR}/targets/${image})
+    ExternalProject_Add(${image}
+        SOURCE_DIR ${image_dir}
+        BINARY_DIR ${CMAKE_BINARY_DIR}/${image}
+        CMAKE_ARGS
+            -DCMAKE_TOOLCHAIN_FILE=${image_dir}/cmake/gcc-arm-none-eabi.cmake
+            -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}
+        BUILD_ALWAYS TRUE
+        USES_TERMINAL_BUILD TRUE
+        INSTALL_COMMAND ""
+    )
+endfunction()
 
-# Enable compile command to ease indexing with e.g. clangd
-set(CMAKE_EXPORT_COMPILE_COMMANDS TRUE)
-
-# Core project settings
-project(${CMAKE_PROJECT_NAME})
-message("Build type: " ${CMAKE_BUILD_TYPE})
-
-# Enable CMake support for ASM and C languages
-enable_language(C ASM)
-
-# Create an executable object type
-add_executable(${CMAKE_PROJECT_NAME})
-
-# Add STM32CubeMX generated sources
-add_subdirectory(cmake/stm32cubemx)
-
-# Link directories setup
-target_link_directories(${CMAKE_PROJECT_NAME} PRIVATE
-    # Add user defined library search paths
-)
-
-# Add sources to executable
-target_sources(${CMAKE_PROJECT_NAME} PRIVATE
-    # Add user sources here
-    App/Src/can_if.c
-    App/Src/imu.c
-    App/Src/logger.c
-    App/Src/print.c
-    App/Src/shell.c
-    App/Src/spi3_bus.c
-    App/Src/stats.c
-    App/Src/tasks.c
-    App/Src/vbat.c
-)
-
-# Add include paths
-target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
-    # Add user defined include paths
-    App/Inc
-)
-
-# Add project symbols (macros)
-target_compile_definitions(${CMAKE_PROJECT_NAME} PRIVATE
-    # Add user defined symbols
-)
-
-# Remove wrong libob.a library dependency when using cpp files
-list(REMOVE_ITEM CMAKE_C_IMPLICIT_LINK_LIBRARIES ob)
-
-# Add linked libraries
-target_link_libraries(${CMAKE_PROJECT_NAME}
-    stm32cubemx
-
-    # Add user defined libraries
-)
+add_image(vcu)
