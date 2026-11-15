@@ -35,6 +35,18 @@ _Avoid_: Unit test, PC test, offline test
 A test of a real **Image** on a real TIM, with faults injected from outside the board and reaction times measured on the wires.
 _Avoid_: HIL test, integration test, hardware test
 
+**Bench case**:
+One numbered **Bench test** with a stimulus, a start edge, an end edge and a pass criterion.
+_Avoid_: Test case, scenario, test item
+
+**Bench measurement**:
+A one-time bench reading that confirms an assumption and has no pass criterion.
+_Avoid_: Characterisation test, informational test
+
+**Rig**:
+The set of hardware a **Bench case** needs: Rig A is a bare TIM, Rig B adds the BMS master and a slave, Rig C adds the VCU daughterboard.
+_Avoid_: Setup, fixture, test bench
+
 **Control step**:
 The one periodic step in which an **Image** reads its inputs, decides, and writes its safety outputs. The VCU's is the torque path every 10 ms; the BMS's is the **Sweep** and its checks every 20 ms. Nothing else in the image writes a safety output or sends on the **Control bus**.
 _Avoid_: Main loop, safety task, control loop, torque task
@@ -71,6 +83,22 @@ _Avoid_: Soft fault, inhibit, torque lockout
 The VCU dropping to a lower state with the inverter disabled. Torque returns only after the driver repeats the start procedure.
 _Avoid_: Hard fault, shutdown (that is the Shutdown Circuit's word), trip
 
+**Power limiter**:
+The part of the VCU's torque path that holds the pack's discharge power at or under the **Power ceiling** by lowering the driver's torque request. It only ever reduces torque and is not a **Torque cut**: the driver keeps whatever torque fits under the ceiling.
+_Avoid_: 80 kW limiter (that is one of its two ceilings), power cap, torque limiter
+
+**Power ceiling**:
+The discharge power the **Power limiter** holds the car to at this moment: the lower of the fixed target under the 80 kW rule limit and the power the BMS's **Discharge limit** allows.
+_Avoid_: Power limit (that is the rule's 80 kW), setpoint, cap
+
+**Discharge limit**:
+The most pack current the BMS will accept being drawn right now. It is how the BMS asks for less power; the VCU obeys it and never looks at a cell value itself.
+_Avoid_: DCL, current cap, BMS limit
+
+**Derating**:
+Lowering the **Discharge limit** or **Charge limit** gradually as a cell value nears a **BMS fault** threshold, so the car slows, or the charge eases off, before it stops. The BMS does it for cell voltage and cell temperature; the inverter does its own for motor and inverter temperature.
+_Avoid_: Taper (the shape, not the act), limp mode, foldback
+
 **Brake engaged**:
 Brake pressure above the one threshold the VCU uses everywhere it needs to know the driver is braking: the start procedure, the brake-and-pedal check, and the brake light.
 _Avoid_: Brake pressed, braking, hard braking
@@ -96,12 +124,40 @@ A condition for which the BMS takes BMS_OK low. It ends by itself once the condi
 _Avoid_: Trip, error, alarm, latched fault
 
 **Low-voltage limit**:
-The cell voltage below which the BMS asks for less discharge power to protect cell life. It is not a **BMS fault** and never takes BMS_OK low.
+The cell voltage below which the BMS starts **Derating** to protect cell life. It is not a **BMS fault** and never takes BMS_OK low.
 _Avoid_: Soft under-voltage, UV warning, cutoff
 
 **Charge mode**:
 The BMS operating with the pack on the hand cart and the charger connected. The BMS knows it is in charge mode because it hears the charger on the **Control bus**.
 _Avoid_: Charging state, charger present
+
+**Charge limit**:
+The most pack current the BMS will accept being put into the pack right now. In **Charge mode** it is what the BMS asks the charger for; in the car it is zero, because the car never regenerates.
+_Avoid_: CCL, charge current setpoint, charger request
+
+**Charge target**:
+The cell voltage at which a charge is finished. The BMS lowers the **Charge limit** as the highest cell nears it; it sits below the over-voltage **BMS fault** threshold and is not a fault itself.
+_Avoid_: Full voltage, cutoff voltage, charge cutoff
+
+**Charge complete**:
+The BMS condition after a charge has reached the **Charge target** and the BMS has told the charger to stop. It lasts until a power cycle; the BMS does not start another charge by itself.
+_Avoid_: Full, charged, end of charge (that is the moment, not the condition)
+
+**Charging Shutdown Circuit**:
+The hand cart's counterpart of the Shutdown Circuit: the Charger Shutdown Button, BMS_OK and the insulation monitor in series, holding the charging isolation relays closed. It is separate hardware from the car's Shutdown Circuit and only one of the two is ever connected to the pack.
+_Avoid_: Charge SDC, charger interlock
+
+**Balancing**:
+The BMS drawing a small current from the higher cells so that every cell reaches the **Charge target** together. It happens only in **Charge mode**, and never while the Shutdown Circuit or the **Charging Shutdown Circuit** is open.
+_Avoid_: Equalising, bleeding (that is what one cell does), top-up (that is a second charge)
+
+**Balancing gate**:
+The cell voltage, a fixed distance under the **Charge target**, that the highest cell must reach once before **Balancing** is allowed in a charge. Below it, voltage differences between cells do not yet show which cell holds more charge.
+_Avoid_: Start balancing voltage, balance threshold
+
+**Cell spread**:
+The highest cell voltage minus the lowest, taken from one **Sweep** with no cell being bled. It is what **Balancing** reduces and how the BMS knows balancing is finished.
+_Avoid_: Delta, imbalance, mismatch
 
 **Power-on reset**:
 A reset caused by the board's supply rising through the MCU's brown-out threshold, whether GLV was switched on or the supply only sagged and recovered. The MCU cannot tell the two apart, so neither do the images.
@@ -142,6 +198,14 @@ _Avoid_: Fault log (most of what it holds is not a fault), crash log, black box
 **Event**:
 One entry in the **Event log**: a fault trip, a state change, a torque cut starting or ending, a reset and its cause, an **Overrun**.
 _Avoid_: Log line, record, fault entry
+
+**Data log**:
+The running record each image writes to the SD card of what its **Control step** saw and decided, step by step, for study after a run. It is a convenience: a missing card loses it and nothing depends on it. The **Event log** is the authority on what happened.
+_Avoid_: SD log, telemetry, trace, black box
+
+**Record**:
+One entry in the **Data log**: one **Control step**'s inputs and decisions, an IMU sample, a DAQ bus frame, or a copy of an **Event**.
+_Avoid_: Log line, sample, row
 
 **Parameter**:
 A stored value a person sets at the car without rebuilding the image: a calibration (pedal and brake sensor end points) or a configuration (CAN termination, maximum torque). Protection thresholds and timings are not parameters; they are fixed in the image.

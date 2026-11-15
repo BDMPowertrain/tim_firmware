@@ -20,5 +20,6 @@ Accepted for now. The conditions under which it should be revisited are listed u
 - A fault-log event that finds its queue full is dropped and counted; the control step never waits for the writer.
 - The step measures its own worst-case time every run. The budgets are 1 ms of CPU on the VCU and 3 ms on the BMS, both estimates until measured.
 - **When to revisit.** If the measured worst case passes its budget, or heavy computation arrives (traction control, state-of-charge estimation), the heavy work moves to a lower task that hands its latest result to the step through the same snapshot copy; the step keeps only the final application, which may only reduce torque. If the copies grow until masking interrupts for their length threatens CAN reception, replace the copy with a lock-free hand-over before reaching for a mutex.
+- The data log adds a third way out of the step: a ring that only the step writes and only the SD logger reads, with no lock and no masked section (ADR 0021).
 - **If safety work is ever split across more than one task,** the watchdog scheme changes with it: a supervisor task takes over the kick (ADR 0013).
 - Flash erases must not stall the control step. On this MCU that means data pages in the bank the image does not run from; the flash layout decision owns it.
