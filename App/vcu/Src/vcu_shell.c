@@ -201,27 +201,6 @@ static int hex_decode(const char *hex, uint8_t *out, size_t out_max)
     return (int)byteCount;
 }
 
-/* CAN1 is the Control bus: classic, filtered, and sent on only by the
-   Control step (ADR 0010), so the shell can look at it but not drive it. */
-static void can1_print_status(void)
-{
-    control_bus_status_t st;
-
-    if (!control_bus_get_status(&st)) {
-        shell_printf("CAN1  status read failed\r\n");
-        return;
-    }
-
-    shell_printf("CAN1  Control bus, classic: started=%u bus_off=%u err_passive=%u\r\n",
-                 (unsigned)st.started, (unsigned)st.bus_off, (unsigned)st.error_passive);
-    shell_printf("     last_err=0x%02lX tx_err=%lu rx_err=%lu\r\n",
-                 (unsigned long)st.last_error_code, (unsigned long)st.tx_error_count,
-                 (unsigned long)st.rx_error_count);
-    shell_printf("     rx=%lu rx_unknown=%lu tx=%lu tx_skipped=%lu\r\n",
-                 (unsigned long)st.rx_frames, (unsigned long)st.rx_unknown,
-                 (unsigned long)st.tx_sent, (unsigned long)st.tx_skipped);
-}
-
 static void can2_print_status(void)
 {
     const char *name = "CAN2";
@@ -338,7 +317,7 @@ static int cmd_can(int argc, char **argv)
     }
 
     if (strcmp(argv[1], "status") == 0) {
-        can1_print_status();
+        control_bus_print_status();
         can2_print_status();
         return 0;
     }
@@ -347,7 +326,7 @@ static int cmd_can(int argc, char **argv)
 
     if (parse_bus_suffix(argv[1], "status", &bus)) {
         if (bus == 1) {
-            can1_print_status();
+            control_bus_print_status();
         } else {
             can2_print_status();
         }

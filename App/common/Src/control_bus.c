@@ -9,8 +9,15 @@
 #include "fdcan_irq.h"
 #include "main.h"
 #include "masked_copy.h"
+#include "print.h"
 
 extern FDCAN_HandleTypeDef hfdcan1;
+
+/* All three send slots, for cancelling every pending send at a bus-off. */
+#define TX_ALL_SLOTS (FDCAN_TX_BUFFER0 | FDCAN_TX_BUFFER1 | FDCAN_TX_BUFFER2)
+
+/* The error counters' error-passive level (ISO 11898-1): 128 or more. */
+#define ERROR_PASSIVE_COUNT 128u
 
 /* The image's received frames, in its row order: the interrupt's lookup
    table. Written once by control_bus_init() before the interrupts are
@@ -27,11 +34,43 @@ static mailbox_rx_t rxLatest[CONTROL_BUS_RX_MAX];
 static mailbox_rx_t rxSnapshot[CONTROL_BUS_RX_MAX];
 static mailbox_t mailboxes[CONTROL_BUS_RX_MAX];
 
+/* The bus-off policy's state, owned by the step. */
+static bus_recovery_t recovery;
+static bool rxOverflowed;
+
+/* What the shell sees of the step's state: written by the step with
+   interrupts masked, read the same way. */
+typedef struct {
+    control_bus_health_t    health;
+    bus_recovery_counters_t counters;
+} published_t;
+static published_t published;
+
 static volatile bool started;
+static volatile uint32_t busOffEvents;   /* written only by the interrupt */
+static volatile bool     controllerOff;  /* written only by the interrupt */
 static volatile uint32_t rxFrames;
 static volatile uint32_t rxUnknown;
+static volatile uint32_t rxOverflows;
 static volatile uint32_t txSent;
 static volatile uint32_t txSkipped;
+
+/* Runs in the FDCAN1 interrupt when the bus-off flag changes. The
+   controller sets CCCR.INIT as it goes bus-off and keeps it set until the
+   step restarts it (RM0440, FDCAN bus-off recovery), so INIT set here is
+   an entry into bus-off and INIT clear is the end of a recovery. Counts
+   only: the step does the rest. */
+static void control_bus_status_isr(FDCAN_HandleTypeDef *hfdcan, uint32_t status_its)
+{
+    if ((status_its & FDCAN_IR_BO) == 0u) {
+        return;
+    }
+    const bool entering = (hfdcan->Instance->CCCR & FDCAN_CCCR_INIT) != 0u;
+    if (entering) {
+        busOffEvents++;
+    }
+    controllerOff = entering;
+}
 
 /* Runs in the FDCAN1 interrupt: drain the FIFO into the mailboxes. The
    FIFO is three frames deep and the interrupt fires once per new frame,
@@ -108,11 +147,14 @@ bool control_bus_init(const control_bus_rx_t *rows, size_t row_count)
         return false;
     }
 
-    if (!fdcan_irq_register(&hfdcan1, control_bus_rx_isr)) {
+    if (!fdcan_irq_register(&hfdcan1, control_bus_rx_isr)
+        || !fdcan_irq_register_status(&hfdcan1, control_bus_status_isr)) {
         return false;
     }
+    /* The FIFO overflow flags are not interrupts: the step reads them. */
     if (HAL_FDCAN_ActivateNotification(&hfdcan1,
-                                       FDCAN_IT_RX_FIFO0_NEW_MESSAGE | FDCAN_IT_RX_FIFO1_NEW_MESSAGE,
+                                       FDCAN_IT_RX_FIFO0_NEW_MESSAGE | FDCAN_IT_RX_FIFO1_NEW_MESSAGE
+                                           | FDCAN_IT_BUS_OFF,
                                        0) != HAL_OK) {
         return false;
     }
@@ -129,7 +171,55 @@ bool control_bus_start(void)
     return started;
 }
 
-void control_bus_update(uint32_t now_ms)
+/* Error-passive from the error counters rather than PSR.EP: reading PSR
+   resets its last error code, which the shell shows. */
+static bool read_error_passive(void)
+{
+    const uint32_t ecr = hfdcan1.Instance->ECR;
+    const uint32_t tec = (ecr & FDCAN_ECR_TEC) >> FDCAN_ECR_TEC_Pos;
+
+    return (ecr & FDCAN_ECR_RP) != 0u || tec >= ERROR_PASSIVE_COUNT;
+}
+
+/* A receive FIFO that was full when a frame arrived sets its lost flag.
+   Read and clear both (write 1 to clear, so the receive interrupt's own
+   flags are untouched). */
+static void read_rx_overflow(void)
+{
+    const uint32_t lost = hfdcan1.Instance->IR & (FDCAN_IR_RF0L | FDCAN_IR_RF1L);
+
+    if (lost != 0u) {
+        hfdcan1.Instance->IR = lost;
+        rxOverflows++;
+        rxOverflowed = true;
+    }
+}
+
+static void run_recovery(uint32_t now_ms, bool latch_may_clear)
+{
+    const bus_recovery_input_t in = {
+        .bus_off_count = busOffEvents,
+        .controller_off = controllerOff,
+        .error_passive = read_error_passive(),
+        .latch_may_clear = latch_may_clear,
+    };
+    const bus_recovery_action_t action = bus_recovery_update(&recovery, &in, now_ms);
+
+    if (action.bus_off) {
+        /* Every mailbox INVALID in this step, and nothing built before
+           the bus-off goes out after the restart. */
+        mailbox_force_all_invalid(mailboxes, rxRowCount);
+        (void)HAL_FDCAN_AbortTxRequest(&hfdcan1, TX_ALL_SLOTS);
+    }
+    if (action.restart) {
+        /* Clearing INIT is the whole restart: the controller rejoins after
+           129 bus-idle sequences, about 2.8 ms at 500 kbit/s. HAL's own
+           start would refuse, as its state never left BUSY. */
+        CLEAR_BIT(hfdcan1.Instance->CCCR, FDCAN_CCCR_INIT);
+    }
+}
+
+void control_bus_update(uint32_t now_ms, bool latch_may_clear)
 {
     masked_copy(rxSnapshot, rxLatest, rxRowCount * sizeof(rxLatest[0]));
 
@@ -137,11 +227,42 @@ void control_bus_update(uint32_t now_ms)
         (void)mailbox_update(&mailboxes[i], &control_rx_config[rxFrameOf[i]],
                              &rxSnapshot[i], now_ms);
     }
+
+    if (started) {
+        read_rx_overflow();
+        run_recovery(now_ms, latch_may_clear);
+    }
+
+    const published_t snapshot = {
+        .health = control_bus_health(),
+        .counters = recovery.counters,
+    };
+    masked_copy(&published, &snapshot, sizeof(published));
 }
 
 const mailbox_t *control_bus_mailbox(size_t row)
 {
     return &mailboxes[row];
+}
+
+bool control_bus_all_valid(void)
+{
+    for (size_t i = 0; i < rxRowCount; i++) {
+        if (mailboxes[i].state != MAILBOX_VALID) {
+            return false;
+        }
+    }
+    return true;
+}
+
+control_bus_health_t control_bus_health(void)
+{
+    return (control_bus_health_t){
+        .off = recovery.off,
+        .latched = recovery.latched,
+        .error_passive = recovery.error_passive,
+        .rx_overflowed = rxOverflowed,
+    };
 }
 
 bool control_bus_send(uint32_t frame_id, bool extended, const uint8_t *data,
@@ -151,7 +272,7 @@ bool control_bus_send(uint32_t frame_id, bool extended, const uint8_t *data,
        (RM0440, FDCAN_TXFQS), so HAL_FDCAN_GetTxFifoFreeLevel() would say
        "full" every time. HAL_FDCAN_AddMessageToTxFifoQ() refuses on
        TXFQS.TFQF instead, which is the real "no free slot". */
-    if (!started || len > MAILBOX_FRAME_MAX) {
+    if (!started || recovery.off || len > MAILBOX_FRAME_MAX) {
         txSkipped++;
         return false;
     }
@@ -196,7 +317,39 @@ bool control_bus_get_status(control_bus_status_t *out)
     out->rx_error_count = errors.RxErrorCnt;
     out->rx_frames = rxFrames;
     out->rx_unknown = rxUnknown;
+    out->rx_overflows = rxOverflows;
     out->tx_sent = txSent;
     out->tx_skipped = txSkipped;
+
+    published_t snapshot;
+    masked_copy(&snapshot, &published, sizeof(snapshot));
+    out->health = snapshot.health;
+    out->recovery = snapshot.counters;
     return true;
+}
+
+void control_bus_print_status(void)
+{
+    control_bus_status_t st;
+
+    if (!control_bus_get_status(&st)) {
+        shell_printf("CAN1  status read failed\r\n");
+        return;
+    }
+
+    const char *state = !st.started            ? "not started"
+                        : st.health.latched    ? "BUS-OFF LATCHED (retry 1/s)"
+                        : st.health.off        ? "bus-off, restarting"
+                                               : "running";
+    shell_printf("CAN1  Control bus, classic: %s\r\n", state);
+    shell_printf("     bus_off=%u err_passive=%u last_err=0x%02lX tx_err=%lu rx_err=%lu\r\n",
+                 (unsigned)st.bus_off, (unsigned)st.error_passive,
+                 (unsigned long)st.last_error_code, (unsigned long)st.tx_error_count,
+                 (unsigned long)st.rx_error_count);
+    shell_printf("     bus_offs=%lu restarts=%lu err_passives=%lu fifo_overflows=%lu\r\n",
+                 (unsigned long)st.recovery.bus_offs, (unsigned long)st.recovery.restarts,
+                 (unsigned long)st.recovery.error_passives, (unsigned long)st.rx_overflows);
+    shell_printf("     rx=%lu rx_unknown=%lu tx=%lu tx_skipped=%lu\r\n",
+                 (unsigned long)st.rx_frames, (unsigned long)st.rx_unknown,
+                 (unsigned long)st.tx_sent, (unsigned long)st.tx_skipped);
 }

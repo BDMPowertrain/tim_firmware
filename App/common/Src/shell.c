@@ -12,6 +12,7 @@
 
 #include "cmsis_os2.h"
 
+#include "control_bus.h"
 #include "control_step.h"
 
 #include "main.h"
@@ -75,6 +76,7 @@ static int cmd_help(int argc, char **argv);
 static int cmd_tasks(int argc, char **argv);
 static int cmd_reset(int argc, char **argv);
 static int cmd_step(int argc, char **argv);
+static int cmd_bus(int argc, char **argv);
 
 /* The commands every image has. Adding one is one row here plus one
    handler function — nothing else in shell.c changes. A command only one
@@ -85,6 +87,7 @@ static const shell_cmd_t commandTable[] = {
     { "tasks",     cmd_tasks,     "list tasks: state, priority, stack free" },
     { "reset",     cmd_reset,     "software reset" },
     { "step",      cmd_step,      "control step: state, overruns, last and worst times" },
+    { "bus",       cmd_bus,       "Control bus (CAN1): bus-off, error-passive, skipped, overflows, error counts" },
     { "param",     parameters_cmd, "param [dump] | set <name> <value> | save" },
 };
 
@@ -139,6 +142,16 @@ static int cmd_step(int argc, char **argv)
     (void)argv;
 
     control_step_print();
+
+    return 0;
+}
+
+static int cmd_bus(int argc, char **argv)
+{
+    (void)argc;
+    (void)argv;
+
+    control_bus_print_status();
 
     return 0;
 }

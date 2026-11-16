@@ -35,7 +35,10 @@ static void phase_input(control_step_ctx_t *ctx)
     if (ctx->step_count == 0u) {
         (void)control_bus_start();
     }
-    control_bus_update(ctx->now_ms);
+    /* Bus-off never stops this step or touches BMS_OK (ADR 0005): sends
+       are skipped until the restart and the Sweep carries on. The latch
+       needs no mailbox to clear, since the charger is absent in the car. */
+    control_bus_update(ctx->now_ms, true);
 }
 
 static void phase_logic(control_step_ctx_t *ctx)
@@ -47,10 +50,14 @@ static void phase_logic(control_step_ctx_t *ctx)
 static void phase_output(control_step_ctx_t *ctx)
 {
     if (bms_tx_status_due(ctx->step_count)) {
-        /* BMS_OK is commanded low in STARTUP: every other signal is 0. */
+        /* BMS_OK is commanded low in STARTUP: every fault signal is 0. */
+        const control_bus_health_t bus = control_bus_health();
         struct can_control_bms_status_t status = {
             .state = ctx->state,
             .parameters_defaulted = parameters_defaulted() ? 1u : 0u,
+            .bus_off_latched = bus.latched ? 1u : 0u,
+            .error_passive = bus.error_passive ? 1u : 0u,
+            .receive_overflow = bus.rx_overflowed ? 1u : 0u,
         };
         uint8_t frame[CAN_CONTROL_BMS_STATUS_LENGTH];
 

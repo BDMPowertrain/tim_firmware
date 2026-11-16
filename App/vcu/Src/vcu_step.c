@@ -45,7 +45,9 @@ static void phase_input(control_step_ctx_t *ctx)
     if (ctx->step_count == 0u) {
         canStarted = control_bus_start();
     }
-    control_bus_update(ctx->now_ms);
+    /* The bus-off latch clears only with every mailbox VALID (spec,
+       reaction table): judged on the last step's mailboxes. */
+    control_bus_update(ctx->now_ms, control_bus_all_valid());
 }
 
 static void phase_logic(control_step_ctx_t *ctx)
@@ -57,10 +59,14 @@ static void phase_logic(control_step_ctx_t *ctx)
 static void phase_output(control_step_ctx_t *ctx)
 {
     if (vcu_tx_status_due(ctx->step_count)) {
+        const control_bus_health_t bus = control_bus_health();
         struct can_control_vcu_status_t status = {
             .state = ctx->state,
             .startup_blocked = (!ctx->startup_ok || !canStarted) ? 1u : 0u,
             .parameters_defaulted = parameters_defaulted() ? 1u : 0u,
+            .bus_off_latched = bus.latched ? 1u : 0u,
+            .error_passive = bus.error_passive ? 1u : 0u,
+            .receive_overflow = bus.rx_overflowed ? 1u : 0u,
         };
         uint8_t frame[CAN_CONTROL_VCU_STATUS_LENGTH];
 

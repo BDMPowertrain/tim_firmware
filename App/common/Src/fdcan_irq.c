@@ -9,8 +9,9 @@
 #define FDCAN_IRQ_SLOTS 2u /* FDCAN1 and FDCAN2 */
 
 typedef struct {
-    FDCAN_HandleTypeDef *hfdcan;
-    fdcan_irq_rx_fn_t    handler;
+    FDCAN_HandleTypeDef  *hfdcan;
+    fdcan_irq_rx_fn_t     handler;
+    fdcan_irq_status_fn_t status_handler; /* optional */
 } fdcan_irq_slot_t;
 
 /* Written from initTask before any FDCAN interrupt is enabled, only read
@@ -29,13 +30,42 @@ bool fdcan_irq_register(FDCAN_HandleTypeDef *hfdcan, fdcan_irq_rx_fn_t handler)
     return false;
 }
 
-static void dispatch(FDCAN_HandleTypeDef *hfdcan, uint32_t rx_fifo)
+static fdcan_irq_slot_t *slot_of(const FDCAN_HandleTypeDef *hfdcan)
 {
     for (size_t i = 0; i < FDCAN_IRQ_SLOTS; i++) {
         if (slots[i].hfdcan == hfdcan) {
-            slots[i].handler(hfdcan, rx_fifo);
-            return;
+            return &slots[i];
         }
+    }
+    return NULL;
+}
+
+bool fdcan_irq_register_status(FDCAN_HandleTypeDef *hfdcan, fdcan_irq_status_fn_t handler)
+{
+    fdcan_irq_slot_t *slot = slot_of(hfdcan);
+
+    if (slot == NULL) {
+        return false;
+    }
+    slot->status_handler = handler;
+    return true;
+}
+
+static void dispatch(FDCAN_HandleTypeDef *hfdcan, uint32_t rx_fifo)
+{
+    const fdcan_irq_slot_t *slot = slot_of(hfdcan);
+
+    if (slot != NULL) {
+        slot->handler(hfdcan, rx_fifo);
+    }
+}
+
+void HAL_FDCAN_ErrorStatusCallback(FDCAN_HandleTypeDef *hfdcan, uint32_t ErrorStatusITs)
+{
+    const fdcan_irq_slot_t *slot = slot_of(hfdcan);
+
+    if (slot != NULL && slot->status_handler != NULL) {
+        slot->status_handler(hfdcan, ErrorStatusITs);
     }
 }
 

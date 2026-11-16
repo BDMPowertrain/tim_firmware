@@ -4,6 +4,7 @@ include(${CMAKE_CURRENT_LIST_DIR}/../../../cmake/logic.cmake)
 
 add_logic_library(logic_common
     SOURCES
+        Src/bus_recovery.c
         Src/control_rx.c
         Src/crc32.c
         Src/e2e_p11.c
