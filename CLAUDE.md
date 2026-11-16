@@ -76,14 +76,12 @@ Use build/Debug/bms/tim.elf for a TIM in the BMS role.
     arm-none-eabi-gdb build/Debug/vcu/tim.elf     # .gdbinit connects automatically
 
 ## Provisioning — REQUIRED, once per board
-NOT YET RUN ON A BOARD: written from RM0440 and DS12288 only. The header of
-tools/provision.tcl says how to record the first run and clear this mark.
-
 Provisioning (ADR 0011, 0012) sets the option bytes before any image is
 flashed: nSWBOOT0=0 and nBOOT0=1 (boot from flash whatever the PB8 pull-up
 does), brown-out reset at the highest level (about 2.8 V). It leaves
-BOOT_LOCK at 0 and the factory dual-bank setting (ADR 0014) alone. The bits
-and their reasons are in tools/provision.tcl.
+BOOT_LOCK at 0 and the factory dual-bank setting (ADR 0014) alone. The bits,
+their reasons and the record of the first run on a board are in
+tools/provision.tcl.
 
     openocd -f interface/stlink-dap.cfg -f target/stm32g4x.cfg \
       -f tools/provision.tcl -c "tim_provision" -c "exit"

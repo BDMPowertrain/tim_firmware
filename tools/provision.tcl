@@ -2,11 +2,20 @@
 # ADR 0011, 0012, 0014). Loaded by OpenOCD after the interface and target
 # scripts; see "Provisioning" in CLAUDE.md for the two commands.
 #
-# HARDWARE STATUS: NOT YET RUN ON A BOARD. Written from RM0440 Rev 9 and
-# DS12288 only. When a person has run tim_provision and then tim_options on a
-# real TIM, replace these two lines with the date, the board and the
-# tim_options output, and remove the mark from CLAUDE.md and the echo at the
-# top of tim_provision.
+# HARDWARE STATUS: run on the bench TIM on 2026-11-16 (ST-Link V3, OpenOCD
+# 0.12.0+dev, image already flashed and running).
+#   Before: FLASH_OPTR 0xFBEFF8AA. nSWBOOT0 was already 0 (from the old
+#           first-time step) and BOR_LEV was 0, so the read-back said NOT
+#           PROVISIONED.
+#   tim_provision wrote and loaded the options. OpenOCD stayed connected
+#           through the option-load reset and exited 0.
+#   After:  FLASH_OPTR 0xFBEFFCAA, FLASH_SEC1R 0xFFFEFF00 (reserved bits read
+#           1, BOOT_LOCK 0, SEC_SIZE1 0), RDP 0xAA, dual-bank. The read-back
+#           said PROVISIONED. The image ran from flash after the reset (PC
+#           0x0800766C, on a task stack).
+#   A second tim_provision said "Already provisioned; nothing written."
+#   Not shown: the brown-out reset tripping near 2.8 V. That needs a variable
+#   supply and is a bench case.
 #
 # What it sets, in FLASH_OPTR (0x4002_2020, RM0440 Rev 9 section 3.7.8):
 #   nSWBOOT0 (bit 26) = 0  BOOT0 comes from nBOOT0, not from pin PB8. PB8 is
@@ -119,7 +128,6 @@ proc tim_options {} {
 # option bytes, which resets the MCU. Run tim_options afterwards to confirm.
 proc tim_provision {} {
 	global TIM_OPTR_OFFSET TIM_SEC1R_OFFSET TIM_OPTR_VALUE TIM_OPTR_MASK
-	echo "tim_provision has NOT YET BEEN RUN ON A BOARD (see tools/provision.tcl)."
 	init
 	reset halt
 
@@ -141,3 +149,7 @@ proc tim_provision {} {
 	stm32l4x option_load 0
 	echo "Done. Confirm with the read-back command (tim_options)."
 }
+
+# Ends the script with an empty result, so OpenOCD does not print the last
+# proc name when it loads this file.
+return ""
