@@ -6,6 +6,7 @@ add_logic_library(logic_bms
     DEPENDS
         logic_common
     SOURCES
+        Src/bms_daq.c
         Src/bms_params.c
         Src/bms_tx.c
 )

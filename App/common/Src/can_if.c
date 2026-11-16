@@ -10,8 +10,14 @@
    frame goes straight onto rxQueue via xQueueSendFromISR — the native
    FreeRTOS call, not the CMSIS-RTOS2 wrapper, matching imu.c's
    HAL_GPIO_EXTI_Callback pattern. canRxTask drains rxQueue, caches the
-   latest frame under a mutex, and counts. canTxTask blocks on txQueue and
-   hands frames to the (also 3-deep) hardware TX FIFO. */
+   latest frame under a mutex, and counts.
+
+   Sending: can_send() pushes onto txQueue (frame_queue.h, drop-oldest) in
+   a critical section and wakes daqTask, which takes one frame at a time
+   and hands it to the (also 3-deep) hardware TX FIFO. A full hardware
+   FIFO keeps the frame in daqTask's hands and retries a few ms later;
+   meanwhile the queue keeps only the newest frames. Every 100 ms daqTask
+   also publishes, and polls the controller for bus-off. */
 
 #include "can_if.h"
 
@@ -19,18 +25,45 @@
 
 #include "FreeRTOS.h"
 #include "queue.h"
+#include "task.h"
 
 #include "cmsis_os2.h"
 
+#include "control_step.h"
+#include "daq_retry.h"
 #include "fdcan_irq.h"
+#include "frame_queue.h"
 #include "main.h"
 
 extern FDCAN_HandleTypeDef hfdcan2;
 
-#define CAN_QUEUE_DEPTH 8u
+#define CAN_RX_QUEUE_DEPTH 8u
+
+/* All three hardware send slots, for cancelling every pending send at a
+   bus-off. */
+#define TX_ALL_SLOTS (FDCAN_TX_BUFFER0 | FDCAN_TX_BUFFER1 | FDCAN_TX_BUFFER2)
+
+/* The publisher's period (issue 36): the DaqStatus frames' cycle time in
+   can/daq.dbc. */
+#define DAQ_PUBLISH_PERIOD_MS 100u
+
+/* How soon daqTask retries a frame the full hardware FIFO refused: three
+   frames go out in well under 1 ms at 2 Mbit/s, so this is only reached
+   when nothing ACKs them. */
+#define DAQ_TX_RETRY_MS 5u
 
 static osMessageQueueId_t rxQueue;
-static osMessageQueueId_t txQueue;
+
+/* Shared by every sender and daqTask: touched only inside a critical
+   section, which holds a push or a pop of one frame and nothing else. */
+static frame_queue_t txQueue;
+static osSemaphoreId_t txWake; /* given by can_send(), taken by daqTask */
+
+/* daqTask's own. The shell reads the counters as single words. */
+static const can_if_publisher_t *publisher;
+static daq_retry_t retry;
+static uint32_t published;
+static bool started;
 
 static osMutexId_t rxCacheMutex;
 static can_frame_t latestRx;
@@ -48,7 +81,7 @@ static bool terminated;
 static uint32_t rxCount;
 static uint32_t txCount;
 static uint32_t rxDropCount;
-static uint32_t txDropCount;
+static uint32_t txRejected;
 
 /* HAL's DLC codes equal the byte count only for 0-8 bytes; above that
    (FD frames) they're an index, not a length (Table: FDCAN_DLC_BYTES_*
@@ -117,13 +150,14 @@ static void can_if_rx_isr(FDCAN_HandleTypeDef *hfdcan, uint32_t rx_fifo)
     portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
 }
 
-bool can_if_init(void)
+bool can_if_init(const can_if_publisher_t *image_publisher)
 {
-    rxQueue = osMessageQueueNew(CAN_QUEUE_DEPTH, sizeof(can_frame_t), NULL);
-    txQueue = osMessageQueueNew(CAN_QUEUE_DEPTH, sizeof(can_frame_t), NULL);
+    publisher = image_publisher;
+    rxQueue = osMessageQueueNew(CAN_RX_QUEUE_DEPTH, sizeof(can_frame_t), NULL);
+    txWake = osSemaphoreNew(1u, 0u, NULL);
     const osMutexAttr_t mutex_attr = { .name = "can2RxCache" };
     rxCacheMutex = osMutexNew(&mutex_attr);
-    if (rxQueue == NULL || txQueue == NULL || rxCacheMutex == NULL) {
+    if (rxQueue == NULL || txWake == NULL || rxCacheMutex == NULL) {
         return false;
     }
 
@@ -146,6 +180,7 @@ bool can_if_init(void)
     if (HAL_FDCAN_Start(&hfdcan2) != HAL_OK) {
         return false;
     }
+    started = true;
     if (HAL_FDCAN_ActivateNotification(&hfdcan2, FDCAN_IT_RX_FIFO0_NEW_MESSAGE, 0) != HAL_OK) {
         return false;
     }
@@ -158,18 +193,37 @@ bool can_if_init(void)
     return true;
 }
 
+/* The only two touches of txQueue. Each holds one frame copy and the
+   ring's indices, a microsecond or so with the scheduler and the
+   interrupts at or below the RTOS ceiling (CAN1 included) held off. */
+static void tx_queue_push(const can_frame_t *frame)
+{
+    taskENTER_CRITICAL();
+    frame_queue_push(&txQueue, frame);
+    taskEXIT_CRITICAL();
+    (void)osSemaphoreRelease(txWake); /* already given: daqTask is due anyway */
+}
+
+static bool tx_queue_pop(can_frame_t *out)
+{
+    taskENTER_CRITICAL();
+    const bool popped = frame_queue_pop(&txQueue, out);
+    taskEXIT_CRITICAL();
+    return popped;
+}
+
 bool can_send(uint32_t id, const uint8_t *data, uint8_t len,
               bool is_extended, bool is_fd, bool is_brs)
 {
     if (is_fd && !fdCapable) {
-        txDropCount++;
+        txRejected++;
         return false;
     }
     /* Classic frames top out at 8 bytes; without this check a longer
        classic payload would get a DLC code len_to_dlc() only intends for
        FD and be silently rejected deep in HAL_FDCAN_AddMessageToTxFifoQ. */
     if (!is_fd && len > 8u) {
-        txDropCount++;
+        txRejected++;
         return false;
     }
 
@@ -183,11 +237,7 @@ bool can_send(uint32_t id, const uint8_t *data, uint8_t len,
     memcpy(frame.data, data, copyLen);
     frame.len = (uint8_t)copyLen;
 
-    if (osMessageQueuePut(txQueue, &frame, 0, 0) != osOK) {
-        txDropCount++;
-        return false;
-    }
-
+    tx_queue_push(&frame);
     return true;
 }
 
@@ -229,7 +279,11 @@ bool can_get_status(can_status_t *out)
     out->rx_count = rxCount;
     out->tx_count = txCount;
     out->rx_drop_count = rxDropCount;
-    out->tx_drop_count = txDropCount;
+    out->tx_queue_dropped = txQueue.dropped;
+    out->tx_rejected = txRejected;
+    out->published = published;
+    out->bus_offs = retry.bus_offs;
+    out->restarts = retry.restarts;
 
     return true;
 }
@@ -274,27 +328,117 @@ void canRxTask(void *argument)
     }
 }
 
-void canTxTask(void *argument)
+/* The controller sets CCCR.INIT as it goes bus-off and keeps it set until
+   software clears it (RM0440, FDCAN bus-off recovery). FDCAN2 has been
+   started by then, so INIT set means bus-off. */
+static bool controller_off(void)
 {
-    (void)argument;
+    return (hfdcan2.Instance->CCCR & FDCAN_CCCR_INIT) != 0u;
+}
 
+/* The DAQ publisher: the image's status frame from a copy of the Control
+   step's published snapshot. The copy is the step's only contact with the
+   DAQ bus, and the step is not the one making it. */
+static void publish(void)
+{
+    control_snapshot_t snap;
+    control_step_read(&snap);
+
+    /* background_stalled waits for Housekeeping (#47); card_state (0,
+       MISSING), events_dropped, allocation_failed and records_dropped for
+       the Data log and Event log. */
+    const daq_status_t status = {
+        .overruns = snap.overruns,
+        .control_bus_off = snap.bus.health.off,
+        .control_bus_latched = snap.bus.health.latched,
+        .control_bus_error_passive = snap.bus.health.error_passive,
+    };
+    can_frame_t frame = {
+        .id = publisher->status_frame_id,
+        .len = publisher->status_frame_len,
+        .is_fd = fdCapable, /* can/daq.dbc: StandardCAN_FD */
+        .is_brs = fdCapable,
+    };
+    publisher->build_status(&status, frame.data);
+    tx_queue_push(&frame);
+    published++;
+}
+
+/* Hands queued frames to the hardware FIFO until it is full or the queue
+   is empty. *pending is a frame taken from the queue that the FIFO has
+   not yet accepted. False: a frame is still pending. */
+static bool drain(can_frame_t *pending, bool *have_pending)
+{
     for (;;) {
-        can_frame_t frame;
-        if (osMessageQueueGet(txQueue, &frame, NULL, osWaitForever) != osOK) {
-            continue;
+        if (!*have_pending) {
+            if (!tx_queue_pop(pending)) {
+                return true;
+            }
+            *have_pending = true;
+        }
+        /* Bus-off: hold the frame. The queue meanwhile keeps the newest. */
+        if (controller_off()) {
+            return false;
         }
 
         FDCAN_TxHeaderTypeDef hdr;
-        can_frame_to_tx_header(&frame, &hdr);
-
-        /* Hardware TX FIFO is also only 3 deep -- a full FIFO here is a
-           normal condition under load, not an edge case. Drop and count
-           rather than retry/block. */
-        if (HAL_FDCAN_AddMessageToTxFifoQ(&hfdcan2, &hdr, frame.data) == HAL_OK) {
-            txCount++;
-            HAL_GPIO_TogglePin(GPIO_CAN2LED_GPIO_Port, GPIO_CAN2LED_Pin);
-        } else {
-            txDropCount++;
+        can_frame_to_tx_header(pending, &hdr);
+        /* The hardware FIFO is only 3 deep: full is normal under load. */
+        if (HAL_FDCAN_AddMessageToTxFifoQ(&hfdcan2, &hdr, pending->data) != HAL_OK) {
+            return false;
         }
+        *have_pending = false;
+        txCount++;
+        HAL_GPIO_TogglePin(GPIO_CAN2LED_GPIO_Port, GPIO_CAN2LED_Pin);
+    }
+}
+
+void daqTask(void *argument)
+{
+    (void)argument;
+
+    can_frame_t pending;
+    bool havePending = false;
+    bool blocked = false; /* the hardware FIFO refused the pending frame */
+    uint32_t nextPublish = osKernelGetTickCount() + DAQ_PUBLISH_PERIOD_MS;
+
+    for (;;) {
+        /* Sleep until the next publish, a frame is queued, or, with the
+           hardware FIFO full on a running bus, a short retry. */
+        const int32_t untilPublish = (int32_t)(nextPublish - osKernelGetTickCount());
+        uint32_t timeout = (untilPublish > 0) ? (uint32_t)untilPublish : 0u;
+        if (blocked && !controller_off() && timeout > DAQ_TX_RETRY_MS) {
+            timeout = DAQ_TX_RETRY_MS;
+        }
+        if (timeout > 0u) {
+            (void)osSemaphoreAcquire(txWake, timeout);
+        }
+        const uint32_t now = osKernelGetTickCount();
+
+        const uint32_t busOffsBefore = retry.bus_offs;
+        const bool restart = started && daq_retry_update(&retry, controller_off(), now);
+        if (retry.bus_offs != busOffsBefore) {
+            /* A new bus-off: nothing built before it goes out after the
+               restart, as on CAN1. The queue keeps the newest frames. */
+            (void)HAL_FDCAN_AbortTxRequest(&hfdcan2, TX_ALL_SLOTS);
+            havePending = false;
+        }
+        if (restart) {
+            /* Clearing INIT is the whole restart, as on CAN1
+               (control_bus.c): the controller rejoins after 129 bus-idle
+               sequences. HAL's own start would refuse, its state never
+               having left BUSY. */
+            CLEAR_BIT(hfdcan2.Instance->CCCR, FDCAN_CCCR_INIT);
+        }
+
+        if ((int32_t)(now - nextPublish) >= 0) {
+            publish();
+            nextPublish += DAQ_PUBLISH_PERIOD_MS;
+            if ((int32_t)(now - nextPublish) >= 0) {
+                nextPublish = now + DAQ_PUBLISH_PERIOD_MS; /* late: no catch-up */
+            }
+        }
+
+        blocked = started && !drain(&pending, &havePending);
     }
 }

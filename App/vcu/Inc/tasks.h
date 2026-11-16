@@ -104,17 +104,19 @@
 #define LOGGER_TASK_PRIORITY      osPriorityBelowNormal
 #define LOGGER_TASK_STACK_SIZE    2048u
 
-/* The DAQ bus (CAN2) receive and send tasks. The DAQ bus carries no
-   safety function, so both sit in the Normal band with the shell; the
+/* The DAQ bus (CAN2) receive task and send task (daqTask, which also runs
+   the 100 ms DAQ publisher). The DAQ bus carries no safety function, so
+   both sit in the Normal band with the shell (issue 36's task table); the
    3-deep hardware FIFO is drained fully per interrupt into an 8-deep
    queue, so a late canRxTask drops only logging data. The Control bus
    (CAN1) has no task: its interrupt writes the mailboxes and the control
-   step sends (ADR 0004). Measure with `tasks` and adjust. */
+   step sends (ADR 0004). daqTask's stack holds a snapshot copy and two
+   frames; unmeasured. Measure with `tasks` and adjust. */
 #define CAN_RX_TASK_PRIORITY      osPriorityNormal
 #define CAN_RX_TASK_STACK_SIZE    512u
 
-#define CAN_TX_TASK_PRIORITY      osPriorityNormal
-#define CAN_TX_TASK_STACK_SIZE    512u
+#define DAQ_TASK_PRIORITY         osPriorityNormal
+#define DAQ_TASK_STACK_SIZE       1024u
 
 /* The Control step (ADR 0010): the one Realtime task, every 10 ms. It
    takes no mutex and blocks only on its own period. The stack holds the

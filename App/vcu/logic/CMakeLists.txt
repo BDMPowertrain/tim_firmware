@@ -6,6 +6,7 @@ add_logic_library(logic_vcu
     DEPENDS
         logic_common
     SOURCES
+        Src/vcu_daq.c
         Src/vcu_params.c
         Src/vcu_tx.c
 )

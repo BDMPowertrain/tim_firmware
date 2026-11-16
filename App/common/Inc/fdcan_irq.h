@@ -4,7 +4,7 @@
 /* Owns HAL's FDCAN receive and error status callbacks, which are shared
    by both controllers, and hands each to the module that owns that controller:
    control_bus.c for FDCAN1 (the Control bus, both images) and can_if.c
-   for FDCAN2 (the DAQ bus, VCU only). Neither needs to know the other
+   for FDCAN2 (the DAQ bus, both images). Neither needs to know the other
    exists, so an image links only the bus modules it uses. */
 
 #include <stdbool.h>

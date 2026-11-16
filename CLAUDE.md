@@ -139,10 +139,14 @@ undo provisioning.
 - targets/<image>/tim.ioc is the source of truth for that image's pin and
   peripheral config. Both projects must name the same firmware package.
 - The BMS project is minimal for now: clock, FreeRTOS, USART1, FDCAN1 (the
-  Control bus), the heartbeat LED and the IMU chip select held high. Its
-  image links print, shell, stats and the control step with its Control bus
-  driver from App/common/; the other common modules join when their
-  peripherals are configured.
+  Control bus), FDCAN2 (the DAQ bus), the heartbeat LED and the IMU chip
+  select held high. Its image links print, shell, stats, the control step
+  with its Control bus driver and the DAQ bus driver from App/common/; the
+  other common modules join when their peripherals are configured.
+- The DAQ bus (CAN2) is sent on only through can_send()
+  (App/common/Src/can_if.c): a drop-oldest queue that never waits, drained
+  by daqTask, which also runs the 100 ms DAQ publisher. The control step
+  never calls into can_if.
 - The Control bus (CAN1) is driven only by the image's control step
   (App/common/Src/control_step.c, control_bus.c, ADR 0004 and 0010): no
   task, queue or shell command sends on it.

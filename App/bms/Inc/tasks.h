@@ -24,6 +24,15 @@
 #define SHELL_TASK_PRIORITY       osPriorityNormal
 #define SHELL_TASK_STACK_SIZE     2048u
 
+/* The DAQ bus (CAN2) receive task and send task (daqTask, with the 100 ms
+   DAQ publisher), in the Normal band as on the VCU; the sizes are the
+   VCU's (App/vcu/Inc/tasks.h), unmeasured on the BMS. */
+#define CAN_RX_TASK_PRIORITY      osPriorityNormal
+#define CAN_RX_TASK_STACK_SIZE    512u
+
+#define DAQ_TASK_PRIORITY         osPriorityNormal
+#define DAQ_TASK_STACK_SIZE       1024u
+
 /* The Control step (ADR 0010): the one Realtime task, every 20 ms. It
    takes no mutex and blocks only on its own period (and, once the Sweep
    exists, its own cell-monitor exchange). Measure with `tasks`. */

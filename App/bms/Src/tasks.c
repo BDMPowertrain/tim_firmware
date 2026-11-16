@@ -2,17 +2,21 @@
    tasks_init() once, then terminates; everything running after that
    point was created here.
 
-   This is the empty BMS image: it boots, blinks the heartbeat LED and
-   answers the common shell on USART1. The cell-monitor Sweep, the
-   control step and the BMS pins come with later work. */
+   The BMS image so far: it boots, blinks the heartbeat LED, answers the
+   common shell on USART1, runs its control step on the Control bus and
+   publishes its status on the DAQ bus. The cell-monitor Sweep and the BMS
+   pins come with later work. */
 
 #include "tasks.h"
 
 #include "FreeRTOS.h"
 #include "task.h"
 
+#include "bms_daq.h"
 #include "bms_params.h"
 #include "bms_step.h"
+#include "can_daq.h"
+#include "can_if.h"
 #include "control_step.h"
 #include "main.h"
 #include "parameters.h"
@@ -48,6 +52,13 @@ static bool create_task(osThreadFunc_t func, void *argument, const char *name,
 /* Read by the control step for as long as it runs. */
 static control_step_args_t controlStepArgs;
 
+/* What the DAQ publisher sends from the BMS (can/daq.dbc). */
+static const can_if_publisher_t daqPublisher = {
+    .status_frame_id = CAN_DAQ_BMS_DAQ_STATUS_FRAME_ID,
+    .status_frame_len = CAN_DAQ_BMS_DAQ_STATUS_LENGTH,
+    .build_status = bms_daq_build_status,
+};
+
 void tasks_init(void)
 {
     /* Every queue and task is created once, here. A failure is remembered
@@ -63,6 +74,7 @@ void tasks_init(void)
        The BMS accepts a save at any time, so it has no save hook. */
     ok = parameters_init(&bms_param_table, NULL) && ok;
     ok = shell_init() && ok;
+    ok = can_if_init(&daqPublisher) && ok;
     ok = bms_step_init() && ok;
 
     ok = create_task(printTask, NULL, "printTask",
@@ -71,6 +83,10 @@ void tasks_init(void)
                      (osPriority_t)SHELL_TASK_PRIORITY, SHELL_TASK_STACK_SIZE) && ok;
     ok = create_task(heartbeatTask, NULL, "heartbeatTask",
                      (osPriority_t)HEARTBEAT_TASK_PRIORITY, HEARTBEAT_TASK_STACK_SIZE) && ok;
+    ok = create_task(canRxTask, NULL, "can2RxTask",
+                     (osPriority_t)CAN_RX_TASK_PRIORITY, CAN_RX_TASK_STACK_SIZE) && ok;
+    ok = create_task(daqTask, NULL, "daqTask",
+                     (osPriority_t)DAQ_TASK_PRIORITY, DAQ_TASK_STACK_SIZE) && ok;
 
     /* The control step last, so it starts with everything else in place. */
     controlStepArgs.def = &bms_step_def;

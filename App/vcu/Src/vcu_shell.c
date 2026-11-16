@@ -217,9 +217,13 @@ static void can2_print_status(void)
     shell_printf("     last_err=0x%02lX tx_err=%lu rx_err=%lu\r\n",
                  (unsigned long)st.last_error_code, (unsigned long)st.tx_error_count,
                  (unsigned long)st.rx_error_count);
-    shell_printf("     rx=%lu tx=%lu rx_drop=%lu tx_drop=%lu\r\n",
+    shell_printf("     rx=%lu tx=%lu rx_drop=%lu tx_queue_dropped=%lu tx_rejected=%lu\r\n",
                  (unsigned long)st.rx_count, (unsigned long)st.tx_count,
-                 (unsigned long)st.rx_drop_count, (unsigned long)st.tx_drop_count);
+                 (unsigned long)st.rx_drop_count, (unsigned long)st.tx_queue_dropped,
+                 (unsigned long)st.tx_rejected);
+    shell_printf("     published=%lu bus_offs=%lu restarts=%lu (retry 1/s)\r\n",
+                 (unsigned long)st.published, (unsigned long)st.bus_offs,
+                 (unsigned long)st.restarts);
 }
 
 /* argv layout: {"can", "send<1|2>", "<id hex>", "<data hex>", ["fd"], ["brs"]}.
@@ -264,7 +268,7 @@ static int can_do_send(int argc, char **argv)
     if (can_send((uint32_t)id, data, (uint8_t)len, is_extended, is_fd, is_brs)) {
         shell_printf("can: queued %d bytes on id 0x%lX\r\n", len, id);
     } else {
-        shell_printf("can: send failed (queue full, fd requested on a classic-only bus,"
+        shell_printf("can: send refused (fd requested on a classic-only bus,"
                      " or >8 bytes without 'fd')\r\n");
     }
 

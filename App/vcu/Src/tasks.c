@@ -8,6 +8,7 @@
 #include "FreeRTOS.h"
 #include "task.h"
 
+#include "can_daq.h"
 #include "can_if.h"
 #include "control_step.h"
 #include "imu.h"
@@ -18,6 +19,7 @@
 #include "shell.h"
 #include "spi3_bus.h"
 #include "vbat.h"
+#include "vcu_daq.h"
 #include "vcu_params.h"
 #include "vcu_shell.h"
 #include "vcu_step.h"
@@ -75,6 +77,13 @@ static bool create_task(osThreadFunc_t func, void *argument, const char *name,
 /* Read by the control step for as long as it runs. */
 static control_step_args_t controlStepArgs;
 
+/* What the DAQ publisher sends from the VCU (can/daq.dbc). */
+static const can_if_publisher_t daqPublisher = {
+    .status_frame_id = CAN_DAQ_VCU_DAQ_STATUS_FRAME_ID,
+    .status_frame_len = CAN_DAQ_VCU_DAQ_STATUS_LENGTH,
+    .build_status = vcu_daq_build_status,
+};
+
 void tasks_init(void)
 {
     /* Every queue, mutex and task is created once, here. A failure is
@@ -93,7 +102,7 @@ void tasks_init(void)
     vcu_shell_register();
     ok = spi3_bus_init() && ok;
     ok = logger_init() && ok;
-    ok = can_if_init() && ok;
+    ok = can_if_init(&daqPublisher) && ok;
     ok = vbat_init() && ok;
     ok = vcu_step_init() && ok;
 
@@ -111,8 +120,8 @@ void tasks_init(void)
                      (osPriority_t)LOGGER_TASK_PRIORITY, LOGGER_TASK_STACK_SIZE) && ok;
     ok = create_task(canRxTask, NULL, "can2RxTask",
                      (osPriority_t)CAN_RX_TASK_PRIORITY, CAN_RX_TASK_STACK_SIZE) && ok;
-    ok = create_task(canTxTask, NULL, "can2TxTask",
-                     (osPriority_t)CAN_TX_TASK_PRIORITY, CAN_TX_TASK_STACK_SIZE) && ok;
+    ok = create_task(daqTask, NULL, "daqTask",
+                     (osPriority_t)DAQ_TASK_PRIORITY, DAQ_TASK_STACK_SIZE) && ok;
 
     /* The control step last, so it starts with everything else in place. */
     controlStepArgs.def = &vcu_step_def;

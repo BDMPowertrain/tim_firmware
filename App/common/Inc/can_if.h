@@ -1,26 +1,35 @@
 #ifndef APP_INC_CAN_IF_H
 #define APP_INC_CAN_IF_H
 
-/* can_if — the DAQ bus (CAN2) driver: CAN FD, logging and display data,
-   nothing safety-related (GLOSSARY.md). The Control bus (CAN1) has its
-   own driver, control_bus.h, used only by the Control step (ADR 0004). */
+/* can_if — the DAQ bus (CAN2) driver: CAN FD, 500 kbit/s arbitration and
+   2 Mbit/s data, logging and display data, nothing safety-related
+   (GLOSSARY.md). The Control bus (CAN1) has its own driver, control_bus.h,
+   used only by the Control step (ADR 0004).
+
+   Isolation from the Control bus (issue 36, "DAQ bus isolation"):
+   - one Normal-priority task, daqTask, owns sending. can_send() copies the
+     frame into a send queue (frame_queue.h) in a short critical section
+     and returns: it never waits. A full queue drops its oldest frame.
+   - the DAQ publisher runs inside daqTask every 100 ms. It copies the
+     Control step's published snapshot (control_step_read()) and sends the
+     image's status frame. The step itself never calls anything here.
+   - CAN2's interrupts sit at priority 7, below CAN1's 5 (tim.ioc).
+   - a bus-off is retried once per second forever (daq_retry.h) and
+     affects nothing else. */
 
 #include <stdbool.h>
 #include <stdint.h>
 
-/* One CAN frame, classic or FD. Deliberately compact (~72 B) rather
-   than queueing FDCAN_RxHeaderTypeDef/FDCAN_TxHeaderTypeDef directly —
-   those carry ~40 B of fields (timestamp, filter index, event-FIFO
-   control...) this driver doesn't use yet, and every byte here is
-   paid for twice, once per queue slot. */
+#include "can_frame.h"
+#include "daq_status.h"
+
+/* What the image publishes: its own status frame (VCU_DaqStatus or
+   BMS_DaqStatus, the same 8-byte layout, can/daq.dbc). */
 typedef struct {
-    uint32_t id;
-    uint8_t  len;          /* real byte count: 0-8 classic; 12/16/20/24/32/48/64 for FD */
-    bool     is_extended;
-    bool     is_fd;
-    bool     is_brs;       /* bit-rate switching; only meaningful if is_fd */
-    uint8_t  data[64];
-} can_frame_t;
+    uint32_t status_frame_id;
+    uint8_t  status_frame_len; /* the frame's LENGTH in can_daq.h */
+    void   (*build_status)(const daq_status_t *in, uint8_t *frame);
+} can_if_publisher_t;
 
 typedef struct {
     bool     standby;          /* last commanded STBY state */
@@ -33,31 +42,33 @@ typedef struct {
     uint32_t tx_error_count;
     uint32_t rx_error_count;
     uint32_t rx_count;         /* frames successfully queued to canRxTask */
-    uint32_t tx_count;         /* frames successfully handed to the TX hardware FIFO */
+    uint32_t tx_count;         /* frames handed to the TX hardware FIFO */
     uint32_t rx_drop_count;    /* ISR->queue drops (rxQueue full) */
-    uint32_t tx_drop_count;    /* TX hardware FIFO full, or rejected (FD frame on a
-                                   classic-compiled bus) */
+    uint32_t tx_queue_dropped; /* oldest frames pushed out of the send queue */
+    uint32_t tx_rejected;      /* refused by can_send(): FD frame on a classic
+                                   bus, or too long for its format */
+    uint32_t published;        /* status frames queued by the publisher */
+    uint32_t bus_offs;         /* bus-offs seen by daqTask since power-on */
+    uint32_t restarts;         /* bus-off restarts, once per second while off */
 } can_status_t;
 
-/* Creates the bus's queues and mutex, configures the accept-all global
-   filter (mandatory -- CubeMX never generates this call, and with zero
-   filter slots configured the peripheral rejects every frame by
-   default), starts FDCAN2, activates the RX FIFO0 interrupt, and brings
-   STBY low (out of standby) per the ADM3057EBRWZ's confirmed polarity.
-   Deliberately does NOT touch the termination GPIO -- termination only
-   changes via an explicit can_set_termination() call, never as an init
-   side effect. Must run before canRxTask/canTxTask are created — see
-   tasks_init(). Returns false if a queue, the mutex or the controller
-   could not be set up. */
-bool can_if_init(void);
+/* Creates the bus's receive queue, mutex and wake semaphore, configures
+   the accept-all global filter (mandatory -- CubeMX never generates this
+   call, and with zero filter slots configured the peripheral rejects every
+   frame by default), starts FDCAN2, activates the RX FIFO0 interrupt, and
+   brings STBY low (out of standby) per the ADM3057EBRWZ's confirmed
+   polarity. Deliberately does NOT touch the termination GPIO -- termination
+   only changes via an explicit can_set_termination() call, never as an
+   init side effect. publisher must outlive daqTask. Must run before
+   canRxTask/daqTask are created -- see tasks_init(). Returns false if a
+   queue, the mutex or the controller could not be set up. */
+bool can_if_init(const can_if_publisher_t *publisher);
 
-/* Queues one frame for canTxTask to send. Non-blocking (0 timeout);
-   returns false without queuing if the hardware TX path can't accept
-   it right now for a reason known immediately: the bus's compiled
-   FrameFormat is Classic but is_fd is set, or len is out of range for
-   the requested format. A false return from a full queue looks
-   identical from the caller's side — check can_get_status()'s
-   tx_drop_count to tell the two apart. */
+/* Queues one frame for daqTask to send. Never waits: a full send queue
+   drops its oldest frame (counted in tx_queue_dropped) to make room.
+   False, without queuing, only for a frame the bus cannot carry: is_fd on
+   a classic-compiled bus, or len out of range for the format. Any task;
+   not from an interrupt. */
 bool can_send(uint32_t id, const uint8_t *data, uint8_t len,
               bool is_extended, bool is_fd, bool is_brs);
 
@@ -81,10 +92,10 @@ bool can_get_status(can_status_t *out);
 void can_set_standby(bool standby);
 void can_set_termination(bool on);
 
-/* Task entry points, created once each from tasks_init(). RX and TX are
-   separate tasks so that a slow sender never delays draining the
-   receive queue. */
+/* Task entry points, created once each from tasks_init(). canRxTask drains
+   the receive queue; daqTask sends, publishes and handles bus-off, so a
+   slow sender never delays draining the receive queue. */
 void canRxTask(void *argument);
-void canTxTask(void *argument);
+void daqTask(void *argument);
 
 #endif /* APP_INC_CAN_IF_H */
