@@ -212,6 +212,7 @@ void shellTask(void *argument)
     size_t lineLen = 0;
     uint8_t ch;
 
+    parameters_print_report();
     shell_printf("> ");
 
     for (;;) {

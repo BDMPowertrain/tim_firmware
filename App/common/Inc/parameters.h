@@ -21,13 +21,16 @@
    refused, for the shell. Runs on the shell task. */
 typedef const char *(*parameters_save_hook_t)(void);
 
-/* Loads the values in force and prints what was found, in at most two
-   lines: loaded, "parameters defaulted" or not dual-bank, and how many
-   values were out of range.
-   save_hook may be NULL (saves always allowed). Call once from
-   tasks_init(), before the shell or the control step runs. False if the
-   table is unusable: every value is then 0 and nothing is saved. */
+/* Loads the values in force, printing nothing (it runs on initTask's
+   small stack). save_hook may be NULL (saves always allowed). Call once
+   from tasks_init(), before the shell or the control step runs. False if
+   the table is unusable: every value is then 0 and nothing is saved. */
 bool parameters_init(const param_table_t *table, parameters_save_hook_t save_hook);
+
+/* Prints what parameters_init() found: loaded, "parameters defaulted" or
+   not dual-bank, and how many values were out of range. The shell task
+   calls it once when it starts. */
+void parameters_print_report(void);
 
 /* The value in force of the parameter at index into the image's table. */
 int32_t parameters_value(size_t index);

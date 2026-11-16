@@ -67,24 +67,30 @@ static void print_source(void)
 
 bool parameters_init(const param_table_t *table, parameters_save_hook_t save_hook)
 {
+    /* No printing here: this runs on initTask's 512-byte stack, which
+       shell_printf()'s line buffer and vsnprintf would overflow. The shell
+       prints the report when it starts. */
     if (!params_table_ok(table) || table->count > PARAMETERS_MAX) {
-        shell_printf("params: table unusable, nothing loaded\r\n");
         return false;
     }
 
     saveHook = save_hook;
     params_load(&store, table, flash_bank2_get(), slots);
     ready = true;
+    return true;
+}
 
-    /* At most two lines: this runs before printTask exists, and a full
-       print queue would block start-up for good. `param dump` names each
-       value defaulted. */
+void parameters_print_report(void)
+{
+    if (!ready) {
+        shell_printf("params: table unusable, nothing loaded\r\n");
+        return;
+    }
     print_source();
     if (store.out_of_range > 0u) {
         shell_printf("params: %u out of range, defaulted (param dump)\r\n",
                      (unsigned)store.out_of_range);
     }
-    return true;
 }
 
 int32_t parameters_value(size_t index)
