@@ -75,18 +75,43 @@ Use build/Debug/bms/tim.elf for a TIM in the BMS role.
     openocd -f interface/stlink-dap.cfg -f target/stm32g4x.cfg
     arm-none-eabi-gdb build/Debug/vcu/tim.elf     # .gdbinit connects automatically
 
-## First-time board setup — REQUIRED
-A factory-fresh G474 boots into the ST bootloader on this design: PB8 is
-I2C1_SCL with a 2k pull-up, and nSWBOOT0 defaults to 1 (BOOT0 from the pin).
-Clear it once per board:
+## Provisioning — REQUIRED, once per board
+NOT YET RUN ON A BOARD: written from RM0440 and DS12288 only. The header of
+tools/provision.tcl says how to record the first run and clear this mark.
+
+Provisioning (ADR 0011, 0012) sets the option bytes before any image is
+flashed: nSWBOOT0=0 and nBOOT0=1 (boot from flash whatever the PB8 pull-up
+does), brown-out reset at the highest level (about 2.8 V). It leaves
+BOOT_LOCK at 0 and the factory dual-bank setting (ADR 0014) alone. The bits
+and their reasons are in tools/provision.tcl.
 
     openocd -f interface/stlink-dap.cfg -f target/stm32g4x.cfg \
-      -c "init" -c "reset halt" \
-      -c "stm32l4x option_write 0 0x20 0x00000000 0x04000000" \
-      -c "stm32l4x option_load 0" -c "exit"
+      -f tools/provision.tcl -c "tim_provision" -c "exit"
+
+The MCU resets when the options load. Then confirm with the read-back, which
+prints each setting and fails unless it ends "PROVISIONED":
+
+    openocd -f interface/stlink-dap.cfg -f target/stm32g4x.cfg \
+      -f tools/provision.tcl -c "tim_options" -c "exit"
 
 Symptom if skipped: flash and verify succeed, nothing runs, PC sits in
-0x1FFF____ instead of 0x0800____.
+0x1FFF____ instead of 0x0800____ (PB8 is I2C1_SCL with a 2k pull-up, so a
+factory-fresh G474 boots the ST bootloader). The brown-out level has no
+symptom on the bench: run the read-back.
+
+If the option bytes ever fail to load, the MCU does not restore the factory
+values (RM0440 section 3.4.2). It forces read protection to level 1, every
+user option bit to 1 (so nSWBOOT0=1 and the board boots the ST bootloader)
+and BOR_LEV to its lowest level. tim_provision refuses such a board. Leaving
+level 1 mass-erases the flash, so a person decides that, and then provisions
+again.
+
+Never mass-erase a calibrated board, or any board holding Parameters or an
+Event log. Bank 2 holds the Parameters (pedal and brake calibration) and the
+Event log (ADR 0014, 0016). `program` above erases only the pages the image
+covers and keeps them. A mass erase (OpenOCD `stm32l4x mass_erase`, a "full
+chip erase" in STM32CubeProgrammer) destroys both. A mass erase does not
+undo provisioning.
 
 ## Code layout — important
 - targets/vcu/ and targets/bms/ are the two CubeMX projects, one per image
@@ -111,6 +136,8 @@ Symptom if skipped: flash and verify succeed, nothing runs, PC sits in
   App/vcu/Inc/tasks.h and App/bms/Inc/tasks.h. One place per image.
 - The shell is common code. A command only one image has is registered by
   that image with shell_register_commands() (App/vcu/Src/vcu_shell.c).
+- tools/ holds bench scripts that run on the PC against a board, such as
+  tools/provision.tcl (OpenOCD). Nothing in it is built into an image.
 - targets/<image>/tim.ioc is the source of truth for that image's pin and
   peripheral config. Both projects must name the same firmware package.
 - The BMS project is minimal for now: clock, FreeRTOS, USART1, FDCAN1 (the
@@ -137,6 +164,13 @@ Symptom if skipped: flash and verify succeed, nothing runs, PC sits in
 ## Regeneration ritual
 Commit before regenerating in CubeMX. Review `git diff` and commit the
 regeneration separately from your own changes.
+
+The generated Reset_Handler (targets/<image>/startup_stm32g474xx.s, a weak
+symbol) is to be replaced by our hand-written one in App/common/, which does
+the RAM errata reads first (#49, not yet written). Once it exists, after
+every regeneration diff the generated Reset_Handler against ours
+(`git diff -- targets/*/startup_stm32g474xx.s`, then read ours) and carry any
+change CubeMX made, such as a new init call, into ours in its own commit.
 
 ## Agent skills
 
