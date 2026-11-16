@@ -10,16 +10,14 @@
 
 static osMutexId_t spi3Mutex;
 
-void spi3_bus_init(void)
+bool spi3_bus_init(void)
 {
     const osMutexAttr_t spi3Mutex_attributes = {
         .name = "spi3Mutex",
     };
 
     spi3Mutex = osMutexNew(&spi3Mutex_attributes);
-    if (spi3Mutex == NULL) {
-        Error_Handler();
-    }
+    return spi3Mutex != NULL;
 }
 
 bool spi3_bus_lock(uint32_t timeout_ms)

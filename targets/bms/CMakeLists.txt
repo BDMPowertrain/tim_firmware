@@ -51,11 +51,15 @@ target_link_directories(${CMAKE_PROJECT_NAME} PRIVATE
 target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     # Add user sources here
     # App/common/ is compiled into both images, App/bms/ into this one only
-    # (ADR 0001). The logger, the CAN interface, VBAT and the SPI3 bus lock
-    # join when this project configures their peripherals.
+    # (ADR 0001). The logger, the DAQ bus interface, VBAT and the SPI3 bus
+    # lock join when this project configures their peripherals.
+    ../../App/common/Src/control_bus.c
+    ../../App/common/Src/control_step.c
+    ../../App/common/Src/fdcan_irq.c
     ../../App/common/Src/print.c
     ../../App/common/Src/shell.c
     ../../App/common/Src/stats.c
+    ../../App/bms/Src/bms_step.c
     ../../App/bms/Src/tasks.c
 )
 

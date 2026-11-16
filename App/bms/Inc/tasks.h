@@ -24,8 +24,16 @@
 #define SHELL_TASK_PRIORITY       osPriorityNormal
 #define SHELL_TASK_STACK_SIZE     2048u
 
-/* Creates every queue and task the BMS image needs, then returns. Called
-   once from initTask, which terminates immediately afterward. */
+/* The Control step (ADR 0010): the one Realtime task, every 20 ms. It
+   takes no mutex and blocks only on its own period (and, once the Sweep
+   exists, its own cell-monitor exchange). Measure with `tasks`. */
+#define CONTROL_STEP_TASK_PRIORITY   osPriorityRealtime
+#define CONTROL_STEP_TASK_STACK_SIZE 1024u
+
+/* Creates every queue and task the BMS image needs, the control step last,
+   then returns. A failed creation does not stop the board: the control
+   step still runs and the BMS stays in STARTUP. Called once from
+   initTask, which terminates immediately afterward. */
 void tasks_init(void);
 
 #endif /* APP_BMS_INC_TASKS_H */

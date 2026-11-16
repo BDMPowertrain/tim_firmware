@@ -288,9 +288,40 @@ static void test_each_of_our_frames_survives_two_lost_frames_in_a_row(void)
     assert_survives_two_lost_frames(CONTROL_RX_BMS_POWER, 20);
 }
 
+/* ---- control_rx_find: which of an image's mailboxes a frame goes to ---- */
+
+static const control_rx_t some_rows[] = {
+    CONTROL_RX_BMS_POWER,
+    CONTROL_RX_INV_VOLTAGE,
+    CONTROL_RX_IMD_INFO_GENERAL,
+};
+
+static void test_a_frame_the_image_reads_finds_its_row(void)
+{
+    TEST_ASSERT_EQUAL_INT(0, control_rx_find(some_rows, 3u, 0x082u, false));
+    TEST_ASSERT_EQUAL_INT(1, control_rx_find(some_rows, 3u, 0x0A7u, false));
+    TEST_ASSERT_EQUAL_INT(2, control_rx_find(some_rows, 3u, 0x18FF01F4u, true));
+}
+
+static void test_a_frame_the_image_does_not_read_finds_nothing(void)
+{
+    /* In the table, but not one of this image's rows. */
+    TEST_ASSERT_EQUAL_INT(-1, control_rx_find(some_rows, 3u, 0x080u, false));
+    TEST_ASSERT_EQUAL_INT(-1, control_rx_find(some_rows, 3u, 0x123u, false));
+}
+
+static void test_a_standard_and_an_extended_id_of_the_same_value_differ(void)
+{
+    TEST_ASSERT_EQUAL_INT(-1, control_rx_find(some_rows, 3u, 0x082u, true));
+    TEST_ASSERT_EQUAL_INT(-1, control_rx_find(some_rows, 3u, 0x0A7u, true));
+}
+
 int main(void)
 {
     UNITY_BEGIN();
+    RUN_TEST(test_a_frame_the_image_reads_finds_its_row);
+    RUN_TEST(test_a_frame_the_image_does_not_read_finds_nothing);
+    RUN_TEST(test_a_standard_and_an_extended_id_of_the_same_value_differ);
     RUN_TEST(test_every_received_frame_has_its_id_checks_and_timeout);
     RUN_TEST(test_every_timeout_is_at_least_three_periods);
     RUN_TEST(test_each_of_our_frames_survives_two_lost_frames_in_a_row);

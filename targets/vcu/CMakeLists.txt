@@ -53,6 +53,9 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     # App/common/ is compiled into both images, App/vcu/ into this one only
     # (ADR 0001). The order is the link order, kept from before the split.
     ../../App/common/Src/can_if.c
+    ../../App/common/Src/control_bus.c
+    ../../App/common/Src/control_step.c
+    ../../App/common/Src/fdcan_irq.c
     ../../App/vcu/Src/imu.c
     ../../App/common/Src/logger.c
     ../../App/common/Src/print.c
@@ -61,6 +64,7 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     ../../App/common/Src/stats.c
     ../../App/vcu/Src/tasks.c
     ../../App/vcu/Src/vcu_shell.c
+    ../../App/vcu/Src/vcu_step.c
     ../../App/common/Src/vbat.c
 )
 

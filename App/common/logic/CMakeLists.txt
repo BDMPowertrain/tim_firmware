@@ -7,6 +7,7 @@ add_logic_library(logic_common
         Src/control_rx.c
         Src/e2e_p11.c
         Src/mailbox.c
+        Src/step_timing.c
         can_db/can_control.c
         can_db/can_daq.c
 )

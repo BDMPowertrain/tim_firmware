@@ -13,8 +13,8 @@
    actually goes through it. */
 
 /* Creates spi3Mutex. Must run before any task that might call
-   spi3_bus_lock() is created — see tasks_init(). */
-void spi3_bus_init(void);
+   spi3_bus_lock() is created — see tasks_init(). False if it could not. */
+bool spi3_bus_init(void);
 
 /* Blocks the calling task until it holds spi3Mutex, up to timeout_ms
    (0 = don't block if it's already held; osWaitForever's numeric value,

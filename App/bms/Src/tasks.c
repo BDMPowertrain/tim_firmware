@@ -11,6 +11,8 @@
 #include "FreeRTOS.h"
 #include "task.h"
 
+#include "bms_step.h"
+#include "control_step.h"
 #include "main.h"
 #include "print.h"
 #include "shell.h"
@@ -30,32 +32,46 @@ static void heartbeatTask(void *argument)
    osThreadAttr_t inside its own call frees it before the next one is
    built, so the task count cannot overflow that stack — see the same
    helper in App/vcu/Src/tasks.c for the measurement behind this. */
-static void create_task(osThreadFunc_t func, void *argument, const char *name,
-                         osPriority_t priority, uint32_t stack_size)
+static bool create_task(osThreadFunc_t func, void *argument, const char *name,
+                        osPriority_t priority, uint32_t stack_size)
 {
     const osThreadAttr_t attributes = {
         .name = name,
         .priority = priority,
         .stack_size = stack_size,
     };
-    osThreadNew(func, argument, &attributes);
+    return osThreadNew(func, argument, &attributes) != NULL;
 }
+
+/* Read by the control step for as long as it runs. */
+static control_step_args_t controlStepArgs;
 
 void tasks_init(void)
 {
-    /* print_init() must run before any task that might print is created.
+    /* Every queue and task is created once, here. A failure is remembered
+       rather than fatal: the control step still runs, sends BMS_Status
+       and keeps the BMS in STARTUP with BMS_OK low.
+
+       print_init() must run before any task that might print is created.
        shell_init() arms the USART1 RX interrupt, so it must run before
        that interrupt can fire. The BMS has no shell commands of its own
        yet, so it never calls shell_register_commands(). */
-    print_init();
-    shell_init();
+    bool ok = print_init();
+    ok = shell_init() && ok;
+    ok = bms_step_init() && ok;
 
-    create_task(printTask, NULL, "printTask",
-                (osPriority_t)PRINT_TASK_PRIORITY, PRINT_TASK_STACK_SIZE);
-    create_task(shellTask, NULL, "shellTask",
-                (osPriority_t)SHELL_TASK_PRIORITY, SHELL_TASK_STACK_SIZE);
-    create_task(heartbeatTask, NULL, "heartbeatTask",
-                (osPriority_t)HEARTBEAT_TASK_PRIORITY, HEARTBEAT_TASK_STACK_SIZE);
+    ok = create_task(printTask, NULL, "printTask",
+                     (osPriority_t)PRINT_TASK_PRIORITY, PRINT_TASK_STACK_SIZE) && ok;
+    ok = create_task(shellTask, NULL, "shellTask",
+                     (osPriority_t)SHELL_TASK_PRIORITY, SHELL_TASK_STACK_SIZE) && ok;
+    ok = create_task(heartbeatTask, NULL, "heartbeatTask",
+                     (osPriority_t)HEARTBEAT_TASK_PRIORITY, HEARTBEAT_TASK_STACK_SIZE) && ok;
+
+    /* The control step last, so it starts with everything else in place. */
+    controlStepArgs.def = &bms_step_def;
+    controlStepArgs.startup_ok = ok;
+    (void)create_task(control_step_task, &controlStepArgs, "controlStep",
+                      (osPriority_t)CONTROL_STEP_TASK_PRIORITY, CONTROL_STEP_TASK_STACK_SIZE);
 }
 
 /* Called by FreeRTOS the instant it detects a task has overrun its stack

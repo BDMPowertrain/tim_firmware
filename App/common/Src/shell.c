@@ -12,6 +12,8 @@
 
 #include "cmsis_os2.h"
 
+#include "control_step.h"
+
 #include "main.h"
 #include "print.h"
 #include "stats.h"
@@ -34,16 +36,14 @@ static uint8_t rxByte;
 /* Creates shellRxStreamBuf and arms the first RX interrupt. Must run
    before any RX interrupt can occur, since the callback below assumes
    shellRxStreamBuf already exists. */
-void shell_init(void)
+bool shell_init(void)
 {
     shellRxStreamBuf = xStreamBufferCreate(SHELL_RX_BUF_SIZE, SHELL_RX_TRIGGER_LEVEL);
     if (shellRxStreamBuf == NULL) {
-        Error_Handler();
+        return false;
     }
 
-    if (HAL_UART_Receive_IT(&huart1, &rxByte, 1) != HAL_OK) {
-        Error_Handler();
-    }
+    return HAL_UART_Receive_IT(&huart1, &rxByte, 1) == HAL_OK;
 }
 
 /* ISR-level work: push the one received byte into the stream buffer.
@@ -73,6 +73,7 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 static int cmd_help(int argc, char **argv);
 static int cmd_tasks(int argc, char **argv);
 static int cmd_reset(int argc, char **argv);
+static int cmd_step(int argc, char **argv);
 
 /* The commands every image has. Adding one is one row here plus one
    handler function — nothing else in shell.c changes. A command only one
@@ -82,6 +83,7 @@ static const shell_cmd_t commandTable[] = {
     { "help",      cmd_help,      "list commands" },
     { "tasks",     cmd_tasks,     "list tasks: state, priority, stack free" },
     { "reset",     cmd_reset,     "software reset" },
+    { "step",      cmd_step,      "control step: state, overruns, last and worst times" },
 };
 
 #define COMMAND_TABLE_COUNT (sizeof(commandTable) / sizeof(commandTable[0]))
@@ -125,6 +127,16 @@ static int cmd_tasks(int argc, char **argv)
     (void)argv;
 
     stats_print_tasks();
+
+    return 0;
+}
+
+static int cmd_step(int argc, char **argv)
+{
+    (void)argc;
+    (void)argv;
+
+    control_step_print();
 
     return 0;
 }

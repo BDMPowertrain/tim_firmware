@@ -51,13 +51,11 @@ static osMessageQueueId_t logCtrlQueue;
 static volatile logger_state_t loggerState = LOGGER_IDLE;
 static volatile uint32_t loggerRecordCount;
 
-void logger_init(void)
+bool logger_init(void)
 {
     logQueue = osMessageQueueNew(LOG_QUEUE_DEPTH, sizeof(log_record_t), NULL);
     logCtrlQueue = osMessageQueueNew(LOG_CTRL_QUEUE_DEPTH, sizeof(log_ctrl_msg_t), NULL);
-    if (logQueue == NULL || logCtrlQueue == NULL) {
-        Error_Handler();
-    }
+    return logQueue != NULL && logCtrlQueue != NULL;
 }
 
 void logger_post(char sensor, int16_t x, int16_t y, int16_t z)

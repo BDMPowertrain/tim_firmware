@@ -29,16 +29,16 @@
        osPriorityIdle           1   FreeRTOS's own Idle task only. Never assign.
        osPriorityLow            8   Housekeeping, heartbeat LED.
        osPriorityBelowNormal   16   Logging, slow sensing, stats.
-       osPriorityNormal        24   Default. Shell, CAN TX, general control.
+       osPriorityNormal        24   Default. Shell, DAQ bus (CAN2) tasks.
        osPriorityAboveNormal   32   High-rate sensing — IMU, APPS.
-       osPriorityHigh          40   Hard hardware deadlines — CAN RX FIFO.
-       osPriorityRealtime      48   Torque path / safety interlocks.
+       osPriorityHigh          40   Empty (ADR 0013).
+       osPriorityRealtime      48   The control step, and nothing else.
        osPriorityISR           56   Reserved for the RTOS's own ISR-deferral thread.
 
-   osPriorityRealtime and osPriorityHigh are RESERVED for the future VCU
-   torque path and hard hardware deadlines (CAN RX FIFO). Nothing below
-   may use them — see Documentation/tim-rtos-architecture.md section 2
-   for the full reserved-band table and why re-tuning later is expensive.
+   osPriorityRealtime is the control step's alone (ADR 0010) and
+   osPriorityHigh stays empty (ADR 0013). Nothing else may use them — see
+   Documentation/tim-rtos-architecture.md section 2 for why re-tuning
+   later is expensive.
 
    ---------------------------------------------------------------------
    stack_size — what a task's stack actually is
@@ -104,23 +104,30 @@
 #define LOGGER_TASK_PRIORITY      osPriorityBelowNormal
 #define LOGGER_TASK_STACK_SIZE    2048u
 
-/* "Hard hardware deadlines" band, reserved for CAN RX FIFO per the
-   reserved-priority table. Both canRxTask instances (CAN1, CAN2) share
-   it — the real deadline enforcement is the 3-deep hardware FIFO
-   drained fully per ISR, not either task's own scheduling latency once
-   woken. No SPI/FatFS-depth call chains in this path, just a HAL
-   struct decode and a mutex; measure with `tasks` after first hardware
-   test and adjust like every other *_STACK_SIZE here. */
-#define CAN_RX_TASK_PRIORITY      osPriorityHigh
+/* The DAQ bus (CAN2) receive and send tasks. The DAQ bus carries no
+   safety function, so both sit in the Normal band with the shell; the
+   3-deep hardware FIFO is drained fully per interrupt into an 8-deep
+   queue, so a late canRxTask drops only logging data. The Control bus
+   (CAN1) has no task: its interrupt writes the mailboxes and the control
+   step sends (ADR 0004). Measure with `tasks` and adjust. */
+#define CAN_RX_TASK_PRIORITY      osPriorityNormal
 #define CAN_RX_TASK_STACK_SIZE    512u
 
-/* "Shell, CAN TX, general control" band, same table. */
 #define CAN_TX_TASK_PRIORITY      osPriorityNormal
 #define CAN_TX_TASK_STACK_SIZE    512u
 
-/* Creates every queue and task the running image needs, then returns.
-   Called once from initTask, which terminates immediately afterward —
-   see Documentation/tim-rtos-architecture.md section 3. */
+/* The Control step (ADR 0010): the one Realtime task, every 10 ms. It
+   takes no mutex and blocks only on its own period. The stack holds the
+   status frame build and the step's own locals; mailboxes and their
+   snapshot are static in control_bus.c. Measure with `tasks`. */
+#define CONTROL_STEP_TASK_PRIORITY   osPriorityRealtime
+#define CONTROL_STEP_TASK_STACK_SIZE 1024u
+
+/* Creates every queue and task the running image needs, the control step
+   last, then returns. A failed creation does not stop the board: the
+   control step still runs and the VCU stays in STARTUP. Called once from
+   initTask, which terminates immediately afterward — see
+   Documentation/tim-rtos-architecture.md section 3. */
 void tasks_init(void);
 
 #endif /* APP_INC_TASKS_H */

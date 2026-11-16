@@ -32,12 +32,10 @@ static osMessageQueueId_t printQueue;
 
 /* Creates printQueue. Must run before any task that might call
    shell_printf()/shell_print_raw() is created — see tasks_init(). */
-void print_init(void)
+bool print_init(void)
 {
     printQueue = osMessageQueueNew(PRINT_QUEUE_DEPTH, sizeof(print_record_t), NULL);
-    if (printQueue == NULL) {
-        Error_Handler();
-    }
+    return printQueue != NULL;
 }
 
 /* The only task allowed to touch huart1's TX side. Blocks waiting for a

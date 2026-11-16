@@ -1,11 +1,12 @@
 #ifndef APP_INC_PRINT_H
 #define APP_INC_PRINT_H
 
+#include <stdbool.h>
 #include <stddef.h>
 
 /* Creates printQueue. Must run before any task that might call
-   shell_printf()/shell_print_raw() is created. */
-void print_init(void);
+   shell_printf()/shell_print_raw() is created. False if it could not. */
+bool print_init(void);
 
 /* Owns huart1's TX side exclusively: blocks on printQueue, blocking-
    transmits each record it receives. No other code may call

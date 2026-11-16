@@ -12,6 +12,7 @@
 #include <string.h>
 
 #include "can_if.h"
+#include "control_bus.h"
 #include "imu.h"
 #include "logger.h"
 #include "print.h"
@@ -143,12 +144,12 @@ static int cmd_log(int argc, char **argv)
     return 0;
 }
 
-#define CMD_CAN_USAGE "usage: can status[1|2]|stby<1|2> on|off|term<1|2> on|off|send<1|2> <id> <hex> [fd] [brs]|stream<1|2>\r\n"
+#define CMD_CAN_USAGE "usage: can status[1|2]|stby2 on|off|term2 on|off|send2 <id> <hex> [fd] [brs]|stream2\r\n"
 
 /* Matches "stby1"/"stby2", "term1"/"term2", etc. against a prefix and
-   sets *bus from the trailing digit. Returns false (bus untouched) if
+   sets *bus to the trailing 1 or 2. Returns false (bus untouched) if
    tok doesn't match prefix+1 or prefix+2 exactly. */
-static bool parse_bus_suffix(const char *tok, const char *prefix, can_bus_t *bus)
+static bool parse_bus_suffix(const char *tok, const char *prefix, int *bus)
 {
     size_t prefixLen = strlen(prefix);
 
@@ -156,11 +157,11 @@ static bool parse_bus_suffix(const char *tok, const char *prefix, can_bus_t *bus
         return false;
     }
     if (strcmp(tok + prefixLen, "1") == 0) {
-        *bus = CAN_BUS_1;
+        *bus = 1;
         return true;
     }
     if (strcmp(tok + prefixLen, "2") == 0) {
-        *bus = CAN_BUS_2;
+        *bus = 2;
         return true;
     }
     return false;
@@ -200,11 +201,33 @@ static int hex_decode(const char *hex, uint8_t *out, size_t out_max)
     return (int)byteCount;
 }
 
-static void can_print_status(can_bus_t bus, const char *name)
+/* CAN1 is the Control bus: classic, filtered, and sent on only by the
+   Control step (ADR 0010), so the shell can look at it but not drive it. */
+static void can1_print_status(void)
 {
+    control_bus_status_t st;
+
+    if (!control_bus_get_status(&st)) {
+        shell_printf("CAN1  status read failed\r\n");
+        return;
+    }
+
+    shell_printf("CAN1  Control bus, classic: started=%u bus_off=%u err_passive=%u\r\n",
+                 (unsigned)st.started, (unsigned)st.bus_off, (unsigned)st.error_passive);
+    shell_printf("     last_err=0x%02lX tx_err=%lu rx_err=%lu\r\n",
+                 (unsigned long)st.last_error_code, (unsigned long)st.tx_error_count,
+                 (unsigned long)st.rx_error_count);
+    shell_printf("     rx=%lu rx_unknown=%lu tx=%lu tx_skipped=%lu\r\n",
+                 (unsigned long)st.rx_frames, (unsigned long)st.rx_unknown,
+                 (unsigned long)st.tx_sent, (unsigned long)st.tx_skipped);
+}
+
+static void can2_print_status(void)
+{
+    const char *name = "CAN2";
     can_status_t st;
 
-    if (!can_get_status(bus, &st)) {
+    if (!can_get_status(&st)) {
         shell_printf("%s  status read failed\r\n", name);
         return;
     }
@@ -226,7 +249,7 @@ static void can_print_status(can_bus_t bus, const char *name)
    in 11 bits -- there's no explicit override for forcing extended
    addressing on a value that would also fit as standard, which this
    bring-up tool doesn't need yet. */
-static int can_do_send(can_bus_t bus, int argc, char **argv)
+static int can_do_send(int argc, char **argv)
 {
     if (argc < 4) {
         shell_printf(CMD_CAN_USAGE);
@@ -259,7 +282,7 @@ static int can_do_send(can_bus_t bus, int argc, char **argv)
 
     bool is_extended = (id > 0x7FFu);
 
-    if (can_send(bus, (uint32_t)id, data, (uint8_t)len, is_extended, is_fd, is_brs)) {
+    if (can_send((uint32_t)id, data, (uint8_t)len, is_extended, is_fd, is_brs)) {
         shell_printf("can: queued %d bytes on id 0x%lX\r\n", len, id);
     } else {
         shell_printf("can: send failed (queue full, fd requested on a classic-only bus,"
@@ -279,7 +302,7 @@ static int can_do_send(can_bus_t bus, int argc, char **argv)
    consumer of that queue would race it) -- a burst of several new
    frames within one 100 ms poll interval still only shows the latest
    of them. */
-static int can_stream(can_bus_t bus)
+static int can_stream(void)
 {
     uint32_t lastSeq = 0;
 
@@ -287,7 +310,7 @@ static int can_stream(can_bus_t bus)
 
     for (;;) {
         can_frame_t frame;
-        if (can_get_new_rx(bus, &frame, &lastSeq)) {
+        if (can_get_new_rx(&frame, &lastSeq)) {
             shell_printf("id=0x%03lX %s%s len=%u data=",
                          (unsigned long)frame.id,
                          frame.is_extended ? "ext " : "std ",
@@ -315,15 +338,26 @@ static int cmd_can(int argc, char **argv)
     }
 
     if (strcmp(argv[1], "status") == 0) {
-        can_print_status(CAN_BUS_1, "CAN1");
-        can_print_status(CAN_BUS_2, "CAN2");
+        can1_print_status();
+        can2_print_status();
         return 0;
     }
 
-    can_bus_t bus;
+    int bus;
 
     if (parse_bus_suffix(argv[1], "status", &bus)) {
-        can_print_status(bus, (bus == CAN_BUS_1) ? "CAN1" : "CAN2");
+        if (bus == 1) {
+            can1_print_status();
+        } else {
+            can2_print_status();
+        }
+        return 0;
+    }
+
+    if ((parse_bus_suffix(argv[1], "stby", &bus) || parse_bus_suffix(argv[1], "term", &bus)
+         || parse_bus_suffix(argv[1], "send", &bus) || parse_bus_suffix(argv[1], "stream", &bus))
+        && bus == 1) {
+        shell_printf("can: CAN1 is the Control bus; only the control step drives it\r\n");
         return 0;
     }
 
@@ -332,10 +366,10 @@ static int cmd_can(int argc, char **argv)
         if (argc < 3) {
             shell_printf(CMD_CAN_USAGE);
         } else if (strcmp(argv[2], "on") == 0) {
-            can_set_standby(bus, true);
+            can_set_standby(true);
             shell_printf("can: standby on\r\n");
         } else if (strcmp(argv[2], "off") == 0) {
-            can_set_standby(bus, false);
+            can_set_standby(false);
             shell_printf("can: standby off\r\n");
         } else {
             shell_printf(CMD_CAN_USAGE);
@@ -347,10 +381,10 @@ static int cmd_can(int argc, char **argv)
         if (argc < 3) {
             shell_printf(CMD_CAN_USAGE);
         } else if (strcmp(argv[2], "on") == 0) {
-            can_set_termination(bus, true);
+            can_set_termination(true);
             shell_printf("can: termination on\r\n");
         } else if (strcmp(argv[2], "off") == 0) {
-            can_set_termination(bus, false);
+            can_set_termination(false);
             shell_printf("can: termination off\r\n");
         } else {
             shell_printf(CMD_CAN_USAGE);
@@ -359,11 +393,11 @@ static int cmd_can(int argc, char **argv)
     }
 
     if (parse_bus_suffix(argv[1], "send", &bus)) {
-        return can_do_send(bus, argc, argv);
+        return can_do_send(argc, argv);
     }
 
     if (parse_bus_suffix(argv[1], "stream", &bus)) {
-        return can_stream(bus);
+        return can_stream();
     }
 
     shell_printf(CMD_CAN_USAGE);
@@ -397,7 +431,7 @@ static const shell_cmd_t vcuCommands[] = {
     { "imu",       cmd_imu,       "latest accel/gyro sample" },
     { "imustream", cmd_imustream, "live accel/gyro stream, any key to stop" },
     { "log",       cmd_log,       "log start|stop|status|list|dump <file>" },
-    { "can",       cmd_can,       "can status|stby<1|2>|term<1|2> on|off|send<1|2> <id> <hex> [fd] [brs]|stream<1|2>" },
+    { "can",       cmd_can,       "can status[1|2]|stby2|term2 on|off|send2 <id> <hex> [fd] [brs]|stream2" },
     { "vbat",      cmd_vbat,      "battery voltage" },
 };
 

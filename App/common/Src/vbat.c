@@ -70,10 +70,10 @@ static void vbat_timer_cb(void *argument)
     haveReading = true;
 }
 
-void vbat_init(void)
+bool vbat_init(void)
 {
     if (HAL_ADCEx_Calibration_Start(&hadc1, ADC_SINGLE_ENDED) != HAL_OK) {
-        Error_Handler();
+        return false;
     }
 
     const osTimerAttr_t timer_attr = {
@@ -81,10 +81,10 @@ void vbat_init(void)
     };
     osTimerId_t timer = osTimerNew(vbat_timer_cb, osTimerPeriodic, NULL, &timer_attr);
     if (timer == NULL) {
-        Error_Handler();
+        return false;
     }
 
-    osTimerStart(timer, pdMS_TO_TICKS(VBAT_SAMPLE_PERIOD_MS));
+    return osTimerStart(timer, pdMS_TO_TICKS(VBAT_SAMPLE_PERIOD_MS)) == osOK;
 }
 
 bool vbat_get_reading(uint32_t *out_raw, uint32_t *out_mv)

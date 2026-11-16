@@ -1,12 +1,14 @@
 #ifndef APP_INC_LOGGER_H
 #define APP_INC_LOGGER_H
 
+#include <stdbool.h>
 #include <stdint.h>
 
 /* Creates logQueue and the small control queue `log start`/`log stop`
    use to talk to loggerTask. Must run before loggerTask (or anything
-   that calls logger_post()) is created — see tasks_init(). */
-void logger_init(void);
+   that calls logger_post()) is created — see tasks_init(). False if
+   either queue could not be created. */
+bool logger_init(void);
 
 /* All FatFS calls (f_mount/f_open/f_write/f_sync/f_close) happen only
    here, in loggerTask's own context — never from shellTask. Blocks on

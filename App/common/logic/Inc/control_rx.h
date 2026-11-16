@@ -33,4 +33,12 @@ typedef enum {
  * can_control_..._unpack() function. */
 extern const mailbox_config_t control_rx_config[CONTROL_RX_COUNT];
 
+/*
+ * The receive interrupt's lookup: the position in rows (the frames an image
+ * reads, one mailbox each) of the frame with this ID, or -1 if the image
+ * does not read it. A standard and an extended ID never match each other.
+ */
+int control_rx_find(const control_rx_t *rows, size_t row_count,
+                    uint32_t frame_id, bool extended);
+
 #endif /* CONTROL_RX_H */

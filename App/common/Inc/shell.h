@@ -13,8 +13,9 @@
 void shellTask(void *argument);
 
 /* Creates shellRxStreamBuf and arms the first USART1 RX interrupt. Must
-   run before any RX interrupt can occur — see tasks_init(). */
-void shell_init(void);
+   run before any RX interrupt can occur — see tasks_init(). Returns false
+   if either fails. */
+bool shell_init(void);
 
 /* Called from HAL_UART_RxCpltCallback with the one byte just received;
    pushes it into shellRxStreamBuf. Nothing else runs at interrupt level. */

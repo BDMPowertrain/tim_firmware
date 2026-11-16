@@ -78,3 +78,15 @@ const mailbox_config_t control_rx_config[CONTROL_RX_COUNT] = {
      * BMS fault and 0 A can never count as "charger disobeys". */
     [CONTROL_RX_CHG_STATUS] = PLAIN(CHG_STATUS, 5000u, ALL_ZERO),
 };
+
+int control_rx_find(const control_rx_t *rows, size_t row_count,
+                    uint32_t frame_id, bool extended)
+{
+    for (size_t i = 0; i < row_count; i++) {
+        const mailbox_config_t *config = &control_rx_config[rows[i]];
+        if (config->frame_id == frame_id && config->extended == extended) {
+            return (int)i;
+        }
+    }
+    return -1;
+}

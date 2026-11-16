@@ -9,6 +9,7 @@
 #include "task.h"
 
 #include "can_if.h"
+#include "control_step.h"
 #include "imu.h"
 #include "logger.h"
 #include "main.h"
@@ -17,6 +18,7 @@
 #include "spi3_bus.h"
 #include "vbat.h"
 #include "vcu_shell.h"
+#include "vcu_step.h"
 
 /* Ladder exercise 1: two tasks toggling different GPIOs at different
    rates and priorities, so preemption is visible on a scope rather than
@@ -57,56 +59,62 @@ static void blinkTask(void *argument)
    make that impossible regardless of task count: each call is a real
    function boundary, so its local attr struct's frame is freed the
    moment that call returns, before the next one is even built. */
-static void create_task(osThreadFunc_t func, void *argument, const char *name,
-                         osPriority_t priority, uint32_t stack_size)
+static bool create_task(osThreadFunc_t func, void *argument, const char *name,
+                        osPriority_t priority, uint32_t stack_size)
 {
     const osThreadAttr_t attributes = {
         .name = name,
         .priority = priority,
         .stack_size = stack_size,
     };
-    osThreadNew(func, argument, &attributes);
+    return osThreadNew(func, argument, &attributes) != NULL;
 }
+
+/* Read by the control step for as long as it runs. */
+static control_step_args_t controlStepArgs;
 
 void tasks_init(void)
 {
-    /* print_init() must run before any task that might call shell_printf()/
+    /* Every queue, mutex and task is created once, here. A failure is
+       remembered rather than fatal: the control step still runs, sends
+       its status frame and keeps the VCU in STARTUP.
+
+       print_init() must run before any task that might call shell_printf()/
        shell_print_raw() is created — printTask itself included, since it's
        the one draining printQueue. shell_init() arms the USART1 RX
        interrupt, so it must run before that interrupt can fire; creating
        shellTask afterward is what actually drains what it collects. */
-    print_init();
-    shell_init();
+    bool ok = print_init();
+    ok = shell_init() && ok;
     vcu_shell_register();
-    spi3_bus_init();
-    logger_init();
-    can_if_init();
-    vbat_init();
+    ok = spi3_bus_init() && ok;
+    ok = logger_init() && ok;
+    ok = can_if_init() && ok;
+    ok = vbat_init() && ok;
+    ok = vcu_step_init() && ok;
 
-    create_task(printTask, NULL, "printTask",
-                (osPriority_t)PRINT_TASK_PRIORITY, PRINT_TASK_STACK_SIZE);
-    create_task(shellTask, NULL, "shellTask",
-                (osPriority_t)SHELL_TASK_PRIORITY, SHELL_TASK_STACK_SIZE);
-    create_task(heartbeatTask, NULL, "heartbeatTask",
-                (osPriority_t)HEARTBEAT_TASK_PRIORITY, HEARTBEAT_TASK_STACK_SIZE);
-    create_task(blinkTask, NULL, "blinkTask",
-                (osPriority_t)BLINK_TASK_PRIORITY, BLINK_TASK_STACK_SIZE);
-    create_task(imuTask, NULL, "imuTask",
-                (osPriority_t)IMU_TASK_PRIORITY, IMU_TASK_STACK_SIZE);
-    create_task(loggerTask, NULL, "loggerTask",
-                (osPriority_t)LOGGER_TASK_PRIORITY, LOGGER_TASK_STACK_SIZE);
+    ok = create_task(printTask, NULL, "printTask",
+                     (osPriority_t)PRINT_TASK_PRIORITY, PRINT_TASK_STACK_SIZE) && ok;
+    ok = create_task(shellTask, NULL, "shellTask",
+                     (osPriority_t)SHELL_TASK_PRIORITY, SHELL_TASK_STACK_SIZE) && ok;
+    ok = create_task(heartbeatTask, NULL, "heartbeatTask",
+                     (osPriority_t)HEARTBEAT_TASK_PRIORITY, HEARTBEAT_TASK_STACK_SIZE) && ok;
+    ok = create_task(blinkTask, NULL, "blinkTask",
+                     (osPriority_t)BLINK_TASK_PRIORITY, BLINK_TASK_STACK_SIZE) && ok;
+    ok = create_task(imuTask, NULL, "imuTask",
+                     (osPriority_t)IMU_TASK_PRIORITY, IMU_TASK_STACK_SIZE) && ok;
+    ok = create_task(loggerTask, NULL, "loggerTask",
+                     (osPriority_t)LOGGER_TASK_PRIORITY, LOGGER_TASK_STACK_SIZE) && ok;
+    ok = create_task(canRxTask, NULL, "can2RxTask",
+                     (osPriority_t)CAN_RX_TASK_PRIORITY, CAN_RX_TASK_STACK_SIZE) && ok;
+    ok = create_task(canTxTask, NULL, "can2TxTask",
+                     (osPriority_t)CAN_TX_TASK_PRIORITY, CAN_TX_TASK_STACK_SIZE) && ok;
 
-    /* canRxTask/canTxTask are each one function reused for both buses —
-       argument is the can_bus_t value itself (not a pointer), see
-       can_if.h. */
-    create_task(canRxTask, (void *)CAN_BUS_1, "can1RxTask",
-                (osPriority_t)CAN_RX_TASK_PRIORITY, CAN_RX_TASK_STACK_SIZE);
-    create_task(canTxTask, (void *)CAN_BUS_1, "can1TxTask",
-                (osPriority_t)CAN_TX_TASK_PRIORITY, CAN_TX_TASK_STACK_SIZE);
-    create_task(canRxTask, (void *)CAN_BUS_2, "can2RxTask",
-                (osPriority_t)CAN_RX_TASK_PRIORITY, CAN_RX_TASK_STACK_SIZE);
-    create_task(canTxTask, (void *)CAN_BUS_2, "can2TxTask",
-                (osPriority_t)CAN_TX_TASK_PRIORITY, CAN_TX_TASK_STACK_SIZE);
+    /* The control step last, so it starts with everything else in place. */
+    controlStepArgs.def = &vcu_step_def;
+    controlStepArgs.startup_ok = ok;
+    (void)create_task(control_step_task, &controlStepArgs, "controlStep",
+                      (osPriority_t)CONTROL_STEP_TASK_PRIORITY, CONTROL_STEP_TASK_STACK_SIZE);
 }
 
 /* Called by FreeRTOS the instant it detects a task has overrun its

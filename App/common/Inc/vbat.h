@@ -8,8 +8,8 @@
    dedicated task — Documentation/tim-rtos-architecture.md section 6,
    ladder step 6) that samples VBAT_ADC (PC3/ADC1_IN9) every 500 ms.
    Must run before any call to vbat_get_millivolts() — see
-   tasks_init(). */
-void vbat_init(void);
+   tasks_init(). False if the calibration or the timer failed. */
+bool vbat_init(void);
 
 /* Latest VBAT reading — raw 12-bit ADC count and millivolts (scaled
    through the board's confirmed 1/13 divider, R21=120k/R22=10k,

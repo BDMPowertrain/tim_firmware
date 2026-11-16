@@ -113,18 +113,22 @@ Symptom if skipped: flash and verify succeed, nothing runs, PC sits in
   that image with shell_register_commands() (App/vcu/Src/vcu_shell.c).
 - targets/<image>/tim.ioc is the source of truth for that image's pin and
   peripheral config. Both projects must name the same firmware package.
-- The BMS project is minimal for now: clock, FreeRTOS, USART1, the heartbeat
-  LED and the IMU chip select held high. Its image links print, shell and
-  stats from App/common/; the other common modules join when their
+- The BMS project is minimal for now: clock, FreeRTOS, USART1, FDCAN1 (the
+  Control bus), the heartbeat LED and the IMU chip select held high. Its
+  image links print, shell, stats and the control step with its Control bus
+  driver from App/common/; the other common modules join when their
   peripherals are configured.
+- The Control bus (CAN1) is driven only by the image's control step
+  (App/common/Src/control_step.c, control_bus.c, ADR 0004 and 0010): no
+  task, queue or shell command sends on it.
 
 ## Conventions
 - Tasks are created in the image's tasks.c (App/vcu/Src/tasks.c,
   App/bms/Src/tasks.c), not in CubeMX. CubeMX creates only initTask, which
   calls tasks_init() and then terminates.
-- osPriorityRealtime and osPriorityHigh are RESERVED for the image's control
-  step (the VCU torque path, the BMS Sweep and its checks) and hard hardware
-  deadlines. Do not use them for test or logging tasks.
+- osPriorityRealtime is the image's control step's alone (the VCU torque
+  path, the BMS Sweep and its checks, ADR 0010); osPriorityHigh stays empty
+  (ADR 0013). Do not use either for any other task.
 - LEDs are active LOW (3V3 -> 240R -> LED -> MCU pin).
 - SPI3 is shared between the onboard IMU and the mezzanine header — every
   access must take spi3Mutex.
