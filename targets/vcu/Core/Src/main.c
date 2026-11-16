@@ -434,7 +434,7 @@ static void MX_FDCAN1_Init(void)
   /* USER CODE END FDCAN1_Init 1 */
   hfdcan1.Instance = FDCAN1;
   hfdcan1.Init.ClockDivider = FDCAN_CLOCK_DIV1;
-  hfdcan1.Init.FrameFormat = FDCAN_FRAME_FD_BRS;
+  hfdcan1.Init.FrameFormat = FDCAN_FRAME_CLASSIC;
   hfdcan1.Init.Mode = FDCAN_MODE_NORMAL;
   hfdcan1.Init.AutoRetransmission = ENABLE;
   hfdcan1.Init.TransmitPause = DISABLE;
@@ -447,9 +447,9 @@ static void MX_FDCAN1_Init(void)
   hfdcan1.Init.DataSyncJumpWidth = 3;
   hfdcan1.Init.DataTimeSeg1 = 13;
   hfdcan1.Init.DataTimeSeg2 = 3;
-  hfdcan1.Init.StdFiltersNbr = 0;
-  hfdcan1.Init.ExtFiltersNbr = 0;
-  hfdcan1.Init.TxFifoQueueMode = FDCAN_TX_FIFO_OPERATION;
+  hfdcan1.Init.StdFiltersNbr = 10;
+  hfdcan1.Init.ExtFiltersNbr = 1;
+  hfdcan1.Init.TxFifoQueueMode = FDCAN_TX_QUEUE_MODE;
   if (HAL_FDCAN_Init(&hfdcan1) != HAL_OK)
   {
     Error_Handler();

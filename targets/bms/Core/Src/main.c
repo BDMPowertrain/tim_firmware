@@ -41,6 +41,8 @@
 /* USER CODE END PM */
 
 /* Private variables ---------------------------------------------------------*/
+FDCAN_HandleTypeDef hfdcan1;
+
 UART_HandleTypeDef huart1;
 
 /* Definitions for initTask */
@@ -57,6 +59,7 @@ const osThreadAttr_t initTask_attributes = {
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
+static void MX_FDCAN1_Init(void);
 static void MX_USART1_UART_Init(void);
 void StartDefaultTask(void *argument);
 
@@ -98,6 +101,7 @@ int main(void)
 
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
+  MX_FDCAN1_Init();
   MX_USART1_UART_Init();
   /* USER CODE BEGIN 2 */
 
@@ -197,6 +201,49 @@ void SystemClock_Config(void)
 }
 
 /**
+  * @brief FDCAN1 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_FDCAN1_Init(void)
+{
+
+  /* USER CODE BEGIN FDCAN1_Init 0 */
+
+  /* USER CODE END FDCAN1_Init 0 */
+
+  /* USER CODE BEGIN FDCAN1_Init 1 */
+
+  /* USER CODE END FDCAN1_Init 1 */
+  hfdcan1.Instance = FDCAN1;
+  hfdcan1.Init.ClockDivider = FDCAN_CLOCK_DIV1;
+  hfdcan1.Init.FrameFormat = FDCAN_FRAME_CLASSIC;
+  hfdcan1.Init.Mode = FDCAN_MODE_NORMAL;
+  hfdcan1.Init.AutoRetransmission = ENABLE;
+  hfdcan1.Init.TransmitPause = DISABLE;
+  hfdcan1.Init.ProtocolException = DISABLE;
+  hfdcan1.Init.NominalPrescaler = 17;
+  hfdcan1.Init.NominalSyncJumpWidth = 4;
+  hfdcan1.Init.NominalTimeSeg1 = 15;
+  hfdcan1.Init.NominalTimeSeg2 = 4;
+  hfdcan1.Init.DataPrescaler = 1;
+  hfdcan1.Init.DataSyncJumpWidth = 1;
+  hfdcan1.Init.DataTimeSeg1 = 1;
+  hfdcan1.Init.DataTimeSeg2 = 1;
+  hfdcan1.Init.StdFiltersNbr = 0;
+  hfdcan1.Init.ExtFiltersNbr = 1;
+  hfdcan1.Init.TxFifoQueueMode = FDCAN_TX_QUEUE_MODE;
+  if (HAL_FDCAN_Init(&hfdcan1) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN FDCAN1_Init 2 */
+
+  /* USER CODE END FDCAN1_Init 2 */
+
+}
+
+/**
   * @brief USART1 Initialization Function
   * @param None
   * @retval None
@@ -264,17 +311,30 @@ static void MX_GPIO_Init(void)
   __HAL_RCC_GPIOB_CLK_ENABLE();
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(GPIO_HBLED_GPIO_Port, GPIO_HBLED_Pin, GPIO_PIN_SET);
+  HAL_GPIO_WritePin(GPIOC, GPIO_CAN1LED_Pin|GPIO_HBLED_Pin, GPIO_PIN_SET);
+
+  /*Configure GPIO pin Output Level */
+  HAL_GPIO_WritePin(Can_Term_1_GPIO_Port, Can_Term_1_Pin, GPIO_PIN_RESET);
+
+  /*Configure GPIO pin Output Level */
+  HAL_GPIO_WritePin(FDCAN1_STB_GPIO_Port, FDCAN1_STB_Pin, GPIO_PIN_SET);
 
   /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(SPI3_CS_GPIO_Port, SPI3_CS_Pin, GPIO_PIN_SET);
 
-  /*Configure GPIO pin : GPIO_HBLED_Pin */
-  GPIO_InitStruct.Pin = GPIO_HBLED_Pin;
+  /*Configure GPIO pins : GPIO_CAN1LED_Pin GPIO_HBLED_Pin Can_Term_1_Pin */
+  GPIO_InitStruct.Pin = GPIO_CAN1LED_Pin|GPIO_HBLED_Pin|Can_Term_1_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
-  HAL_GPIO_Init(GPIO_HBLED_GPIO_Port, &GPIO_InitStruct);
+  HAL_GPIO_Init(GPIOC, &GPIO_InitStruct);
+
+  /*Configure GPIO pin : FDCAN1_STB_Pin */
+  GPIO_InitStruct.Pin = FDCAN1_STB_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+  HAL_GPIO_Init(FDCAN1_STB_GPIO_Port, &GPIO_InitStruct);
 
   /*Configure GPIO pin : SPI3_CS_Pin */
   GPIO_InitStruct.Pin = SPI3_CS_Pin;
