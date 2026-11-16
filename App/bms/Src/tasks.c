@@ -2,9 +2,9 @@
    tasks_init() once, then terminates; everything running after that
    point was created here.
 
-   The BMS image so far: it boots, blinks the heartbeat LED, answers the
-   common shell on USART1, runs its control step on the Control bus and
-   publishes its status on the DAQ bus. The cell-monitor Sweep and the BMS
+   The BMS image so far: it boots, runs Housekeeping (the heartbeat LED),
+   answers the common shell on USART1, runs its control step on the
+   Control bus and publishes its status on the DAQ bus. The cell-monitor Sweep and the BMS
    pins come with later work. */
 
 #include "tasks.h"
@@ -18,21 +18,11 @@
 #include "can_daq.h"
 #include "can_if.h"
 #include "control_step.h"
+#include "housekeeping.h"
 #include "main.h"
 #include "parameters.h"
 #include "print.h"
 #include "shell.h"
-
-/* The board's "I'm alive" LED: 1 Hz, lowest priority of anything here. */
-static void heartbeatTask(void *argument)
-{
-    (void)argument;
-
-    for (;;) {
-        HAL_GPIO_TogglePin(GPIO_HBLED_GPIO_Port, GPIO_HBLED_Pin);
-        osDelay(500);
-    }
-}
 
 /* tasks_init() runs on initTask's fixed 512-byte stack. Building each
    osThreadAttr_t inside its own call frees it before the next one is
@@ -51,6 +41,12 @@ static bool create_task(osThreadFunc_t func, void *argument, const char *name,
 
 /* Read by the control step for as long as it runs. */
 static control_step_args_t controlStepArgs;
+
+/* The BMS has no slow reading of its own yet: ADC1 (board temperature,
+   VBAT) is not configured in its CubeMX project. */
+static const housekeeping_def_t housekeepingDef = {
+    .poll = NULL,
+};
 
 /* What the DAQ publisher sends from the BMS (can/daq.dbc). */
 static const can_if_publisher_t daqPublisher = {
@@ -75,14 +71,15 @@ void tasks_init(void)
     ok = parameters_init(&bms_param_table, NULL) && ok;
     ok = shell_init() && ok;
     ok = can_if_init(&daqPublisher) && ok;
+    ok = housekeeping_init() && ok;
     ok = bms_step_init() && ok;
 
     ok = create_task(printTask, NULL, "printTask",
                      (osPriority_t)PRINT_TASK_PRIORITY, PRINT_TASK_STACK_SIZE) && ok;
     ok = create_task(shellTask, NULL, "shellTask",
                      (osPriority_t)SHELL_TASK_PRIORITY, SHELL_TASK_STACK_SIZE) && ok;
-    ok = create_task(heartbeatTask, NULL, "heartbeatTask",
-                     (osPriority_t)HEARTBEAT_TASK_PRIORITY, HEARTBEAT_TASK_STACK_SIZE) && ok;
+    ok = create_task(housekeepingTask, (void *)&housekeepingDef, "housekeeping",
+                     (osPriority_t)HOUSEKEEPING_TASK_PRIORITY, HOUSEKEEPING_TASK_STACK_SIZE) && ok;
     ok = create_task(canRxTask, NULL, "can2RxTask",
                      (osPriority_t)CAN_RX_TASK_PRIORITY, CAN_RX_TASK_STACK_SIZE) && ok;
     ok = create_task(daqTask, NULL, "daqTask",
@@ -98,7 +95,7 @@ void tasks_init(void)
 /* Called by FreeRTOS the instant it detects a task has overrun its stack
    (configCHECK_FOR_STACK_OVERFLOW, FreeRTOSConfig.h). RTOS state is not
    trustworthy by now, so this only latches HBLED on solid and halts —
-   visibly different from the 1 Hz heartbeat. Attach a debugger to read
+   visibly different from the heartbeat blink. Attach a debugger to read
    xTask and pcTaskName. */
 void vApplicationStackOverflowHook(TaskHandle_t xTask, char *pcTaskName)
 {

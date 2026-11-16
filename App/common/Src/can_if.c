@@ -344,11 +344,11 @@ static void publish(void)
     control_snapshot_t snap;
     control_step_read(&snap);
 
-    /* background_stalled waits for Housekeeping (#47); card_state (0,
-       MISSING), events_dropped, allocation_failed and records_dropped for
-       the Data log and Event log. */
+    /* card_state (0, MISSING), events_dropped, allocation_failed and
+       records_dropped wait for the Data log and Event log. */
     const daq_status_t status = {
         .overruns = snap.overruns,
+        .background_stalled = snap.background_stalled,
         .control_bus_off = snap.bus.health.off,
         .control_bus_latched = snap.bus.health.latched,
         .control_bus_error_passive = snap.bus.health.error_passive,

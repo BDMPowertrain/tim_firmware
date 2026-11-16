@@ -11,6 +11,7 @@
 #include "can_daq.h"
 #include "can_if.h"
 #include "control_step.h"
+#include "housekeeping.h"
 #include "imu.h"
 #include "logger.h"
 #include "main.h"
@@ -23,31 +24,6 @@
 #include "vcu_params.h"
 #include "vcu_shell.h"
 #include "vcu_step.h"
-
-/* Ladder exercise 1: two tasks toggling different GPIOs at different
-   rates and priorities, so preemption is visible on a scope rather than
-   just read about. heartbeatTask is slow and low-priority (the board's
-   "I'm alive" LED); blinkTask is fast and Normal-priority, so it
-   preempts heartbeatTask every time both are runnable at once. */
-static void heartbeatTask(void *argument)
-{
-    (void)argument;
-
-    for (;;) {
-        HAL_GPIO_TogglePin(GPIO_HBLED_GPIO_Port, GPIO_HBLED_Pin);
-        osDelay(500);
-    }
-}
-
-static void blinkTask(void *argument)
-{
-    (void)argument;
-
-    for (;;) {
-        HAL_GPIO_TogglePin(GPIO_1_GPIO_Port, GPIO_1_Pin);
-        osDelay(5);
-    }
-}
 
 /* initTask (the one CubeMX-generated task, see Core/Src/main.c) has a
    fixed 512-byte stack that isn't one of tasks.h's tunable *_STACK_SIZE
@@ -77,6 +53,11 @@ static bool create_task(osThreadFunc_t func, void *argument, const char *name,
 /* Read by the control step for as long as it runs. */
 static control_step_args_t controlStepArgs;
 
+/* The VCU's own Housekeeping work: VBAT. */
+static const housekeeping_def_t housekeepingDef = {
+    .poll = vbat_sample,
+};
+
 /* What the DAQ publisher sends from the VCU (can/daq.dbc). */
 static const can_if_publisher_t daqPublisher = {
     .status_frame_id = CAN_DAQ_VCU_DAQ_STATUS_FRAME_ID,
@@ -104,16 +85,15 @@ void tasks_init(void)
     ok = logger_init() && ok;
     ok = can_if_init(&daqPublisher) && ok;
     ok = vbat_init() && ok;
+    ok = housekeeping_init() && ok;
     ok = vcu_step_init() && ok;
 
     ok = create_task(printTask, NULL, "printTask",
                      (osPriority_t)PRINT_TASK_PRIORITY, PRINT_TASK_STACK_SIZE) && ok;
     ok = create_task(shellTask, NULL, "shellTask",
                      (osPriority_t)SHELL_TASK_PRIORITY, SHELL_TASK_STACK_SIZE) && ok;
-    ok = create_task(heartbeatTask, NULL, "heartbeatTask",
-                     (osPriority_t)HEARTBEAT_TASK_PRIORITY, HEARTBEAT_TASK_STACK_SIZE) && ok;
-    ok = create_task(blinkTask, NULL, "blinkTask",
-                     (osPriority_t)BLINK_TASK_PRIORITY, BLINK_TASK_STACK_SIZE) && ok;
+    ok = create_task(housekeepingTask, (void *)&housekeepingDef, "housekeeping",
+                     (osPriority_t)HOUSEKEEPING_TASK_PRIORITY, HOUSEKEEPING_TASK_STACK_SIZE) && ok;
     ok = create_task(imuTask, NULL, "imuTask",
                      (osPriority_t)IMU_TASK_PRIORITY, IMU_TASK_STACK_SIZE) && ok;
     ok = create_task(loggerTask, NULL, "loggerTask",
@@ -136,7 +116,7 @@ void tasks_init(void)
    the offending task's own stack is not trustworthy — so this does
    nothing but latch HBLED on solid and halt, deliberately not using
    shell_printf()/osDelay()/anything that assumes RTOS state is sane.
-   Solid-on is visibly different from heartbeatTask's normal 1 Hz blink,
+   Solid-on is visibly different from Housekeeping's normal 1 Hz blink,
    which stops the instant this fires. Attach a debugger to read xTask
    and pcTaskName from here to find out which task overran. */
 void vApplicationStackOverflowHook(TaskHandle_t xTask, char *pcTaskName)

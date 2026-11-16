@@ -21,14 +21,18 @@
 #include "control_bus.h"
 #include "step_timing.h"
 
-/* What a phase is handed. now_ms and step_count are set before the first
-   phase; state is the image's own state, written by its phases and
-   published after the step. */
+/* What a phase is handed. now_ms, step_count and background_stalled are set
+   before the first phase; state and fault_active are the image's own,
+   written by its phases and published after the step. */
 typedef struct {
     uint32_t now_ms;
     uint32_t step_count; /* 0 on the first step */
     bool     startup_ok; /* every task and queue was created */
+    /* Housekeeping has not run for 1 s (stall_watch.h): a warning only. */
+    bool     background_stalled;
     uint8_t  state;
+    /* Any fault is active: the heartbeat LED blinks at 5 Hz (heartbeat.h). */
+    bool     fault_active;
 } control_step_ctx_t;
 
 typedef struct {
@@ -56,6 +60,8 @@ typedef struct {
     uint32_t     step_count; /* steps run */
     uint8_t      state;
     bool         startup_ok;
+    bool         fault_active;
+    bool         background_stalled;
     uint32_t     overruns;   /* since power-on */
     step_stats_t stats;      /* last and worst since power-on, in us */
     control_bus_report_t bus; /* the Control bus as this step left it */

@@ -67,22 +67,22 @@
    and walk away from it; measure the high-water mark once the task is
    exercised and size to that with headroom. */
 
-#define HEARTBEAT_TASK_PRIORITY   osPriorityLow
-#define HEARTBEAT_TASK_STACK_SIZE 256u
-
-#define BLINK_TASK_PRIORITY       osPriorityNormal
-#define BLINK_TASK_STACK_SIZE     256u
+/* Housekeeping (issue 47): the one Low task, every 100 ms — heartbeat LED,
+   VBAT, and once a second the task statistics (whose array is static in
+   stats.c, not on this stack). The stack holds a copy of the step's
+   snapshot and the HAL ADC calls; unmeasured. Measure with `tasks`. */
+#define HOUSEKEEPING_TASK_PRIORITY   osPriorityLow
+#define HOUSEKEEPING_TASK_STACK_SIZE 1024u
 
 #define PRINT_TASK_PRIORITY       osPriorityNormal
 #define PRINT_TASK_STACK_SIZE     512u
 
 #define SHELL_TASK_PRIORITY       osPriorityNormal
-/* Measured via the `tasks` command itself: running `tasks` (builds a
-   16-entry TaskStatus_t array on shellTask's own stack, on top of its
-   line buffer and shell_dispatch()'s argv array) drove the high-water
-   Mark down to ~688 B free out of 2048 — i.e. ~1360 B actually used at
-   the worst point seen so far. 2048 leaves real headroom; re-measure
-   with `tasks` if more call depth gets added to this path later. */
+/* Measured via the `tasks` command itself when it still built a 16-entry
+   TaskStatus_t array on shellTask's own stack, on top of its line buffer
+   and shell_dispatch()'s argv array: ~688 B free out of 2048. `tasks` now
+   copies one gathered row at a time (stats.c), so this has more headroom
+   than that; re-measure with `tasks` if more call depth gets added. */
 #define SHELL_TASK_STACK_SIZE     2048u
 
 /* High-rate sensing band, per the reserved-priority table in

@@ -84,7 +84,7 @@ static int cmd_bus(int argc, char **argv);
    shell_register_commands(). */
 static const shell_cmd_t commandTable[] = {
     { "help",      cmd_help,      "list commands" },
-    { "tasks",     cmd_tasks,     "list tasks: state, priority, stack free" },
+    { "tasks",     cmd_tasks,     "list tasks: state, priority, CPU share, stack free (each second)" },
     { "reset",     cmd_reset,     "software reset" },
     { "step",      cmd_step,      "control step: state, overruns, last and worst times" },
     { "bus",       cmd_bus,       "Control bus (CAN1): bus-off, error-passive, skipped, overflows, error counts" },

@@ -175,6 +175,17 @@ standard names. */
    leaving the corruption to surface later as an unrelated hard fault. */
 #define configCHECK_FOR_STACK_OVERFLOW 2
 
+/* Each task's CPU time, counted in the DWT cycle counter
+   (App/common/Inc/cycle_counter.h); Housekeeping turns it into a CPU share
+   per task once a second for the shell's `tasks` (issue 47). */
+#define configGENERATE_RUN_TIME_STATS 1
+#ifndef __ASSEMBLER__
+void cycle_counter_init(void);
+uint32_t cycle_counter_read(void);
+#endif
+#define portCONFIGURE_TIMER_FOR_RUN_TIME_STATS() cycle_counter_init()
+#define portGET_RUN_TIME_COUNTER_VALUE()        cycle_counter_read()
+
 /* USER CODE END Defines */
 
 #endif /* FREERTOS_CONFIG_H */

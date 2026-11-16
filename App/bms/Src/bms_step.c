@@ -43,8 +43,10 @@ static void phase_input(control_step_ctx_t *ctx)
 
 static void phase_logic(control_step_ctx_t *ctx)
 {
-    /* No Sweep or logic yet: the BMS stays in STARTUP. */
+    /* No Sweep or logic yet: the BMS stays in STARTUP, with no BMS fault
+       to show. */
     ctx->state = CAN_CONTROL_BMS_STATUS_STATE_STARTUP_CHOICE;
+    ctx->fault_active = false;
 }
 
 static void phase_output(control_step_ctx_t *ctx)

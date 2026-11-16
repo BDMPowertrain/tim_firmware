@@ -52,8 +52,9 @@ static void phase_input(control_step_ctx_t *ctx)
 
 static void phase_logic(control_step_ctx_t *ctx)
 {
-    /* No logic yet: the VCU stays in STARTUP. */
+    /* No logic yet: the VCU stays in STARTUP, with no fault to show. */
     ctx->state = CAN_CONTROL_VCU_STATUS_STATE_STARTUP_CHOICE;
+    ctx->fault_active = false;
 }
 
 static void phase_output(control_step_ctx_t *ctx)

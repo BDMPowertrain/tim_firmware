@@ -12,8 +12,11 @@
    reserved for the BMS control step and hard hardware deadlines; nothing
    below may use them. */
 
-#define HEARTBEAT_TASK_PRIORITY   osPriorityLow
-#define HEARTBEAT_TASK_STACK_SIZE 256u
+/* Housekeeping (issue 47): the one Low task, every 100 ms — heartbeat LED
+   and once a second the task statistics. The VCU's size
+   (App/vcu/Inc/tasks.h), unmeasured on the BMS. */
+#define HOUSEKEEPING_TASK_PRIORITY   osPriorityLow
+#define HOUSEKEEPING_TASK_STACK_SIZE 1024u
 
 #define PRINT_TASK_PRIORITY       osPriorityNormal
 #define PRINT_TASK_STACK_SIZE     512u

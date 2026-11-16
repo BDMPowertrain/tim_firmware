@@ -11,8 +11,10 @@ add_logic_library(logic_common
         Src/daq_status.c
         Src/e2e_p11.c
         Src/frame_queue.c
+        Src/heartbeat.c
         Src/mailbox.c
         Src/params.c
+        Src/stall_watch.c
         Src/step_timing.c
         can_db/can_control.c
         can_db/can_daq.c
