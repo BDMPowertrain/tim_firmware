@@ -1,0 +1,4 @@
+# The Message database and the C generated from it (ADR 0003) are LF on every
+# machine, so can/generate.py gives the same bytes on Windows and in CI.
+can/*.dbc text eol=lf
+App/common/logic/can_db/* text eol=lf

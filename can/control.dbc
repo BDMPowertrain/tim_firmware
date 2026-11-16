@@ -1,0 +1,430 @@
+VERSION ""
+
+
+NS_ :
+	NS_DESC_
+	CM_
+	BA_DEF_
+	BA_
+	VAL_
+	CAT_DEF_
+	CAT_
+	FILTER
+	BA_DEF_DEF_
+	EV_DATA_
+	ENVVAR_DATA_
+	SGTYPE_
+	SGTYPE_VAL_
+	BA_DEF_SGTYPE_
+	BA_SGTYPE_
+	SIG_TYPE_REF_
+	VAL_TABLE_
+	SIG_GROUP_
+	SIG_VALTYPE_
+	SIGTYPE_VALTYPE_
+	BO_TX_BU_
+	BA_DEF_REL_
+	BA_REL_
+	BA_DEF_DEF_REL_
+	BU_SG_REL_
+	BU_EV_REL_
+	BU_BO_REL_
+	SG_MUL_VAL_
+
+BS_:
+
+BU_: VCU BMS INV EM IMD CHG
+
+
+BO_ 128 BMS_Status: 8 BMS
+ SG_ Crc : 0|8@1+ (1,0) [0|255] "" VCU
+ SG_ Counter : 8|4@1+ (1,0) [0|14] "" VCU
+ SG_ State : 12|4@1+ (1,0) [0|4] "" VCU
+ SG_ OverVoltageActive : 16|1@1+ (1,0) [0|1] "" VCU
+ SG_ UnderVoltageActive : 17|1@1+ (1,0) [0|1] "" VCU
+ SG_ OverTempActive : 18|1@1+ (1,0) [0|1] "" VCU
+ SG_ UnderTempActive : 19|1@1+ (1,0) [0|1] "" VCU
+ SG_ MeasurementActive : 20|1@1+ (1,0) [0|1] "" VCU
+ SG_ OpenWireActive : 21|1@1+ (1,0) [0|1] "" VCU
+ SG_ CellMonitorActive : 22|1@1+ (1,0) [0|1] "" VCU
+ SG_ InternalActive : 23|1@1+ (1,0) [0|1] "" VCU
+ SG_ ChargerDisobeysActive : 24|1@1+ (1,0) [0|1] "" VCU
+ SG_ OvercurrentActive : 25|1@1+ (1,0) [0|1] "" VCU
+ SG_ OverVoltageSeen : 32|1@1+ (1,0) [0|1] "" VCU
+ SG_ UnderVoltageSeen : 33|1@1+ (1,0) [0|1] "" VCU
+ SG_ OverTempSeen : 34|1@1+ (1,0) [0|1] "" VCU
+ SG_ UnderTempSeen : 35|1@1+ (1,0) [0|1] "" VCU
+ SG_ MeasurementSeen : 36|1@1+ (1,0) [0|1] "" VCU
+ SG_ OpenWireSeen : 37|1@1+ (1,0) [0|1] "" VCU
+ SG_ CellMonitorSeen : 38|1@1+ (1,0) [0|1] "" VCU
+ SG_ InternalSeen : 39|1@1+ (1,0) [0|1] "" VCU
+ SG_ ChargerDisobeysSeen : 40|1@1+ (1,0) [0|1] "" VCU
+ SG_ OvercurrentSeen : 41|1@1+ (1,0) [0|1] "" VCU
+ SG_ BmsOk : 48|1@1+ (1,0) [0|1] "" VCU
+ SG_ LowVoltageLimit : 49|1@1+ (1,0) [0|1] "" VCU
+ SG_ ShutdownCircuitClosed : 50|1@1+ (1,0) [0|1] "" VCU
+ SG_ ChargeComplete : 51|1@1+ (1,0) [0|1] "" VCU
+ SG_ ParametersDefaulted : 52|1@1+ (1,0) [0|1] "" VCU
+ SG_ NotDualBank : 53|1@1+ (1,0) [0|1] "" VCU
+ SG_ LastResetNotPowerOn : 54|1@1+ (1,0) [0|1] "" VCU
+ SG_ BusOffLatched : 56|1@1+ (1,0) [0|1] "" VCU
+ SG_ ErrorPassive : 57|1@1+ (1,0) [0|1] "" VCU
+ SG_ ReceiveOverflow : 58|1@1+ (1,0) [0|1] "" VCU
+
+BO_ 129 BMS_Limits: 8 BMS
+ SG_ Crc : 0|8@1+ (1,0) [0|255] "" VCU
+ SG_ Counter : 8|4@1+ (1,0) [0|14] "" VCU
+ SG_ ChargeLimit : 16|16@1+ (0.1,0) [0|6553.5] "A" VCU
+ SG_ PackVoltage : 32|16@1+ (0.1,0) [0|6553.5] "V" VCU
+
+BO_ 130 BMS_Power: 8 BMS
+ SG_ Crc : 0|8@1+ (1,0) [0|255] "" VCU
+ SG_ Counter : 8|4@1+ (1,0) [0|14] "" VCU
+ SG_ PackCurrent : 16|16@1- (0.1,0) [-3276.8|3276.7] "A" VCU
+ SG_ PackVoltage : 32|16@1+ (0.1,0) [0|6553.5] "V" VCU
+ SG_ DischargeLimit : 48|16@1+ (0.1,0) [0|6553.5] "A" VCU
+
+BO_ 144 VCU_Status: 8 VCU
+ SG_ Crc : 0|8@1+ (1,0) [0|255] "" Vector__XXX
+ SG_ Counter : 8|4@1+ (1,0) [0|14] "" Vector__XXX
+ SG_ State : 12|4@1+ (1,0) [0|3] "" Vector__XXX
+ SG_ AppsImplausible : 16|1@1+ (1,0) [0|1] "" Vector__XXX
+ SG_ BrakeSensorFailed : 17|1@1+ (1,0) [0|1] "" Vector__XXX
+ SG_ BrakePedalCut : 18|1@1+ (1,0) [0|1] "" Vector__XXX
+ SG_ BmsStatusTimeout : 19|1@1+ (1,0) [0|1] "" Vector__XXX
+ SG_ BmsLimitsTimeout : 20|1@1+ (1,0) [0|1] "" Vector__XXX
+ SG_ BmsPowerTimeout : 21|1@1+ (1,0) [0|1] "" Vector__XXX
+ SG_ InverterTimeout : 22|1@1+ (1,0) [0|1] "" Vector__XXX
+ SG_ TimingFault : 23|1@1+ (1,0) [0|1] "" Vector__XXX
+ SG_ BmsFaultReported : 24|1@1+ (1,0) [0|1] "" Vector__XXX
+ SG_ InverterFaultReported : 25|1@1+ (1,0) [0|1] "" Vector__XXX
+ SG_ ShutdownCircuitOpen : 26|1@1+ (1,0) [0|1] "" Vector__XXX
+ SG_ BusOffLatched : 27|1@1+ (1,0) [0|1] "" Vector__XXX
+ SG_ ParametersDefaulted : 28|1@1+ (1,0) [0|1] "" Vector__XXX
+ SG_ StartupBlocked : 29|1@1+ (1,0) [0|1] "" Vector__XXX
+ SG_ EnergyMeterTimeout : 32|1@1+ (1,0) [0|1] "" Vector__XXX
+ SG_ ErrorPassive : 33|1@1+ (1,0) [0|1] "" Vector__XXX
+ SG_ ReceiveOverflow : 34|1@1+ (1,0) [0|1] "" Vector__XXX
+ SG_ DischargeSlow : 35|1@1+ (1,0) [0|1] "" Vector__XXX
+ SG_ LimiterActive : 36|1@1+ (1,0) [0|1] "" Vector__XXX
+ SG_ LastResetNotPowerOn : 37|1@1+ (1,0) [0|1] "" Vector__XXX
+ SG_ NotDualBank : 38|1@1+ (1,0) [0|1] "" Vector__XXX
+ SG_ BrakeEngaged : 40|1@1+ (1,0) [0|1] "" Vector__XXX
+ SG_ StartButton : 41|1@1+ (1,0) [0|1] "" Vector__XXX
+ SG_ SoundOn : 42|1@1+ (1,0) [0|1] "" Vector__XXX
+ SG_ EnableSent : 43|1@1+ (1,0) [0|1] "" Vector__XXX
+ SG_ TorqueSent : 48|16@1- (0.1,0) [-3276.8|3276.7] "Nm" Vector__XXX
+
+BO_ 165 INV_MotorPosition: 8 INV
+ SG_ MotorSpeed : 16|16@1- (1,0) [-32768|32767] "rpm" VCU
+
+BO_ 167 INV_Voltage: 8 INV
+ SG_ DcBusVoltage : 0|16@1- (0.1,0) [-3276.8|3276.7] "V" VCU
+
+BO_ 170 INV_InternalStates: 8 INV
+ SG_ VsmState : 0|8@1+ (1,0) [0|15] "" VCU
+ SG_ EnableState : 48|1@1+ (1,0) [0|1] "" VCU
+ SG_ EnableLockout : 55|1@1+ (1,0) [0|1] "" VCU
+ SG_ BmsActive : 57|1@1+ (1,0) [0|1] "" VCU
+ SG_ BmsLimitingMotorTorque : 58|1@1+ (1,0) [0|1] "" VCU
+
+BO_ 171 INV_FaultCodes: 8 INV
+ SG_ PostFaults : 0|32@1+ (1,0) [0|4294967295] "" VCU
+ SG_ RunFaults : 32|32@1+ (1,0) [0|4294967295] "" VCU
+
+BO_ 177 INV_TorqueCapability: 8 INV
+ SG_ MotorTorqueAvailable : 0|16@1- (0.1,0) [-3276.8|3276.7] "Nm" VCU
+
+BO_ 192 INV_Command: 8 VCU
+ SG_ TorqueCommand : 0|16@1- (0.1,0) [-3276.8|3276.7] "Nm" INV
+ SG_ SpeedCommand : 16|16@1- (1,0) [-32768|32767] "rpm" INV
+ SG_ DirectionCommand : 32|1@1+ (1,0) [0|1] "" INV
+ SG_ InverterEnable : 40|1@1+ (1,0) [0|1] "" INV
+ SG_ InverterDischarge : 41|1@1+ (1,0) [0|1] "" INV
+ SG_ SpeedModeEnable : 42|1@1+ (1,0) [0|1] "" INV
+ SG_ RollingCounter : 44|4@1+ (1,0) [0|15] "" INV
+ SG_ TorqueLimit : 48|16@1- (0.1,0) [0|3276.7] "Nm" INV
+
+BO_ 193 INV_ParameterCommand: 8 VCU
+ SG_ ParameterAddress : 0|16@1+ (1,0) [0|65535] "" INV
+ SG_ Write : 16|1@1+ (1,0) [0|1] "" INV
+ SG_ Data : 32|16@1+ (1,0) [0|65535] "" INV
+
+BO_ 269 EM_Measurement: 8 EM
+ SG_ Current : 0|32@1- (1,0) [0|0] "A" VCU
+ SG_ Voltage : 32|32@1- (1,0) [0|0] "V" VCU
+
+BO_ 514 INV_BmsLimits: 8 BMS
+ SG_ DischargeLimit : 0|16@1+ (1,0) [0|32767] "A" INV
+ SG_ ChargeLimit : 16|16@1+ (1,0) [0|32767] "A" INV
+
+BO_ 528 BMS_PackVoltages: 8 BMS
+ SG_ MaxCellVoltage : 0|16@1+ (0.0001,0) [0|6.5535] "V" Vector__XXX
+ SG_ MinCellVoltage : 16|16@1+ (0.0001,0) [0|6.5535] "V" Vector__XXX
+ SG_ AvgCellVoltage : 32|16@1+ (0.0001,0) [0|6.5535] "V" Vector__XXX
+ SG_ MaxCellModule : 48|4@1+ (1,0) [0|15] "" Vector__XXX
+ SG_ MaxCellNumber : 52|4@1+ (1,0) [0|7] "" Vector__XXX
+ SG_ MinCellModule : 56|4@1+ (1,0) [0|15] "" Vector__XXX
+ SG_ MinCellNumber : 60|4@1+ (1,0) [0|7] "" Vector__XXX
+
+BO_ 529 BMS_PackTemps: 8 BMS
+ SG_ MaxTemp : 0|16@1- (0.1,0) [-3276.8|3276.7] "degC" Vector__XXX
+ SG_ MinTemp : 16|16@1- (0.1,0) [-3276.8|3276.7] "degC" Vector__XXX
+ SG_ AvgTemp : 32|16@1- (0.1,0) [-3276.8|3276.7] "degC" Vector__XXX
+ SG_ MaxTempModule : 48|4@1+ (1,0) [0|15] "" Vector__XXX
+ SG_ MaxTempSensor : 52|4@1+ (1,0) [0|7] "" Vector__XXX
+ SG_ MinTempModule : 56|4@1+ (1,0) [0|15] "" Vector__XXX
+ SG_ MinTempSensor : 60|4@1+ (1,0) [0|7] "" Vector__XXX
+
+BO_ 1037 EM_Status: 8 EM
+ SG_ Violation : 0|1@1+ (1,0) [0|1] "" VCU
+
+BO_ 1536 BMS_Balancing: 8 BMS
+ SG_ State : 0|4@1+ (1,0) [0|5] "" Vector__XXX
+ SG_ Reason : 8|8@1+ (1,0) [0|9] "" Vector__XXX
+ SG_ CellSpread : 16|16@1+ (1,0) [0|65535] "mV" Vector__XXX
+
+BO_ 1549 EM_CellTemps: 8 BMS
+ SG_ MaxCellTemp : 0|16@1+ (0.1,0) [0|6553.5] "degC" EM
+ SG_ MinCellTemp : 16|16@1+ (0.1,0) [0|6553.5] "degC" EM
+ SG_ AvgCellTemp : 32|16@1+ (0.1,0) [0|6553.5] "degC" EM
+
+BO_ 2550588916 CHG_Request: 8 BMS
+ SG_ MaxChargeVoltage : 7|16@0+ (0.1,0) [0|6553.5] "V" CHG
+ SG_ MaxChargeCurrent : 23|16@0+ (0.1,0) [0|6553.5] "A" CHG
+ SG_ Control : 32|8@1+ (1,0) [0|1] "" CHG
+
+BO_ 2566849012 IMD_InfoGeneral: 8 IMD
+ SG_ RIsoCorrected : 0|16@1+ (1,0) [0|65535] "kOhm" VCU
+ SG_ RIsoStatus : 16|8@1+ (1,0) [0|255] "" VCU
+ SG_ IsoAlarm : 36|1@1+ (1,0) [0|1] "" VCU
+ SG_ UnsafeToStart : 41|1@1+ (1,0) [0|1] "" VCU
+
+BO_ 2566869221 CHG_Status: 8 CHG
+ SG_ OutputVoltage : 7|16@0+ (0.1,0) [0|6553.5] "V" BMS
+ SG_ OutputCurrent : 23|16@0+ (0.1,0) [0|6553.5] "A" BMS
+ SG_ HardwareFailure : 32|1@1+ (1,0) [0|1] "" BMS
+ SG_ OverTemperature : 33|1@1+ (1,0) [0|1] "" BMS
+ SG_ InputVoltageWrong : 34|1@1+ (1,0) [0|1] "" BMS
+ SG_ StartingState : 35|1@1+ (1,0) [0|1] "" BMS
+ SG_ CommTimeout : 36|1@1+ (1,0) [0|1] "" BMS
+
+
+CM_ "Message database for the Control bus (the TIM's CAN1), ADR 0003.
+Classic CAN, 500 kbit/s, 8-byte frames, 11-bit IDs for every frame we own.
+Generated C: App/common/logic/can_db/can_control.[ch], made by can/generate.py
+and committed. Change a layout here, regenerate, commit both.
+
+ID plan, shared with can/daq.dbc (an ID means the same frame on either bus):
+0x000-0x07F empty; 0x080-0x09F our safety-relevant frames (BMS 0x08x, VCU
+0x09x); 0x0A0-0x0CF inverter; 0x100-0x1FF our fast data; 0x200-0x3FF our medium
+data (taken by others: 0x202, 0x30D, 0x30E); 0x400-0x5FF third parties (Energy
+Meter 0x40D; iso175 reserves 0x400, 0x401, 0x410, 0x500, 0x501, 0x510);
+0x600-0x6FF slow pack detail (taken: 0x60D); 0x700-0x7FF reserved for the
+bootloader and parameter tool (0x710/0x718 VCU, 0x720/0x728 BMS; 0x7DF-0x7EF
+kept clear).
+
+Our own frames are little-endian. Bits are numbered from bit 0 of byte 0.
+A bit or byte with no signal is spare: sent as 0, ignored on receive.
+
+BMS_Status, BMS_Limits, BMS_Power and VCU_Status carry AUTOSAR E2E Profile 11
+(App/common/logic/Inc/e2e_p11.h): byte 0 is the CRC, the low half of byte 1 is
+the counter (0 to 14). The Data ID of each of these frames is its CAN ID
+(0x0080, 0x0081, 0x0082, 0x0090).
+
+Third-party frames are transcribed by hand from the manuals in Datasheets/,
+only the signals we use, each citing its page. Page numbers are the printed
+ones. GenMsgCycleTime is the period in ms; 0 means sent on an event.";
+
+CM_ BU_ VCU "TIM running the VCU image.";
+CM_ BU_ BMS "TIM running the BMS image, on the BMS master daughterboard.";
+CM_ BU_ INV "Cascadia Motion CM200DZ inverter. Manual: CM Software Users Manual 0A-0163-04.";
+CM_ BU_ EM "FSAE Energy Meter. Manual: Energy Meter Student Manual, 27 Oct 2026.";
+CM_ BU_ IMD "Bender iso175 insulation monitor. Manual: iso175 SAE J1939 Specification D00415_03, 07.2025.";
+CM_ BU_ CHG "ELCON HK-J-H650-12 charger, on the hand cart only. Manual: Elcon CAN Specification 2019, document 0010 version 0A.";
+
+CM_ BO_ 128 "BMS state, BMS_OK and BMS faults. Every sweep (20 ms), from the first control step. E2E Profile 11, Data ID 0x0080. Only a BMS image sends this ID, so the ID also says which image a board runs.
+Layout: byte 0 CRC; byte 1 counter (bits 0-3) and state (bits 4-7); bytes 2-3 one active bit per fault; bytes 4-5 one seen bit per fault, same order; byte 6 flags that are not faults; byte 7 Control bus trouble, never a fault (ADR 0005).
+Fault order in both bit rows: 0 over-voltage, 1 under-voltage, 2 over-temperature, 3 under-temperature, 4 measurement, 5 open wire, 6 cell monitor, 7 internal, 8 charger disobeys, 9 overcurrent; 10-15 spare.";
+CM_ SG_ 128 Crc "E2E Profile 11 CRC-8 over the Data ID and bytes 1-7.";
+CM_ SG_ 128 Counter "E2E Profile 11 counter, 0 to 14.";
+CM_ SG_ 128 State "BMS state. FAULT ends by itself after 1 s clean; FAULT_HELD lasts until a power-on reset.";
+CM_ SG_ 128 OverVoltageActive "Active bits: the fault exists now, after its debounce. Cell over-voltage.";
+CM_ SG_ 128 UnderVoltageActive "Cell under-voltage.";
+CM_ SG_ 128 OverTempActive "Cell over-temperature.";
+CM_ SG_ 128 UnderTempActive "Cell under-temperature. Charge mode only.";
+CM_ SG_ 128 MeasurementActive "Measurement missing or invalid, or cell-monitor chain comms loss.";
+CM_ SG_ 128 OpenWireActive "Open sense wire.";
+CM_ SG_ 128 CellMonitorActive "Cell monitor fault: NFAULT low, a device fault, or a comparator.";
+CM_ SG_ 128 InternalActive "BMS internal fault: Held fault after a reset that was not power-on, feedback mismatch, sense cross-check, timing fault. The cause is in the Event log.";
+CM_ SG_ 128 ChargerDisobeysActive "Charger disobeys its request.";
+CM_ SG_ 128 OvercurrentActive "Reserved, never set (pack current sensing, issue 29).";
+CM_ SG_ 128 OverVoltageSeen "Seen bits: the fault has tripped since power-up; cleared only by a power cycle. Same order as the active bits.";
+CM_ SG_ 128 BmsOk "The level the firmware commands on BMS_OK: 1 = high (no fault).";
+CM_ SG_ 128 LowVoltageLimit "A cell is under the Low-voltage limit (3.0 V) and the Discharge limit is being derated. Not a fault.";
+CM_ SG_ 128 ShutdownCircuitClosed "The Shutdown Circuit sense input reads energised (in the car or on the hand cart).";
+CM_ SG_ 128 ChargeComplete "Charge complete: lasts until a power cycle.";
+CM_ SG_ 128 ParametersDefaulted "No valid stored parameters were found; running on defaults.";
+CM_ SG_ 128 NotDualBank "The MCU is not in dual-bank mode; nothing is written to flash.";
+CM_ SG_ 128 LastResetNotPowerOn "The last reset was not a power-on reset.";
+CM_ SG_ 128 BusOffLatched "Third bus-off without 1 s clean; retrying once per second.";
+CM_ SG_ 128 ErrorPassive "The CAN1 controller is error-passive.";
+CM_ SG_ 128 ReceiveOverflow "A CAN1 receive FIFO has overflowed since power-up.";
+
+CM_ BO_ 129 "Charge limit and pack voltage. Every 100 ms. E2E Profile 11, Data ID 0x0081. Bytes 2-3 charge limit, bytes 4-5 pack voltage, bytes 6-7 and bits 4-7 of byte 1 spare.";
+CM_ SG_ 129 ChargeLimit "Charge limit. 0 A in DRIVE and until BMS_OK is up.";
+CM_ SG_ 129 PackVoltage "Sum of the cell voltages of the last sweep.";
+
+CM_ BO_ 130 "Pack current, pack voltage and Discharge limit, all from one sweep. Every sweep (20 ms). E2E Profile 11, Data ID 0x0082. Bits 4-7 of byte 1 are spare: issue 29 (pack current sensing) decides how an invalid current is marked.";
+CM_ SG_ 130 PackCurrent "Pack current, positive when discharging.";
+CM_ SG_ 130 PackVoltage "Sum of the cell voltages of the same sweep.";
+CM_ SG_ 130 DischargeLimit "Derated Discharge limit (ADR 0018). 0 A until BMS_OK is up.";
+
+CM_ BO_ 144 "VCU state, fault bits, flags and the torque sent. Every second control step (20 ms), from the first step. E2E Profile 11, Data ID 0x0090. Only a VCU image sends this ID, so the ID also says which image a board runs.
+Layout: byte 0 CRC; byte 1 counter (bits 0-3) and state (bits 4-7); byte 2 Torque cut causes; byte 3 causes of Leaving Ready to Drive or of a refused start; byte 4 reported only; byte 5 flags; bytes 6-7 torque.
+This replaces the layout first drawn on issue 13 (state in byte 2, 16 fault bits in bytes 3-4), which later decisions over-filled. The state moved into the free half of byte 1, which gives three bytes of bits, and the timing fault sits with the other Torque cut causes instead of in the flags byte. Spare: bits 6-7 of byte 3, bit 7 of byte 4, bits 4-7 of byte 5.";
+CM_ SG_ 144 Crc "E2E Profile 11 CRC-8 over the Data ID and bytes 1-7.";
+CM_ SG_ 144 Counter "E2E Profile 11 counter, 0 to 14.";
+CM_ SG_ 144 State "VCU state. There is no fault state and no separate Ready to Drive bit.";
+CM_ SG_ 144 AppsImplausible "Torque cut: the two pedal sensors disagree or one is out of range.";
+CM_ SG_ 144 BrakeSensorFailed "Torque cut: a brake pressure sensor is out of range.";
+CM_ SG_ 144 BrakePedalCut "Torque cut: Brake engaged with Pedal travel above 25%.";
+CM_ SG_ 144 BmsStatusTimeout "Torque cut: the BMS_Status mailbox is not VALID.";
+CM_ SG_ 144 BmsLimitsTimeout "Torque cut: the BMS_Limits mailbox is not VALID.";
+CM_ SG_ 144 BmsPowerTimeout "Torque cut: the BMS_Power mailbox is not VALID.";
+CM_ SG_ 144 InverterTimeout "Torque cut: an inverter mailbox is not VALID.";
+CM_ SG_ 144 TimingFault "Torque cut: three Overruns within one second.";
+CM_ SG_ 144 BmsFaultReported "BMS_Status reports a fault.";
+CM_ SG_ 144 InverterFaultReported "The inverter reports a fault (INV_FaultCodes).";
+CM_ SG_ 144 ShutdownCircuitOpen "The Shutdown Circuit input reads open.";
+CM_ SG_ 144 BusOffLatched "Third bus-off without 1 s clean; clears after 5 s clean.";
+CM_ SG_ 144 ParametersDefaulted "No valid stored parameters: not calibrated, no torque, Start procedure refused.";
+CM_ SG_ 144 StartupBlocked "A start-up check has not passed and the VCU is staying in STARTUP.";
+CM_ SG_ 144 EnergyMeterTimeout "The EM_Measurement mailbox is not VALID. Cuts nothing.";
+CM_ SG_ 144 ErrorPassive "The CAN1 controller is error-passive.";
+CM_ SG_ 144 ReceiveOverflow "A CAN1 receive FIFO has overflowed since power-up.";
+CM_ SG_ 144 DischargeSlow "The bus was still above 60 V 5 s after the Shutdown Circuit opened.";
+CM_ SG_ 144 LimiterActive "The torque sent is under the driver's request because of the Power limiter, whichever of its two ceilings is the lower.";
+CM_ SG_ 144 LastResetNotPowerOn "The last reset was not a power-on reset.";
+CM_ SG_ 144 NotDualBank "The MCU is not in dual-bank mode; nothing is written to flash.";
+CM_ SG_ 144 BrakeEngaged "Brake engaged.";
+CM_ SG_ 144 StartButton "The start button reads pressed.";
+CM_ SG_ 144 SoundOn "The Ready to Drive sound is on.";
+CM_ SG_ 144 EnableSent "The last INV_Command carried Enable = 1.";
+CM_ SG_ 144 TorqueSent "The torque in the last INV_Command.";
+
+CM_ BO_ 165 "Inverter 0x0A5 Motor Position Information. CM manual Table 59, p.144. UNVERIFIED: layout not yet checked against a bus capture. Set to the fast broadcast rate (10 ms) at commissioning.";
+CM_ SG_ 165 MotorSpeed "INV_Motor_Speed, bytes 2-3, Angular Velocity format (1 rpm). Table 59, p.144; format p.84.";
+
+CM_ BO_ 167 "Inverter 0x0A7 Voltage Information. CM manual Table 61, p.144. UNVERIFIED: layout not yet checked against a bus capture. Fast rate (10 ms).";
+CM_ SG_ 167 DcBusVoltage "INV_DC_Bus_Voltage, bytes 0-1, High Voltage format (0.1 V). Table 61, p.144; format p.84.";
+
+CM_ BO_ 170 "Inverter 0x0AA Internal States. CM manual Table 64, p.145-148. UNVERIFIED: layout not yet checked against a bus capture. Fast rate (10 ms).";
+CM_ SG_ 170 VsmState "INV_VSM_State, byte 0. Table 64, p.145.";
+CM_ SG_ 170 EnableState "INV_Inverter_Enable_State, byte 6 bit 0: 1 enabled. Table 64, p.147.";
+CM_ SG_ 170 EnableLockout "INV_Inverter_Enable_Lockout, byte 6 bit 7: 1 = cannot be enabled until a command with Enable = 0 is seen. Table 64, p.148.";
+CM_ SG_ 170 BmsActive "INV_BMS_Active, byte 7 bit 1: the 0x202 frame is being received. Table 64, p.148.";
+CM_ SG_ 170 BmsLimitingMotorTorque "INV_BMS_Limiting_Motor_Torque, byte 7 bit 2. Table 64, p.148.";
+
+CM_ BO_ 171 "Inverter 0x0AB Fault Codes. CM manual Table 65, p.149; bit meanings Tables 72-73, p.151-154. UNVERIFIED: layout not yet checked against a bus capture. Fast rate (10 ms).";
+CM_ SG_ 171 PostFaults "INV_Post_Fault_Lo (bytes 0-1) and _Hi (bytes 2-3) read as one 32-bit word. Table 65, p.149.";
+CM_ SG_ 171 RunFaults "INV_Run_Fault_Lo (bytes 4-5) and _Hi (bytes 6-7) read as one 32-bit word. Table 65, p.149.";
+
+CM_ BO_ 177 "Inverter 0x0B1 Torque Capability. CM manual Table 71, p.150. UNVERIFIED: layout not yet checked against a bus capture. Logged only.";
+CM_ SG_ 177 MotorTorqueAvailable "Motor Torque Available, bytes 0-1, Torque format (0.1 Nm). Table 71, p.150.";
+
+CM_ BO_ 192 "Inverter 0x0C0 Command Message, in the inverter's format. CM manual Table 28, p.90, and Table 35, p.100 (rolling counter). UNVERIFIED: layout not yet checked against the inverter. Every VCU control step (10 ms) in every state after STARTUP. DLC must be 8 (p.90).";
+CM_ SG_ 192 TorqueCommand "Torque Command, bytes 0-1, Torque format. Never negative: no regen.";
+CM_ SG_ 192 SpeedCommand "Speed Command, bytes 2-3. Speed mode only; always 0.";
+CM_ SG_ 192 DirectionCommand "Direction Command, byte 4: 1 forward. Always 1.";
+CM_ SG_ 192 InverterEnable "Inverter Enable, byte 5 bit 0. 1 only in READY_TO_DRIVE.";
+CM_ SG_ 192 InverterDischarge "Inverter Discharge, byte 5 bit 1. Never set: discharge is hardware-only.";
+CM_ SG_ 192 SpeedModeEnable "Speed Mode Enable, byte 5 bit 2. Never set.";
+CM_ SG_ 192 RollingCounter "Rolling Counter, byte 5 bits 4-7: last value + 1, modulo 16. Table 35, p.100; section 8.12, p.98-100.";
+CM_ SG_ 192 TorqueLimit "Commanded Torque Limit, bytes 6-7. Always the maximum-torque parameter, never a computed value. 0 means use the EEPROM limits, not zero torque (p.90).";
+
+CM_ BO_ 193 "Inverter 0x0C1 Read/Write Parameter Command. CM manual Table 29, p.93. UNVERIFIED: layout not yet checked against the inverter. Sent once per start button press, only as a fault clear: address 20, write, data 0 (section 8.8.3, p.94).";
+CM_ SG_ 193 ParameterAddress "Parameter Address, bytes 0-1. 20 = Fault Clear (p.94).";
+CM_ SG_ 193 Write "R/W Command, byte 2: 0 read, 1 write.";
+CM_ SG_ 193 Data "Data, bytes 4-5.";
+
+CM_ BO_ 269 "Energy Meter 0x10D Measurement Message, sent by the meter every 20 ms. EM manual p.10. Logged only; nothing in the torque path reads it. The meter is fitted only at competition.";
+CM_ SG_ 269 Current "Current [A], float, bytes 0-3, little-endian. EM manual p.10.";
+CM_ SG_ 269 Voltage "Voltage [V], float, bytes 4-7, little-endian. EM manual p.10.";
+
+CM_ BO_ 514 "Inverter 0x202 BMS current limits, in the inverter's (Orion) format: fixed ID, whole amps, little-endian. CM manual section 8.10, p.96-97. UNVERIFIED: not yet checked against the inverter. Every 100 ms. The inverter drops the limit 1 s after the last frame. In Charge mode this frame gives up two of its ten slots per second to CHG_Request and BMS_Balancing.";
+CM_ SG_ 514 DischargeLimit "Maximum discharge current, bytes 0-1: the derated Discharge limit, unscaled. Section 8.10, p.96.";
+CM_ SG_ 514 ChargeLimit "Maximum charge current, bytes 2-3. Section 8.10, p.96-97.";
+
+CM_ BO_ 528 "Pack cell-voltage summary. Every 100 ms. Informational: no decision reads it. Module and cell numbers count from 0: modules 0-15, cells 0-7.";
+CM_ BO_ 529 "Pack temperature summary. Every 100 ms. Informational: no decision reads it. Module and sensor numbers count from 0: modules 0-15, sensors 0-7.";
+
+CM_ BO_ 1037 "Energy Meter 0x40D Status Message, sent by the meter every 100 ms. EM manual p.10. Only the Violation bit is used; the other status bits and the Energy float in bytes 1-4 are not transcribed. The meter's DLC is unverified.";
+CM_ SG_ 1037 Violation "Violation, byte 0 bit 0. Written as an Event. EM manual p.10.";
+
+CM_ BO_ 1536 "Balancing status. Every 1 s, in Charge mode only. No CRC or counter.
+ID: 0x600, the first ID of the slow pack detail range.
+Send slot: the BMS sends three frames per control step over a five-step cycle, and step 1 of the cycle carries INV_BmsLimits (0x202). In Charge mode that slot comes round ten times a second (steps 1, 6, ... 46 of a 50-step second). CHG_Request takes it on step 1 and this frame takes it on step 26; the other eight keep 0x202. So no step ever has more than three frames due (ADR 0004). Outside Charge mode this frame is not sent.
+Per-cell bleed flags are on the DAQ bus (BMS_CellTemps_NN in can/daq.dbc).";
+CM_ SG_ 1536 State "Balancing state.";
+CM_ SG_ 1536 Reason "Why balancing is PAUSED (1-5) or STOPPED (6-9); NONE otherwise. TIME_LIMIT is the 12 hours after Charge complete running out with the Cell spread not yet at its target (no convergence).";
+CM_ SG_ 1536 CellSpread "Cell spread from the last sweep taken with no cell bleeding.";
+
+CM_ BO_ 1549 "Energy Meter 0x60D Temperature Message, in the meter's format. REQUIRED by the meter at least every 250 ms; sent every 100 ms. EM manual p.10: unsigned, degC = raw * 0.1, little-endian. The 16-bit widths are read from the table's column spans. A temperature below 0 degC cannot be sent: clamp to 0. Bytes 6-7 are 0.";
+CM_ SG_ 1549 MaxCellTemp "Maximum Cell Temp, bytes 0-1. EM manual p.10.";
+CM_ SG_ 1549 MinCellTemp "Minimum Cell Temp, bytes 2-3. EM manual p.10.";
+CM_ SG_ 1549 AvgCellTemp "Average Cell Temp, bytes 4-5. EM manual p.10.";
+
+CM_ BO_ 2550588916 "Charger request 0x1806E5F4 (29-bit), in the charger's format: big-endian. Elcon CAN Specification p.2, Message 1. UNVERIFIED: not yet checked against the charger (issue 33). Every 1 s, in Charge mode only, in the 0x202 slot (see BMS_Balancing). The charger stops 5 s after the last request (Operation Mode 1, p.6).";
+CM_ SG_ 2550588916 MaxChargeVoltage "Max Allowable Charging Terminal Voltage, BYTE1 high, BYTE2 low, 0.1 V. 128 x the Charge target while charging, 0 otherwise. Elcon p.2.";
+CM_ SG_ 2550588916 MaxChargeCurrent "Max Allowable Charging Current, BYTE3 high, BYTE4 low, 0.1 A. The Charge limit while charging, 0 otherwise. Elcon p.2.";
+CM_ SG_ 2550588916 Control "Control, BYTE5: 0 start charging, 1 stop charging. Elcon p.2.";
+
+CM_ BO_ 2566849012 "iso175 PGN_Info_General (PGN 65281), every 100 ms. iso175 J1939 Specification section 1.3.3, p.3. UNVERIFIED: the ID 0x18FF01F4 is not printed in the manual; it is computed from priority 6, the PGN and the default source address 0xF4 (p.2-3). Logged only.";
+CM_ SG_ 2566849012 RIsoCorrected "R_iso_corrected, Data 0-1, kOhm, 65535 = not available. p.3; values p.10 (index 0x4C).";
+CM_ SG_ 2566849012 RIsoStatus "R_iso_status, Data 2. p.3; values p.9 (index 0x44).";
+CM_ SG_ 2566849012 IsoAlarm "Warnings and alarms bit 4 (Data 4 bit 4): iso value below the error threshold. p.11.";
+CM_ SG_ 2566849012 UnsafeToStart "Warnings and alarms bit 9 (Data 5 bit 1): unsafe to start. p.11.";
+
+CM_ BO_ 2566869221 "Charger status 0x18FF50E5 (29-bit), broadcast by the charger every 1 s, big-endian. Elcon CAN Specification p.2 and p.6, Message 2. UNVERIFIED: not yet checked against the charger (issue 33). Hearing it starts Charge mode. No flag is a BMS fault.";
+CM_ SG_ 2566869221 OutputVoltage "Output Voltage, BYTE1 high, BYTE2 low, 0.1 V. Elcon p.2.";
+CM_ SG_ 2566869221 OutputCurrent "Output Current, BYTE3 high, BYTE4 low, 0.1 A. Elcon p.2, p.6.";
+CM_ SG_ 2566869221 HardwareFailure "Status flags (BYTE5) bit 0: 1 hardware failure. Elcon p.6.";
+CM_ SG_ 2566869221 OverTemperature "Status flags bit 1: 1 over-temperature protection. Elcon p.6.";
+CM_ SG_ 2566869221 InputVoltageWrong "Status flags bit 2: 1 input voltage wrong, the charger stops. Elcon p.6.";
+CM_ SG_ 2566869221 StartingState "Status flags bit 3: 0 battery detected and charging started, 1 charger stays off (reverse polarity guard). Elcon p.6.";
+CM_ SG_ 2566869221 CommTimeout "Status flags bit 4: 1 communication receive time-out. Elcon p.6.";
+
+BA_DEF_ BO_ "GenMsgCycleTime" INT 0 65535;
+BA_DEF_DEF_ "GenMsgCycleTime" 0;
+BA_ "GenMsgCycleTime" BO_ 128 20;
+BA_ "GenMsgCycleTime" BO_ 129 100;
+BA_ "GenMsgCycleTime" BO_ 130 20;
+BA_ "GenMsgCycleTime" BO_ 144 20;
+BA_ "GenMsgCycleTime" BO_ 165 10;
+BA_ "GenMsgCycleTime" BO_ 167 10;
+BA_ "GenMsgCycleTime" BO_ 170 10;
+BA_ "GenMsgCycleTime" BO_ 171 10;
+BA_ "GenMsgCycleTime" BO_ 177 10;
+BA_ "GenMsgCycleTime" BO_ 192 10;
+BA_ "GenMsgCycleTime" BO_ 269 20;
+BA_ "GenMsgCycleTime" BO_ 514 100;
+BA_ "GenMsgCycleTime" BO_ 528 100;
+BA_ "GenMsgCycleTime" BO_ 529 100;
+BA_ "GenMsgCycleTime" BO_ 1037 100;
+BA_ "GenMsgCycleTime" BO_ 1536 1000;
+BA_ "GenMsgCycleTime" BO_ 1549 100;
+BA_ "GenMsgCycleTime" BO_ 2550588916 1000;
+BA_ "GenMsgCycleTime" BO_ 2566849012 100;
+BA_ "GenMsgCycleTime" BO_ 2566869221 1000;
+
+VAL_ 128 State 0 "STARTUP" 1 "DRIVE" 2 "CHARGE" 3 "FAULT" 4 "FAULT_HELD" ;
+VAL_ 144 State 0 "STARTUP" 1 "GLV_ON" 2 "TS_ACTIVE" 3 "READY_TO_DRIVE" ;
+VAL_ 170 VsmState 0 "START" 1 "PRECHARGE_INIT" 2 "PRECHARGE_ACTIVE" 3 "PRECHARGE_COMPLETE" 4 "WAIT" 5 "READY" 6 "MOTOR_RUNNING" 7 "FAULT" 14 "SHUTDOWN_IN_PROCESS" 15 "RECYCLE_POWER" ;
+VAL_ 1536 State 0 "OFF" 1 "WAITING_FOR_GATE" 2 "BALANCING" 3 "PAUSED" 4 "DONE" 5 "STOPPED" ;
+VAL_ 1536 Reason 0 "NONE" 1 "SENSE_OPEN" 2 "BMS_FAULT" 3 "CHARGER_SILENT" 4 "BOARD_HOT" 5 "CELLS_HOT" 6 "LOW_CELL" 7 "TIME_LIMIT" 8 "FET_CHECK_FAILED" 9 "CONFIG_REJECTED" ;
+VAL_ 2550588916 Control 0 "START" 1 "STOP" ;
+VAL_ 2566849012 RIsoStatus 252 "STARTUP_ESTIMATE" 253 "STARTUP_FIRST_VALUE" 254 "NORMAL" 255 "NOT_AVAILABLE" ;
+
+SIG_VALTYPE_ 269 Current : 1;
+SIG_VALTYPE_ 269 Voltage : 1;

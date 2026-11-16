@@ -44,3 +44,4 @@ function(add_host_test name logic_library)
 endfunction()
 
 add_host_test(test_e2e_p11 logic_common common/test_e2e_p11.c)
+add_host_test(test_can_db logic_common common/test_can_db.c)

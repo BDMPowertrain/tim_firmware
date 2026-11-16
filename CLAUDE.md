@@ -16,7 +16,8 @@ Onboard: ASM330LHHG1TR IMU (SPI3), microSD (SPI2), 2x isolated CAN FD
 One preset builds both images (ADR 0001): build/<preset>/vcu/tim.elf and
 build/<preset>/bms/tim.elf. Both are named tim.elf, so check the folder
 before flashing. CI (.github/workflows/build.yml) runs the Debug and Release
-presets and the host tests on every push and pull request to dev.
+presets and the host tests, and checks the generated CAN code, on every push
+and pull request to dev.
 
 The configure fails if the two CubeMX projects name different firmware
 packages. The link fails if an image exceeds 224 KB (ADR 0014,
@@ -42,6 +43,27 @@ to the Arm toolchain.
 CI uses the host-tests-sanitize preset, which adds ASan and UBSan. MinGW GCC
 on Windows has neither, so run that preset on Linux or in WSL. Do not share
 one build/host-tests folder between Windows and WSL: delete it when switching.
+
+## Message database
+    pip install -r requirements.txt
+    python can/generate.py
+
+can/control.dbc (Control bus) and can/daq.dbc (DAQ bus) are the Message
+database (ADR 0003): the one definition of every CAN frame, with the bit
+layouts and the reason for them in the DBC comments. A frame layout changes
+there and nowhere else. can/generate.py turns them into
+App/common/logic/can_db/, which is committed and is logic. NEVER edit
+can_db/ by hand: change the DBC file, run the script, commit both. CI
+regenerates and fails on any difference. Python (3.10 or later) is needed
+only for this, not to build an image.
+
+The generated structs hold raw signal values (tenths of an amp and so on):
+the scale and unit of each signal are in its DBC file. No float or double
+scaling helper is generated.
+
+Third-party frames carry only the signals we use, each citing its manual
+page. A frame that comes once per module (..._00 to ..._15) gets C for its
+_00 copy only; pack any module with it and add to the _00 frame ID.
 
 ## Flash
     openocd -f interface/stlink-dap.cfg -f target/stm32g4x.cfg \
@@ -83,7 +105,8 @@ Symptom if skipped: flash and verify succeed, nothing runs, PC sits in
   add_logic_library() from cmake/logic.cmake. Logic includes no HAL,
   CMSIS-RTOS, FreeRTOS or generated header: those paths are not given to it,
   so the include fails to compile. The same libraries link into the images
-  and the host tests. Every logic module gets a host test.
+  and the host tests. Every logic module gets a host test. logic_common also
+  holds can_db/, the generated Message database code (see above).
 - All task priorities and stack sizes live in the image's tasks.h:
   App/vcu/Inc/tasks.h and App/bms/Inc/tasks.h. One place per image.
 - The shell is common code. A command only one image has is registered by

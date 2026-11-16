@@ -1,0 +1,945 @@
+VERSION ""
+
+
+NS_ :
+	NS_DESC_
+	CM_
+	BA_DEF_
+	BA_
+	VAL_
+	CAT_DEF_
+	CAT_
+	FILTER
+	BA_DEF_DEF_
+	EV_DATA_
+	ENVVAR_DATA_
+	SGTYPE_
+	SGTYPE_VAL_
+	BA_DEF_SGTYPE_
+	BA_SGTYPE_
+	SIG_TYPE_REF_
+	VAL_TABLE_
+	SIG_GROUP_
+	SIG_VALTYPE_
+	SIGTYPE_VALTYPE_
+	BO_TX_BU_
+	BA_DEF_REL_
+	BA_REL_
+	BA_DEF_DEF_REL_
+	BU_SG_REL_
+	BU_EV_REL_
+	BU_BO_REL_
+	SG_MUL_VAL_
+
+BS_:
+
+BU_: VCU BMS
+
+
+BO_ 640 BMS_DaqStatus: 8 BMS
+ SG_ OverrunSeen : 0|1@1+ (1,0) [0|1] "" VCU
+ SG_ BackgroundStalled : 1|1@1+ (1,0) [0|1] "" VCU
+ SG_ ControlBusState : 2|2@1+ (1,0) [0|3] "" VCU
+ SG_ CardState : 4|4@1+ (1,0) [0|2] "" VCU
+ SG_ EventsDropped : 8|1@1+ (1,0) [0|1] "" VCU
+ SG_ AllocationFailed : 9|1@1+ (1,0) [0|1] "" VCU
+ SG_ RecordsDropped : 32|32@1+ (1,0) [0|4294967295] "" VCU
+
+BO_ 656 VCU_DaqStatus: 8 VCU
+ SG_ OverrunSeen : 0|1@1+ (1,0) [0|1] "" Vector__XXX
+ SG_ BackgroundStalled : 1|1@1+ (1,0) [0|1] "" Vector__XXX
+ SG_ ControlBusState : 2|2@1+ (1,0) [0|3] "" Vector__XXX
+ SG_ CardState : 4|4@1+ (1,0) [0|2] "" Vector__XXX
+ SG_ EventsDropped : 8|1@1+ (1,0) [0|1] "" Vector__XXX
+ SG_ AllocationFailed : 9|1@1+ (1,0) [0|1] "" Vector__XXX
+ SG_ RecordsDropped : 32|32@1+ (1,0) [0|4294967295] "" Vector__XXX
+
+BO_ 1552 BMS_ModuleSummary_00: 8 BMS
+ SG_ MaxCellVoltage : 0|16@1+ (0.0001,0) [0|6.5535] "V" VCU
+ SG_ MinCellVoltage : 16|16@1+ (0.0001,0) [0|6.5535] "V" VCU
+ SG_ MaxTemp : 32|8@1+ (0.5,-40) [-40|87.5] "degC" VCU
+ SG_ MinTemp : 40|8@1+ (0.5,-40) [-40|87.5] "degC" VCU
+ SG_ MaxCellNumber : 48|4@1+ (1,0) [0|7] "" VCU
+ SG_ MinCellNumber : 52|4@1+ (1,0) [0|7] "" VCU
+ SG_ MaxTempSensor : 56|4@1+ (1,0) [0|7] "" VCU
+ SG_ MinTempSensor : 60|4@1+ (1,0) [0|7] "" VCU
+
+BO_ 1553 BMS_ModuleSummary_01: 8 BMS
+ SG_ MaxCellVoltage : 0|16@1+ (0.0001,0) [0|6.5535] "V" VCU
+ SG_ MinCellVoltage : 16|16@1+ (0.0001,0) [0|6.5535] "V" VCU
+ SG_ MaxTemp : 32|8@1+ (0.5,-40) [-40|87.5] "degC" VCU
+ SG_ MinTemp : 40|8@1+ (0.5,-40) [-40|87.5] "degC" VCU
+ SG_ MaxCellNumber : 48|4@1+ (1,0) [0|7] "" VCU
+ SG_ MinCellNumber : 52|4@1+ (1,0) [0|7] "" VCU
+ SG_ MaxTempSensor : 56|4@1+ (1,0) [0|7] "" VCU
+ SG_ MinTempSensor : 60|4@1+ (1,0) [0|7] "" VCU
+
+BO_ 1554 BMS_ModuleSummary_02: 8 BMS
+ SG_ MaxCellVoltage : 0|16@1+ (0.0001,0) [0|6.5535] "V" VCU
+ SG_ MinCellVoltage : 16|16@1+ (0.0001,0) [0|6.5535] "V" VCU
+ SG_ MaxTemp : 32|8@1+ (0.5,-40) [-40|87.5] "degC" VCU
+ SG_ MinTemp : 40|8@1+ (0.5,-40) [-40|87.5] "degC" VCU
+ SG_ MaxCellNumber : 48|4@1+ (1,0) [0|7] "" VCU
+ SG_ MinCellNumber : 52|4@1+ (1,0) [0|7] "" VCU
+ SG_ MaxTempSensor : 56|4@1+ (1,0) [0|7] "" VCU
+ SG_ MinTempSensor : 60|4@1+ (1,0) [0|7] "" VCU
+
+BO_ 1555 BMS_ModuleSummary_03: 8 BMS
+ SG_ MaxCellVoltage : 0|16@1+ (0.0001,0) [0|6.5535] "V" VCU
+ SG_ MinCellVoltage : 16|16@1+ (0.0001,0) [0|6.5535] "V" VCU
+ SG_ MaxTemp : 32|8@1+ (0.5,-40) [-40|87.5] "degC" VCU
+ SG_ MinTemp : 40|8@1+ (0.5,-40) [-40|87.5] "degC" VCU
+ SG_ MaxCellNumber : 48|4@1+ (1,0) [0|7] "" VCU
+ SG_ MinCellNumber : 52|4@1+ (1,0) [0|7] "" VCU
+ SG_ MaxTempSensor : 56|4@1+ (1,0) [0|7] "" VCU
+ SG_ MinTempSensor : 60|4@1+ (1,0) [0|7] "" VCU
+
+BO_ 1556 BMS_ModuleSummary_04: 8 BMS
+ SG_ MaxCellVoltage : 0|16@1+ (0.0001,0) [0|6.5535] "V" VCU
+ SG_ MinCellVoltage : 16|16@1+ (0.0001,0) [0|6.5535] "V" VCU
+ SG_ MaxTemp : 32|8@1+ (0.5,-40) [-40|87.5] "degC" VCU
+ SG_ MinTemp : 40|8@1+ (0.5,-40) [-40|87.5] "degC" VCU
+ SG_ MaxCellNumber : 48|4@1+ (1,0) [0|7] "" VCU
+ SG_ MinCellNumber : 52|4@1+ (1,0) [0|7] "" VCU
+ SG_ MaxTempSensor : 56|4@1+ (1,0) [0|7] "" VCU
+ SG_ MinTempSensor : 60|4@1+ (1,0) [0|7] "" VCU
+
+BO_ 1557 BMS_ModuleSummary_05: 8 BMS
+ SG_ MaxCellVoltage : 0|16@1+ (0.0001,0) [0|6.5535] "V" VCU
+ SG_ MinCellVoltage : 16|16@1+ (0.0001,0) [0|6.5535] "V" VCU
+ SG_ MaxTemp : 32|8@1+ (0.5,-40) [-40|87.5] "degC" VCU
+ SG_ MinTemp : 40|8@1+ (0.5,-40) [-40|87.5] "degC" VCU
+ SG_ MaxCellNumber : 48|4@1+ (1,0) [0|7] "" VCU
+ SG_ MinCellNumber : 52|4@1+ (1,0) [0|7] "" VCU
+ SG_ MaxTempSensor : 56|4@1+ (1,0) [0|7] "" VCU
+ SG_ MinTempSensor : 60|4@1+ (1,0) [0|7] "" VCU
+
+BO_ 1558 BMS_ModuleSummary_06: 8 BMS
+ SG_ MaxCellVoltage : 0|16@1+ (0.0001,0) [0|6.5535] "V" VCU
+ SG_ MinCellVoltage : 16|16@1+ (0.0001,0) [0|6.5535] "V" VCU
+ SG_ MaxTemp : 32|8@1+ (0.5,-40) [-40|87.5] "degC" VCU
+ SG_ MinTemp : 40|8@1+ (0.5,-40) [-40|87.5] "degC" VCU
+ SG_ MaxCellNumber : 48|4@1+ (1,0) [0|7] "" VCU
+ SG_ MinCellNumber : 52|4@1+ (1,0) [0|7] "" VCU
+ SG_ MaxTempSensor : 56|4@1+ (1,0) [0|7] "" VCU
+ SG_ MinTempSensor : 60|4@1+ (1,0) [0|7] "" VCU
+
+BO_ 1559 BMS_ModuleSummary_07: 8 BMS
+ SG_ MaxCellVoltage : 0|16@1+ (0.0001,0) [0|6.5535] "V" VCU
+ SG_ MinCellVoltage : 16|16@1+ (0.0001,0) [0|6.5535] "V" VCU
+ SG_ MaxTemp : 32|8@1+ (0.5,-40) [-40|87.5] "degC" VCU
+ SG_ MinTemp : 40|8@1+ (0.5,-40) [-40|87.5] "degC" VCU
+ SG_ MaxCellNumber : 48|4@1+ (1,0) [0|7] "" VCU
+ SG_ MinCellNumber : 52|4@1+ (1,0) [0|7] "" VCU
+ SG_ MaxTempSensor : 56|4@1+ (1,0) [0|7] "" VCU
+ SG_ MinTempSensor : 60|4@1+ (1,0) [0|7] "" VCU
+
+BO_ 1560 BMS_ModuleSummary_08: 8 BMS
+ SG_ MaxCellVoltage : 0|16@1+ (0.0001,0) [0|6.5535] "V" VCU
+ SG_ MinCellVoltage : 16|16@1+ (0.0001,0) [0|6.5535] "V" VCU
+ SG_ MaxTemp : 32|8@1+ (0.5,-40) [-40|87.5] "degC" VCU
+ SG_ MinTemp : 40|8@1+ (0.5,-40) [-40|87.5] "degC" VCU
+ SG_ MaxCellNumber : 48|4@1+ (1,0) [0|7] "" VCU
+ SG_ MinCellNumber : 52|4@1+ (1,0) [0|7] "" VCU
+ SG_ MaxTempSensor : 56|4@1+ (1,0) [0|7] "" VCU
+ SG_ MinTempSensor : 60|4@1+ (1,0) [0|7] "" VCU
+
+BO_ 1561 BMS_ModuleSummary_09: 8 BMS
+ SG_ MaxCellVoltage : 0|16@1+ (0.0001,0) [0|6.5535] "V" VCU
+ SG_ MinCellVoltage : 16|16@1+ (0.0001,0) [0|6.5535] "V" VCU
+ SG_ MaxTemp : 32|8@1+ (0.5,-40) [-40|87.5] "degC" VCU
+ SG_ MinTemp : 40|8@1+ (0.5,-40) [-40|87.5] "degC" VCU
+ SG_ MaxCellNumber : 48|4@1+ (1,0) [0|7] "" VCU
+ SG_ MinCellNumber : 52|4@1+ (1,0) [0|7] "" VCU
+ SG_ MaxTempSensor : 56|4@1+ (1,0) [0|7] "" VCU
+ SG_ MinTempSensor : 60|4@1+ (1,0) [0|7] "" VCU
+
+BO_ 1562 BMS_ModuleSummary_10: 8 BMS
+ SG_ MaxCellVoltage : 0|16@1+ (0.0001,0) [0|6.5535] "V" VCU
+ SG_ MinCellVoltage : 16|16@1+ (0.0001,0) [0|6.5535] "V" VCU
+ SG_ MaxTemp : 32|8@1+ (0.5,-40) [-40|87.5] "degC" VCU
+ SG_ MinTemp : 40|8@1+ (0.5,-40) [-40|87.5] "degC" VCU
+ SG_ MaxCellNumber : 48|4@1+ (1,0) [0|7] "" VCU
+ SG_ MinCellNumber : 52|4@1+ (1,0) [0|7] "" VCU
+ SG_ MaxTempSensor : 56|4@1+ (1,0) [0|7] "" VCU
+ SG_ MinTempSensor : 60|4@1+ (1,0) [0|7] "" VCU
+
+BO_ 1563 BMS_ModuleSummary_11: 8 BMS
+ SG_ MaxCellVoltage : 0|16@1+ (0.0001,0) [0|6.5535] "V" VCU
+ SG_ MinCellVoltage : 16|16@1+ (0.0001,0) [0|6.5535] "V" VCU
+ SG_ MaxTemp : 32|8@1+ (0.5,-40) [-40|87.5] "degC" VCU
+ SG_ MinTemp : 40|8@1+ (0.5,-40) [-40|87.5] "degC" VCU
+ SG_ MaxCellNumber : 48|4@1+ (1,0) [0|7] "" VCU
+ SG_ MinCellNumber : 52|4@1+ (1,0) [0|7] "" VCU
+ SG_ MaxTempSensor : 56|4@1+ (1,0) [0|7] "" VCU
+ SG_ MinTempSensor : 60|4@1+ (1,0) [0|7] "" VCU
+
+BO_ 1564 BMS_ModuleSummary_12: 8 BMS
+ SG_ MaxCellVoltage : 0|16@1+ (0.0001,0) [0|6.5535] "V" VCU
+ SG_ MinCellVoltage : 16|16@1+ (0.0001,0) [0|6.5535] "V" VCU
+ SG_ MaxTemp : 32|8@1+ (0.5,-40) [-40|87.5] "degC" VCU
+ SG_ MinTemp : 40|8@1+ (0.5,-40) [-40|87.5] "degC" VCU
+ SG_ MaxCellNumber : 48|4@1+ (1,0) [0|7] "" VCU
+ SG_ MinCellNumber : 52|4@1+ (1,0) [0|7] "" VCU
+ SG_ MaxTempSensor : 56|4@1+ (1,0) [0|7] "" VCU
+ SG_ MinTempSensor : 60|4@1+ (1,0) [0|7] "" VCU
+
+BO_ 1565 BMS_ModuleSummary_13: 8 BMS
+ SG_ MaxCellVoltage : 0|16@1+ (0.0001,0) [0|6.5535] "V" VCU
+ SG_ MinCellVoltage : 16|16@1+ (0.0001,0) [0|6.5535] "V" VCU
+ SG_ MaxTemp : 32|8@1+ (0.5,-40) [-40|87.5] "degC" VCU
+ SG_ MinTemp : 40|8@1+ (0.5,-40) [-40|87.5] "degC" VCU
+ SG_ MaxCellNumber : 48|4@1+ (1,0) [0|7] "" VCU
+ SG_ MinCellNumber : 52|4@1+ (1,0) [0|7] "" VCU
+ SG_ MaxTempSensor : 56|4@1+ (1,0) [0|7] "" VCU
+ SG_ MinTempSensor : 60|4@1+ (1,0) [0|7] "" VCU
+
+BO_ 1566 BMS_ModuleSummary_14: 8 BMS
+ SG_ MaxCellVoltage : 0|16@1+ (0.0001,0) [0|6.5535] "V" VCU
+ SG_ MinCellVoltage : 16|16@1+ (0.0001,0) [0|6.5535] "V" VCU
+ SG_ MaxTemp : 32|8@1+ (0.5,-40) [-40|87.5] "degC" VCU
+ SG_ MinTemp : 40|8@1+ (0.5,-40) [-40|87.5] "degC" VCU
+ SG_ MaxCellNumber : 48|4@1+ (1,0) [0|7] "" VCU
+ SG_ MinCellNumber : 52|4@1+ (1,0) [0|7] "" VCU
+ SG_ MaxTempSensor : 56|4@1+ (1,0) [0|7] "" VCU
+ SG_ MinTempSensor : 60|4@1+ (1,0) [0|7] "" VCU
+
+BO_ 1567 BMS_ModuleSummary_15: 8 BMS
+ SG_ MaxCellVoltage : 0|16@1+ (0.0001,0) [0|6.5535] "V" VCU
+ SG_ MinCellVoltage : 16|16@1+ (0.0001,0) [0|6.5535] "V" VCU
+ SG_ MaxTemp : 32|8@1+ (0.5,-40) [-40|87.5] "degC" VCU
+ SG_ MinTemp : 40|8@1+ (0.5,-40) [-40|87.5] "degC" VCU
+ SG_ MaxCellNumber : 48|4@1+ (1,0) [0|7] "" VCU
+ SG_ MinCellNumber : 52|4@1+ (1,0) [0|7] "" VCU
+ SG_ MaxTempSensor : 56|4@1+ (1,0) [0|7] "" VCU
+ SG_ MinTempSensor : 60|4@1+ (1,0) [0|7] "" VCU
+
+BO_ 1568 BMS_CellVoltagesA_00: 8 BMS
+ SG_ Cell0 : 0|16@1+ (0.0001,0) [0|6.5535] "V" VCU
+ SG_ Cell1 : 16|16@1+ (0.0001,0) [0|6.5535] "V" VCU
+ SG_ Cell2 : 32|16@1+ (0.0001,0) [0|6.5535] "V" VCU
+ SG_ Cell3 : 48|16@1+ (0.0001,0) [0|6.5535] "V" VCU
+
+BO_ 1569 BMS_CellVoltagesB_00: 8 BMS
+ SG_ Cell4 : 0|16@1+ (0.0001,0) [0|6.5535] "V" VCU
+ SG_ Cell5 : 16|16@1+ (0.0001,0) [0|6.5535] "V" VCU
+ SG_ Cell6 : 32|16@1+ (0.0001,0) [0|6.5535] "V" VCU
+ SG_ Cell7 : 48|16@1+ (0.0001,0) [0|6.5535] "V" VCU
+
+BO_ 1570 BMS_CellTemps_00: 20 BMS
+ SG_ Temp0 : 0|16@1- (0.1,0) [-3276.8|3276.7] "degC" VCU
+ SG_ Temp1 : 16|16@1- (0.1,0) [-3276.8|3276.7] "degC" VCU
+ SG_ Temp2 : 32|16@1- (0.1,0) [-3276.8|3276.7] "degC" VCU
+ SG_ Temp3 : 48|16@1- (0.1,0) [-3276.8|3276.7] "degC" VCU
+ SG_ Temp4 : 64|16@1- (0.1,0) [-3276.8|3276.7] "degC" VCU
+ SG_ Temp5 : 80|16@1- (0.1,0) [-3276.8|3276.7] "degC" VCU
+ SG_ Temp6 : 96|16@1- (0.1,0) [-3276.8|3276.7] "degC" VCU
+ SG_ Temp7 : 112|16@1- (0.1,0) [-3276.8|3276.7] "degC" VCU
+ SG_ Bleed0 : 128|1@1+ (1,0) [0|1] "" VCU
+ SG_ Bleed1 : 129|1@1+ (1,0) [0|1] "" VCU
+ SG_ Bleed2 : 130|1@1+ (1,0) [0|1] "" VCU
+ SG_ Bleed3 : 131|1@1+ (1,0) [0|1] "" VCU
+ SG_ Bleed4 : 132|1@1+ (1,0) [0|1] "" VCU
+ SG_ Bleed5 : 133|1@1+ (1,0) [0|1] "" VCU
+ SG_ Bleed6 : 134|1@1+ (1,0) [0|1] "" VCU
+ SG_ Bleed7 : 135|1@1+ (1,0) [0|1] "" VCU
+
+BO_ 1571 BMS_CellVoltagesA_01: 8 BMS
+ SG_ Cell0 : 0|16@1+ (0.0001,0) [0|6.5535] "V" VCU
+ SG_ Cell1 : 16|16@1+ (0.0001,0) [0|6.5535] "V" VCU
+ SG_ Cell2 : 32|16@1+ (0.0001,0) [0|6.5535] "V" VCU
+ SG_ Cell3 : 48|16@1+ (0.0001,0) [0|6.5535] "V" VCU
+
+BO_ 1572 BMS_CellVoltagesB_01: 8 BMS
+ SG_ Cell4 : 0|16@1+ (0.0001,0) [0|6.5535] "V" VCU
+ SG_ Cell5 : 16|16@1+ (0.0001,0) [0|6.5535] "V" VCU
+ SG_ Cell6 : 32|16@1+ (0.0001,0) [0|6.5535] "V" VCU
+ SG_ Cell7 : 48|16@1+ (0.0001,0) [0|6.5535] "V" VCU
+
+BO_ 1573 BMS_CellTemps_01: 20 BMS
+ SG_ Temp0 : 0|16@1- (0.1,0) [-3276.8|3276.7] "degC" VCU
+ SG_ Temp1 : 16|16@1- (0.1,0) [-3276.8|3276.7] "degC" VCU
+ SG_ Temp2 : 32|16@1- (0.1,0) [-3276.8|3276.7] "degC" VCU
+ SG_ Temp3 : 48|16@1- (0.1,0) [-3276.8|3276.7] "degC" VCU
+ SG_ Temp4 : 64|16@1- (0.1,0) [-3276.8|3276.7] "degC" VCU
+ SG_ Temp5 : 80|16@1- (0.1,0) [-3276.8|3276.7] "degC" VCU
+ SG_ Temp6 : 96|16@1- (0.1,0) [-3276.8|3276.7] "degC" VCU
+ SG_ Temp7 : 112|16@1- (0.1,0) [-3276.8|3276.7] "degC" VCU
+ SG_ Bleed0 : 128|1@1+ (1,0) [0|1] "" VCU
+ SG_ Bleed1 : 129|1@1+ (1,0) [0|1] "" VCU
+ SG_ Bleed2 : 130|1@1+ (1,0) [0|1] "" VCU
+ SG_ Bleed3 : 131|1@1+ (1,0) [0|1] "" VCU
+ SG_ Bleed4 : 132|1@1+ (1,0) [0|1] "" VCU
+ SG_ Bleed5 : 133|1@1+ (1,0) [0|1] "" VCU
+ SG_ Bleed6 : 134|1@1+ (1,0) [0|1] "" VCU
+ SG_ Bleed7 : 135|1@1+ (1,0) [0|1] "" VCU
+
+BO_ 1574 BMS_CellVoltagesA_02: 8 BMS
+ SG_ Cell0 : 0|16@1+ (0.0001,0) [0|6.5535] "V" VCU
+ SG_ Cell1 : 16|16@1+ (0.0001,0) [0|6.5535] "V" VCU
+ SG_ Cell2 : 32|16@1+ (0.0001,0) [0|6.5535] "V" VCU
+ SG_ Cell3 : 48|16@1+ (0.0001,0) [0|6.5535] "V" VCU
+
+BO_ 1575 BMS_CellVoltagesB_02: 8 BMS
+ SG_ Cell4 : 0|16@1+ (0.0001,0) [0|6.5535] "V" VCU
+ SG_ Cell5 : 16|16@1+ (0.0001,0) [0|6.5535] "V" VCU
+ SG_ Cell6 : 32|16@1+ (0.0001,0) [0|6.5535] "V" VCU
+ SG_ Cell7 : 48|16@1+ (0.0001,0) [0|6.5535] "V" VCU
+
+BO_ 1576 BMS_CellTemps_02: 20 BMS
+ SG_ Temp0 : 0|16@1- (0.1,0) [-3276.8|3276.7] "degC" VCU
+ SG_ Temp1 : 16|16@1- (0.1,0) [-3276.8|3276.7] "degC" VCU
+ SG_ Temp2 : 32|16@1- (0.1,0) [-3276.8|3276.7] "degC" VCU
+ SG_ Temp3 : 48|16@1- (0.1,0) [-3276.8|3276.7] "degC" VCU
+ SG_ Temp4 : 64|16@1- (0.1,0) [-3276.8|3276.7] "degC" VCU
+ SG_ Temp5 : 80|16@1- (0.1,0) [-3276.8|3276.7] "degC" VCU
+ SG_ Temp6 : 96|16@1- (0.1,0) [-3276.8|3276.7] "degC" VCU
+ SG_ Temp7 : 112|16@1- (0.1,0) [-3276.8|3276.7] "degC" VCU
+ SG_ Bleed0 : 128|1@1+ (1,0) [0|1] "" VCU
+ SG_ Bleed1 : 129|1@1+ (1,0) [0|1] "" VCU
+ SG_ Bleed2 : 130|1@1+ (1,0) [0|1] "" VCU
+ SG_ Bleed3 : 131|1@1+ (1,0) [0|1] "" VCU
+ SG_ Bleed4 : 132|1@1+ (1,0) [0|1] "" VCU
+ SG_ Bleed5 : 133|1@1+ (1,0) [0|1] "" VCU
+ SG_ Bleed6 : 134|1@1+ (1,0) [0|1] "" VCU
+ SG_ Bleed7 : 135|1@1+ (1,0) [0|1] "" VCU
+
+BO_ 1577 BMS_CellVoltagesA_03: 8 BMS
+ SG_ Cell0 : 0|16@1+ (0.0001,0) [0|6.5535] "V" VCU
+ SG_ Cell1 : 16|16@1+ (0.0001,0) [0|6.5535] "V" VCU
+ SG_ Cell2 : 32|16@1+ (0.0001,0) [0|6.5535] "V" VCU
+ SG_ Cell3 : 48|16@1+ (0.0001,0) [0|6.5535] "V" VCU
+
+BO_ 1578 BMS_CellVoltagesB_03: 8 BMS
+ SG_ Cell4 : 0|16@1+ (0.0001,0) [0|6.5535] "V" VCU
+ SG_ Cell5 : 16|16@1+ (0.0001,0) [0|6.5535] "V" VCU
+ SG_ Cell6 : 32|16@1+ (0.0001,0) [0|6.5535] "V" VCU
+ SG_ Cell7 : 48|16@1+ (0.0001,0) [0|6.5535] "V" VCU
+
+BO_ 1579 BMS_CellTemps_03: 20 BMS
+ SG_ Temp0 : 0|16@1- (0.1,0) [-3276.8|3276.7] "degC" VCU
+ SG_ Temp1 : 16|16@1- (0.1,0) [-3276.8|3276.7] "degC" VCU
+ SG_ Temp2 : 32|16@1- (0.1,0) [-3276.8|3276.7] "degC" VCU
+ SG_ Temp3 : 48|16@1- (0.1,0) [-3276.8|3276.7] "degC" VCU
+ SG_ Temp4 : 64|16@1- (0.1,0) [-3276.8|3276.7] "degC" VCU
+ SG_ Temp5 : 80|16@1- (0.1,0) [-3276.8|3276.7] "degC" VCU
+ SG_ Temp6 : 96|16@1- (0.1,0) [-3276.8|3276.7] "degC" VCU
+ SG_ Temp7 : 112|16@1- (0.1,0) [-3276.8|3276.7] "degC" VCU
+ SG_ Bleed0 : 128|1@1+ (1,0) [0|1] "" VCU
+ SG_ Bleed1 : 129|1@1+ (1,0) [0|1] "" VCU
+ SG_ Bleed2 : 130|1@1+ (1,0) [0|1] "" VCU
+ SG_ Bleed3 : 131|1@1+ (1,0) [0|1] "" VCU
+ SG_ Bleed4 : 132|1@1+ (1,0) [0|1] "" VCU
+ SG_ Bleed5 : 133|1@1+ (1,0) [0|1] "" VCU
+ SG_ Bleed6 : 134|1@1+ (1,0) [0|1] "" VCU
+ SG_ Bleed7 : 135|1@1+ (1,0) [0|1] "" VCU
+
+BO_ 1580 BMS_CellVoltagesA_04: 8 BMS
+ SG_ Cell0 : 0|16@1+ (0.0001,0) [0|6.5535] "V" VCU
+ SG_ Cell1 : 16|16@1+ (0.0001,0) [0|6.5535] "V" VCU
+ SG_ Cell2 : 32|16@1+ (0.0001,0) [0|6.5535] "V" VCU
+ SG_ Cell3 : 48|16@1+ (0.0001,0) [0|6.5535] "V" VCU
+
+BO_ 1581 BMS_CellVoltagesB_04: 8 BMS
+ SG_ Cell4 : 0|16@1+ (0.0001,0) [0|6.5535] "V" VCU
+ SG_ Cell5 : 16|16@1+ (0.0001,0) [0|6.5535] "V" VCU
+ SG_ Cell6 : 32|16@1+ (0.0001,0) [0|6.5535] "V" VCU
+ SG_ Cell7 : 48|16@1+ (0.0001,0) [0|6.5535] "V" VCU
+
+BO_ 1582 BMS_CellTemps_04: 20 BMS
+ SG_ Temp0 : 0|16@1- (0.1,0) [-3276.8|3276.7] "degC" VCU
+ SG_ Temp1 : 16|16@1- (0.1,0) [-3276.8|3276.7] "degC" VCU
+ SG_ Temp2 : 32|16@1- (0.1,0) [-3276.8|3276.7] "degC" VCU
+ SG_ Temp3 : 48|16@1- (0.1,0) [-3276.8|3276.7] "degC" VCU
+ SG_ Temp4 : 64|16@1- (0.1,0) [-3276.8|3276.7] "degC" VCU
+ SG_ Temp5 : 80|16@1- (0.1,0) [-3276.8|3276.7] "degC" VCU
+ SG_ Temp6 : 96|16@1- (0.1,0) [-3276.8|3276.7] "degC" VCU
+ SG_ Temp7 : 112|16@1- (0.1,0) [-3276.8|3276.7] "degC" VCU
+ SG_ Bleed0 : 128|1@1+ (1,0) [0|1] "" VCU
+ SG_ Bleed1 : 129|1@1+ (1,0) [0|1] "" VCU
+ SG_ Bleed2 : 130|1@1+ (1,0) [0|1] "" VCU
+ SG_ Bleed3 : 131|1@1+ (1,0) [0|1] "" VCU
+ SG_ Bleed4 : 132|1@1+ (1,0) [0|1] "" VCU
+ SG_ Bleed5 : 133|1@1+ (1,0) [0|1] "" VCU
+ SG_ Bleed6 : 134|1@1+ (1,0) [0|1] "" VCU
+ SG_ Bleed7 : 135|1@1+ (1,0) [0|1] "" VCU
+
+BO_ 1583 BMS_CellVoltagesA_05: 8 BMS
+ SG_ Cell0 : 0|16@1+ (0.0001,0) [0|6.5535] "V" VCU
+ SG_ Cell1 : 16|16@1+ (0.0001,0) [0|6.5535] "V" VCU
+ SG_ Cell2 : 32|16@1+ (0.0001,0) [0|6.5535] "V" VCU
+ SG_ Cell3 : 48|16@1+ (0.0001,0) [0|6.5535] "V" VCU
+
+BO_ 1584 BMS_CellVoltagesB_05: 8 BMS
+ SG_ Cell4 : 0|16@1+ (0.0001,0) [0|6.5535] "V" VCU
+ SG_ Cell5 : 16|16@1+ (0.0001,0) [0|6.5535] "V" VCU
+ SG_ Cell6 : 32|16@1+ (0.0001,0) [0|6.5535] "V" VCU
+ SG_ Cell7 : 48|16@1+ (0.0001,0) [0|6.5535] "V" VCU
+
+BO_ 1585 BMS_CellTemps_05: 20 BMS
+ SG_ Temp0 : 0|16@1- (0.1,0) [-3276.8|3276.7] "degC" VCU
+ SG_ Temp1 : 16|16@1- (0.1,0) [-3276.8|3276.7] "degC" VCU
+ SG_ Temp2 : 32|16@1- (0.1,0) [-3276.8|3276.7] "degC" VCU
+ SG_ Temp3 : 48|16@1- (0.1,0) [-3276.8|3276.7] "degC" VCU
+ SG_ Temp4 : 64|16@1- (0.1,0) [-3276.8|3276.7] "degC" VCU
+ SG_ Temp5 : 80|16@1- (0.1,0) [-3276.8|3276.7] "degC" VCU
+ SG_ Temp6 : 96|16@1- (0.1,0) [-3276.8|3276.7] "degC" VCU
+ SG_ Temp7 : 112|16@1- (0.1,0) [-3276.8|3276.7] "degC" VCU
+ SG_ Bleed0 : 128|1@1+ (1,0) [0|1] "" VCU
+ SG_ Bleed1 : 129|1@1+ (1,0) [0|1] "" VCU
+ SG_ Bleed2 : 130|1@1+ (1,0) [0|1] "" VCU
+ SG_ Bleed3 : 131|1@1+ (1,0) [0|1] "" VCU
+ SG_ Bleed4 : 132|1@1+ (1,0) [0|1] "" VCU
+ SG_ Bleed5 : 133|1@1+ (1,0) [0|1] "" VCU
+ SG_ Bleed6 : 134|1@1+ (1,0) [0|1] "" VCU
+ SG_ Bleed7 : 135|1@1+ (1,0) [0|1] "" VCU
+
+BO_ 1586 BMS_CellVoltagesA_06: 8 BMS
+ SG_ Cell0 : 0|16@1+ (0.0001,0) [0|6.5535] "V" VCU
+ SG_ Cell1 : 16|16@1+ (0.0001,0) [0|6.5535] "V" VCU
+ SG_ Cell2 : 32|16@1+ (0.0001,0) [0|6.5535] "V" VCU
+ SG_ Cell3 : 48|16@1+ (0.0001,0) [0|6.5535] "V" VCU
+
+BO_ 1587 BMS_CellVoltagesB_06: 8 BMS
+ SG_ Cell4 : 0|16@1+ (0.0001,0) [0|6.5535] "V" VCU
+ SG_ Cell5 : 16|16@1+ (0.0001,0) [0|6.5535] "V" VCU
+ SG_ Cell6 : 32|16@1+ (0.0001,0) [0|6.5535] "V" VCU
+ SG_ Cell7 : 48|16@1+ (0.0001,0) [0|6.5535] "V" VCU
+
+BO_ 1588 BMS_CellTemps_06: 20 BMS
+ SG_ Temp0 : 0|16@1- (0.1,0) [-3276.8|3276.7] "degC" VCU
+ SG_ Temp1 : 16|16@1- (0.1,0) [-3276.8|3276.7] "degC" VCU
+ SG_ Temp2 : 32|16@1- (0.1,0) [-3276.8|3276.7] "degC" VCU
+ SG_ Temp3 : 48|16@1- (0.1,0) [-3276.8|3276.7] "degC" VCU
+ SG_ Temp4 : 64|16@1- (0.1,0) [-3276.8|3276.7] "degC" VCU
+ SG_ Temp5 : 80|16@1- (0.1,0) [-3276.8|3276.7] "degC" VCU
+ SG_ Temp6 : 96|16@1- (0.1,0) [-3276.8|3276.7] "degC" VCU
+ SG_ Temp7 : 112|16@1- (0.1,0) [-3276.8|3276.7] "degC" VCU
+ SG_ Bleed0 : 128|1@1+ (1,0) [0|1] "" VCU
+ SG_ Bleed1 : 129|1@1+ (1,0) [0|1] "" VCU
+ SG_ Bleed2 : 130|1@1+ (1,0) [0|1] "" VCU
+ SG_ Bleed3 : 131|1@1+ (1,0) [0|1] "" VCU
+ SG_ Bleed4 : 132|1@1+ (1,0) [0|1] "" VCU
+ SG_ Bleed5 : 133|1@1+ (1,0) [0|1] "" VCU
+ SG_ Bleed6 : 134|1@1+ (1,0) [0|1] "" VCU
+ SG_ Bleed7 : 135|1@1+ (1,0) [0|1] "" VCU
+
+BO_ 1589 BMS_CellVoltagesA_07: 8 BMS
+ SG_ Cell0 : 0|16@1+ (0.0001,0) [0|6.5535] "V" VCU
+ SG_ Cell1 : 16|16@1+ (0.0001,0) [0|6.5535] "V" VCU
+ SG_ Cell2 : 32|16@1+ (0.0001,0) [0|6.5535] "V" VCU
+ SG_ Cell3 : 48|16@1+ (0.0001,0) [0|6.5535] "V" VCU
+
+BO_ 1590 BMS_CellVoltagesB_07: 8 BMS
+ SG_ Cell4 : 0|16@1+ (0.0001,0) [0|6.5535] "V" VCU
+ SG_ Cell5 : 16|16@1+ (0.0001,0) [0|6.5535] "V" VCU
+ SG_ Cell6 : 32|16@1+ (0.0001,0) [0|6.5535] "V" VCU
+ SG_ Cell7 : 48|16@1+ (0.0001,0) [0|6.5535] "V" VCU
+
+BO_ 1591 BMS_CellTemps_07: 20 BMS
+ SG_ Temp0 : 0|16@1- (0.1,0) [-3276.8|3276.7] "degC" VCU
+ SG_ Temp1 : 16|16@1- (0.1,0) [-3276.8|3276.7] "degC" VCU
+ SG_ Temp2 : 32|16@1- (0.1,0) [-3276.8|3276.7] "degC" VCU
+ SG_ Temp3 : 48|16@1- (0.1,0) [-3276.8|3276.7] "degC" VCU
+ SG_ Temp4 : 64|16@1- (0.1,0) [-3276.8|3276.7] "degC" VCU
+ SG_ Temp5 : 80|16@1- (0.1,0) [-3276.8|3276.7] "degC" VCU
+ SG_ Temp6 : 96|16@1- (0.1,0) [-3276.8|3276.7] "degC" VCU
+ SG_ Temp7 : 112|16@1- (0.1,0) [-3276.8|3276.7] "degC" VCU
+ SG_ Bleed0 : 128|1@1+ (1,0) [0|1] "" VCU
+ SG_ Bleed1 : 129|1@1+ (1,0) [0|1] "" VCU
+ SG_ Bleed2 : 130|1@1+ (1,0) [0|1] "" VCU
+ SG_ Bleed3 : 131|1@1+ (1,0) [0|1] "" VCU
+ SG_ Bleed4 : 132|1@1+ (1,0) [0|1] "" VCU
+ SG_ Bleed5 : 133|1@1+ (1,0) [0|1] "" VCU
+ SG_ Bleed6 : 134|1@1+ (1,0) [0|1] "" VCU
+ SG_ Bleed7 : 135|1@1+ (1,0) [0|1] "" VCU
+
+BO_ 1592 BMS_CellVoltagesA_08: 8 BMS
+ SG_ Cell0 : 0|16@1+ (0.0001,0) [0|6.5535] "V" VCU
+ SG_ Cell1 : 16|16@1+ (0.0001,0) [0|6.5535] "V" VCU
+ SG_ Cell2 : 32|16@1+ (0.0001,0) [0|6.5535] "V" VCU
+ SG_ Cell3 : 48|16@1+ (0.0001,0) [0|6.5535] "V" VCU
+
+BO_ 1593 BMS_CellVoltagesB_08: 8 BMS
+ SG_ Cell4 : 0|16@1+ (0.0001,0) [0|6.5535] "V" VCU
+ SG_ Cell5 : 16|16@1+ (0.0001,0) [0|6.5535] "V" VCU
+ SG_ Cell6 : 32|16@1+ (0.0001,0) [0|6.5535] "V" VCU
+ SG_ Cell7 : 48|16@1+ (0.0001,0) [0|6.5535] "V" VCU
+
+BO_ 1594 BMS_CellTemps_08: 20 BMS
+ SG_ Temp0 : 0|16@1- (0.1,0) [-3276.8|3276.7] "degC" VCU
+ SG_ Temp1 : 16|16@1- (0.1,0) [-3276.8|3276.7] "degC" VCU
+ SG_ Temp2 : 32|16@1- (0.1,0) [-3276.8|3276.7] "degC" VCU
+ SG_ Temp3 : 48|16@1- (0.1,0) [-3276.8|3276.7] "degC" VCU
+ SG_ Temp4 : 64|16@1- (0.1,0) [-3276.8|3276.7] "degC" VCU
+ SG_ Temp5 : 80|16@1- (0.1,0) [-3276.8|3276.7] "degC" VCU
+ SG_ Temp6 : 96|16@1- (0.1,0) [-3276.8|3276.7] "degC" VCU
+ SG_ Temp7 : 112|16@1- (0.1,0) [-3276.8|3276.7] "degC" VCU
+ SG_ Bleed0 : 128|1@1+ (1,0) [0|1] "" VCU
+ SG_ Bleed1 : 129|1@1+ (1,0) [0|1] "" VCU
+ SG_ Bleed2 : 130|1@1+ (1,0) [0|1] "" VCU
+ SG_ Bleed3 : 131|1@1+ (1,0) [0|1] "" VCU
+ SG_ Bleed4 : 132|1@1+ (1,0) [0|1] "" VCU
+ SG_ Bleed5 : 133|1@1+ (1,0) [0|1] "" VCU
+ SG_ Bleed6 : 134|1@1+ (1,0) [0|1] "" VCU
+ SG_ Bleed7 : 135|1@1+ (1,0) [0|1] "" VCU
+
+BO_ 1595 BMS_CellVoltagesA_09: 8 BMS
+ SG_ Cell0 : 0|16@1+ (0.0001,0) [0|6.5535] "V" VCU
+ SG_ Cell1 : 16|16@1+ (0.0001,0) [0|6.5535] "V" VCU
+ SG_ Cell2 : 32|16@1+ (0.0001,0) [0|6.5535] "V" VCU
+ SG_ Cell3 : 48|16@1+ (0.0001,0) [0|6.5535] "V" VCU
+
+BO_ 1596 BMS_CellVoltagesB_09: 8 BMS
+ SG_ Cell4 : 0|16@1+ (0.0001,0) [0|6.5535] "V" VCU
+ SG_ Cell5 : 16|16@1+ (0.0001,0) [0|6.5535] "V" VCU
+ SG_ Cell6 : 32|16@1+ (0.0001,0) [0|6.5535] "V" VCU
+ SG_ Cell7 : 48|16@1+ (0.0001,0) [0|6.5535] "V" VCU
+
+BO_ 1597 BMS_CellTemps_09: 20 BMS
+ SG_ Temp0 : 0|16@1- (0.1,0) [-3276.8|3276.7] "degC" VCU
+ SG_ Temp1 : 16|16@1- (0.1,0) [-3276.8|3276.7] "degC" VCU
+ SG_ Temp2 : 32|16@1- (0.1,0) [-3276.8|3276.7] "degC" VCU
+ SG_ Temp3 : 48|16@1- (0.1,0) [-3276.8|3276.7] "degC" VCU
+ SG_ Temp4 : 64|16@1- (0.1,0) [-3276.8|3276.7] "degC" VCU
+ SG_ Temp5 : 80|16@1- (0.1,0) [-3276.8|3276.7] "degC" VCU
+ SG_ Temp6 : 96|16@1- (0.1,0) [-3276.8|3276.7] "degC" VCU
+ SG_ Temp7 : 112|16@1- (0.1,0) [-3276.8|3276.7] "degC" VCU
+ SG_ Bleed0 : 128|1@1+ (1,0) [0|1] "" VCU
+ SG_ Bleed1 : 129|1@1+ (1,0) [0|1] "" VCU
+ SG_ Bleed2 : 130|1@1+ (1,0) [0|1] "" VCU
+ SG_ Bleed3 : 131|1@1+ (1,0) [0|1] "" VCU
+ SG_ Bleed4 : 132|1@1+ (1,0) [0|1] "" VCU
+ SG_ Bleed5 : 133|1@1+ (1,0) [0|1] "" VCU
+ SG_ Bleed6 : 134|1@1+ (1,0) [0|1] "" VCU
+ SG_ Bleed7 : 135|1@1+ (1,0) [0|1] "" VCU
+
+BO_ 1598 BMS_CellVoltagesA_10: 8 BMS
+ SG_ Cell0 : 0|16@1+ (0.0001,0) [0|6.5535] "V" VCU
+ SG_ Cell1 : 16|16@1+ (0.0001,0) [0|6.5535] "V" VCU
+ SG_ Cell2 : 32|16@1+ (0.0001,0) [0|6.5535] "V" VCU
+ SG_ Cell3 : 48|16@1+ (0.0001,0) [0|6.5535] "V" VCU
+
+BO_ 1599 BMS_CellVoltagesB_10: 8 BMS
+ SG_ Cell4 : 0|16@1+ (0.0001,0) [0|6.5535] "V" VCU
+ SG_ Cell5 : 16|16@1+ (0.0001,0) [0|6.5535] "V" VCU
+ SG_ Cell6 : 32|16@1+ (0.0001,0) [0|6.5535] "V" VCU
+ SG_ Cell7 : 48|16@1+ (0.0001,0) [0|6.5535] "V" VCU
+
+BO_ 1600 BMS_CellTemps_10: 20 BMS
+ SG_ Temp0 : 0|16@1- (0.1,0) [-3276.8|3276.7] "degC" VCU
+ SG_ Temp1 : 16|16@1- (0.1,0) [-3276.8|3276.7] "degC" VCU
+ SG_ Temp2 : 32|16@1- (0.1,0) [-3276.8|3276.7] "degC" VCU
+ SG_ Temp3 : 48|16@1- (0.1,0) [-3276.8|3276.7] "degC" VCU
+ SG_ Temp4 : 64|16@1- (0.1,0) [-3276.8|3276.7] "degC" VCU
+ SG_ Temp5 : 80|16@1- (0.1,0) [-3276.8|3276.7] "degC" VCU
+ SG_ Temp6 : 96|16@1- (0.1,0) [-3276.8|3276.7] "degC" VCU
+ SG_ Temp7 : 112|16@1- (0.1,0) [-3276.8|3276.7] "degC" VCU
+ SG_ Bleed0 : 128|1@1+ (1,0) [0|1] "" VCU
+ SG_ Bleed1 : 129|1@1+ (1,0) [0|1] "" VCU
+ SG_ Bleed2 : 130|1@1+ (1,0) [0|1] "" VCU
+ SG_ Bleed3 : 131|1@1+ (1,0) [0|1] "" VCU
+ SG_ Bleed4 : 132|1@1+ (1,0) [0|1] "" VCU
+ SG_ Bleed5 : 133|1@1+ (1,0) [0|1] "" VCU
+ SG_ Bleed6 : 134|1@1+ (1,0) [0|1] "" VCU
+ SG_ Bleed7 : 135|1@1+ (1,0) [0|1] "" VCU
+
+BO_ 1601 BMS_CellVoltagesA_11: 8 BMS
+ SG_ Cell0 : 0|16@1+ (0.0001,0) [0|6.5535] "V" VCU
+ SG_ Cell1 : 16|16@1+ (0.0001,0) [0|6.5535] "V" VCU
+ SG_ Cell2 : 32|16@1+ (0.0001,0) [0|6.5535] "V" VCU
+ SG_ Cell3 : 48|16@1+ (0.0001,0) [0|6.5535] "V" VCU
+
+BO_ 1602 BMS_CellVoltagesB_11: 8 BMS
+ SG_ Cell4 : 0|16@1+ (0.0001,0) [0|6.5535] "V" VCU
+ SG_ Cell5 : 16|16@1+ (0.0001,0) [0|6.5535] "V" VCU
+ SG_ Cell6 : 32|16@1+ (0.0001,0) [0|6.5535] "V" VCU
+ SG_ Cell7 : 48|16@1+ (0.0001,0) [0|6.5535] "V" VCU
+
+BO_ 1603 BMS_CellTemps_11: 20 BMS
+ SG_ Temp0 : 0|16@1- (0.1,0) [-3276.8|3276.7] "degC" VCU
+ SG_ Temp1 : 16|16@1- (0.1,0) [-3276.8|3276.7] "degC" VCU
+ SG_ Temp2 : 32|16@1- (0.1,0) [-3276.8|3276.7] "degC" VCU
+ SG_ Temp3 : 48|16@1- (0.1,0) [-3276.8|3276.7] "degC" VCU
+ SG_ Temp4 : 64|16@1- (0.1,0) [-3276.8|3276.7] "degC" VCU
+ SG_ Temp5 : 80|16@1- (0.1,0) [-3276.8|3276.7] "degC" VCU
+ SG_ Temp6 : 96|16@1- (0.1,0) [-3276.8|3276.7] "degC" VCU
+ SG_ Temp7 : 112|16@1- (0.1,0) [-3276.8|3276.7] "degC" VCU
+ SG_ Bleed0 : 128|1@1+ (1,0) [0|1] "" VCU
+ SG_ Bleed1 : 129|1@1+ (1,0) [0|1] "" VCU
+ SG_ Bleed2 : 130|1@1+ (1,0) [0|1] "" VCU
+ SG_ Bleed3 : 131|1@1+ (1,0) [0|1] "" VCU
+ SG_ Bleed4 : 132|1@1+ (1,0) [0|1] "" VCU
+ SG_ Bleed5 : 133|1@1+ (1,0) [0|1] "" VCU
+ SG_ Bleed6 : 134|1@1+ (1,0) [0|1] "" VCU
+ SG_ Bleed7 : 135|1@1+ (1,0) [0|1] "" VCU
+
+BO_ 1604 BMS_CellVoltagesA_12: 8 BMS
+ SG_ Cell0 : 0|16@1+ (0.0001,0) [0|6.5535] "V" VCU
+ SG_ Cell1 : 16|16@1+ (0.0001,0) [0|6.5535] "V" VCU
+ SG_ Cell2 : 32|16@1+ (0.0001,0) [0|6.5535] "V" VCU
+ SG_ Cell3 : 48|16@1+ (0.0001,0) [0|6.5535] "V" VCU
+
+BO_ 1605 BMS_CellVoltagesB_12: 8 BMS
+ SG_ Cell4 : 0|16@1+ (0.0001,0) [0|6.5535] "V" VCU
+ SG_ Cell5 : 16|16@1+ (0.0001,0) [0|6.5535] "V" VCU
+ SG_ Cell6 : 32|16@1+ (0.0001,0) [0|6.5535] "V" VCU
+ SG_ Cell7 : 48|16@1+ (0.0001,0) [0|6.5535] "V" VCU
+
+BO_ 1606 BMS_CellTemps_12: 20 BMS
+ SG_ Temp0 : 0|16@1- (0.1,0) [-3276.8|3276.7] "degC" VCU
+ SG_ Temp1 : 16|16@1- (0.1,0) [-3276.8|3276.7] "degC" VCU
+ SG_ Temp2 : 32|16@1- (0.1,0) [-3276.8|3276.7] "degC" VCU
+ SG_ Temp3 : 48|16@1- (0.1,0) [-3276.8|3276.7] "degC" VCU
+ SG_ Temp4 : 64|16@1- (0.1,0) [-3276.8|3276.7] "degC" VCU
+ SG_ Temp5 : 80|16@1- (0.1,0) [-3276.8|3276.7] "degC" VCU
+ SG_ Temp6 : 96|16@1- (0.1,0) [-3276.8|3276.7] "degC" VCU
+ SG_ Temp7 : 112|16@1- (0.1,0) [-3276.8|3276.7] "degC" VCU
+ SG_ Bleed0 : 128|1@1+ (1,0) [0|1] "" VCU
+ SG_ Bleed1 : 129|1@1+ (1,0) [0|1] "" VCU
+ SG_ Bleed2 : 130|1@1+ (1,0) [0|1] "" VCU
+ SG_ Bleed3 : 131|1@1+ (1,0) [0|1] "" VCU
+ SG_ Bleed4 : 132|1@1+ (1,0) [0|1] "" VCU
+ SG_ Bleed5 : 133|1@1+ (1,0) [0|1] "" VCU
+ SG_ Bleed6 : 134|1@1+ (1,0) [0|1] "" VCU
+ SG_ Bleed7 : 135|1@1+ (1,0) [0|1] "" VCU
+
+BO_ 1607 BMS_CellVoltagesA_13: 8 BMS
+ SG_ Cell0 : 0|16@1+ (0.0001,0) [0|6.5535] "V" VCU
+ SG_ Cell1 : 16|16@1+ (0.0001,0) [0|6.5535] "V" VCU
+ SG_ Cell2 : 32|16@1+ (0.0001,0) [0|6.5535] "V" VCU
+ SG_ Cell3 : 48|16@1+ (0.0001,0) [0|6.5535] "V" VCU
+
+BO_ 1608 BMS_CellVoltagesB_13: 8 BMS
+ SG_ Cell4 : 0|16@1+ (0.0001,0) [0|6.5535] "V" VCU
+ SG_ Cell5 : 16|16@1+ (0.0001,0) [0|6.5535] "V" VCU
+ SG_ Cell6 : 32|16@1+ (0.0001,0) [0|6.5535] "V" VCU
+ SG_ Cell7 : 48|16@1+ (0.0001,0) [0|6.5535] "V" VCU
+
+BO_ 1609 BMS_CellTemps_13: 20 BMS
+ SG_ Temp0 : 0|16@1- (0.1,0) [-3276.8|3276.7] "degC" VCU
+ SG_ Temp1 : 16|16@1- (0.1,0) [-3276.8|3276.7] "degC" VCU
+ SG_ Temp2 : 32|16@1- (0.1,0) [-3276.8|3276.7] "degC" VCU
+ SG_ Temp3 : 48|16@1- (0.1,0) [-3276.8|3276.7] "degC" VCU
+ SG_ Temp4 : 64|16@1- (0.1,0) [-3276.8|3276.7] "degC" VCU
+ SG_ Temp5 : 80|16@1- (0.1,0) [-3276.8|3276.7] "degC" VCU
+ SG_ Temp6 : 96|16@1- (0.1,0) [-3276.8|3276.7] "degC" VCU
+ SG_ Temp7 : 112|16@1- (0.1,0) [-3276.8|3276.7] "degC" VCU
+ SG_ Bleed0 : 128|1@1+ (1,0) [0|1] "" VCU
+ SG_ Bleed1 : 129|1@1+ (1,0) [0|1] "" VCU
+ SG_ Bleed2 : 130|1@1+ (1,0) [0|1] "" VCU
+ SG_ Bleed3 : 131|1@1+ (1,0) [0|1] "" VCU
+ SG_ Bleed4 : 132|1@1+ (1,0) [0|1] "" VCU
+ SG_ Bleed5 : 133|1@1+ (1,0) [0|1] "" VCU
+ SG_ Bleed6 : 134|1@1+ (1,0) [0|1] "" VCU
+ SG_ Bleed7 : 135|1@1+ (1,0) [0|1] "" VCU
+
+BO_ 1610 BMS_CellVoltagesA_14: 8 BMS
+ SG_ Cell0 : 0|16@1+ (0.0001,0) [0|6.5535] "V" VCU
+ SG_ Cell1 : 16|16@1+ (0.0001,0) [0|6.5535] "V" VCU
+ SG_ Cell2 : 32|16@1+ (0.0001,0) [0|6.5535] "V" VCU
+ SG_ Cell3 : 48|16@1+ (0.0001,0) [0|6.5535] "V" VCU
+
+BO_ 1611 BMS_CellVoltagesB_14: 8 BMS
+ SG_ Cell4 : 0|16@1+ (0.0001,0) [0|6.5535] "V" VCU
+ SG_ Cell5 : 16|16@1+ (0.0001,0) [0|6.5535] "V" VCU
+ SG_ Cell6 : 32|16@1+ (0.0001,0) [0|6.5535] "V" VCU
+ SG_ Cell7 : 48|16@1+ (0.0001,0) [0|6.5535] "V" VCU
+
+BO_ 1612 BMS_CellTemps_14: 20 BMS
+ SG_ Temp0 : 0|16@1- (0.1,0) [-3276.8|3276.7] "degC" VCU
+ SG_ Temp1 : 16|16@1- (0.1,0) [-3276.8|3276.7] "degC" VCU
+ SG_ Temp2 : 32|16@1- (0.1,0) [-3276.8|3276.7] "degC" VCU
+ SG_ Temp3 : 48|16@1- (0.1,0) [-3276.8|3276.7] "degC" VCU
+ SG_ Temp4 : 64|16@1- (0.1,0) [-3276.8|3276.7] "degC" VCU
+ SG_ Temp5 : 80|16@1- (0.1,0) [-3276.8|3276.7] "degC" VCU
+ SG_ Temp6 : 96|16@1- (0.1,0) [-3276.8|3276.7] "degC" VCU
+ SG_ Temp7 : 112|16@1- (0.1,0) [-3276.8|3276.7] "degC" VCU
+ SG_ Bleed0 : 128|1@1+ (1,0) [0|1] "" VCU
+ SG_ Bleed1 : 129|1@1+ (1,0) [0|1] "" VCU
+ SG_ Bleed2 : 130|1@1+ (1,0) [0|1] "" VCU
+ SG_ Bleed3 : 131|1@1+ (1,0) [0|1] "" VCU
+ SG_ Bleed4 : 132|1@1+ (1,0) [0|1] "" VCU
+ SG_ Bleed5 : 133|1@1+ (1,0) [0|1] "" VCU
+ SG_ Bleed6 : 134|1@1+ (1,0) [0|1] "" VCU
+ SG_ Bleed7 : 135|1@1+ (1,0) [0|1] "" VCU
+
+BO_ 1613 BMS_CellVoltagesA_15: 8 BMS
+ SG_ Cell0 : 0|16@1+ (0.0001,0) [0|6.5535] "V" VCU
+ SG_ Cell1 : 16|16@1+ (0.0001,0) [0|6.5535] "V" VCU
+ SG_ Cell2 : 32|16@1+ (0.0001,0) [0|6.5535] "V" VCU
+ SG_ Cell3 : 48|16@1+ (0.0001,0) [0|6.5535] "V" VCU
+
+BO_ 1614 BMS_CellVoltagesB_15: 8 BMS
+ SG_ Cell4 : 0|16@1+ (0.0001,0) [0|6.5535] "V" VCU
+ SG_ Cell5 : 16|16@1+ (0.0001,0) [0|6.5535] "V" VCU
+ SG_ Cell6 : 32|16@1+ (0.0001,0) [0|6.5535] "V" VCU
+ SG_ Cell7 : 48|16@1+ (0.0001,0) [0|6.5535] "V" VCU
+
+BO_ 1615 BMS_CellTemps_15: 20 BMS
+ SG_ Temp0 : 0|16@1- (0.1,0) [-3276.8|3276.7] "degC" VCU
+ SG_ Temp1 : 16|16@1- (0.1,0) [-3276.8|3276.7] "degC" VCU
+ SG_ Temp2 : 32|16@1- (0.1,0) [-3276.8|3276.7] "degC" VCU
+ SG_ Temp3 : 48|16@1- (0.1,0) [-3276.8|3276.7] "degC" VCU
+ SG_ Temp4 : 64|16@1- (0.1,0) [-3276.8|3276.7] "degC" VCU
+ SG_ Temp5 : 80|16@1- (0.1,0) [-3276.8|3276.7] "degC" VCU
+ SG_ Temp6 : 96|16@1- (0.1,0) [-3276.8|3276.7] "degC" VCU
+ SG_ Temp7 : 112|16@1- (0.1,0) [-3276.8|3276.7] "degC" VCU
+ SG_ Bleed0 : 128|1@1+ (1,0) [0|1] "" VCU
+ SG_ Bleed1 : 129|1@1+ (1,0) [0|1] "" VCU
+ SG_ Bleed2 : 130|1@1+ (1,0) [0|1] "" VCU
+ SG_ Bleed3 : 131|1@1+ (1,0) [0|1] "" VCU
+ SG_ Bleed4 : 132|1@1+ (1,0) [0|1] "" VCU
+ SG_ Bleed5 : 133|1@1+ (1,0) [0|1] "" VCU
+ SG_ Bleed6 : 134|1@1+ (1,0) [0|1] "" VCU
+ SG_ Bleed7 : 135|1@1+ (1,0) [0|1] "" VCU
+
+
+CM_ "Message database for the DAQ bus (the TIM's CAN2), ADR 0003.
+CAN FD, 500 kbit/s arbitration, 2 Mbit/s data. Logging and display data only:
+nothing on the Control bus waits on this bus and no safety function reads it.
+Generated C: App/common/logic/can_db/can_daq.[ch], made by can/generate.py
+and committed. Change a layout here, regenerate, commit both.
+
+The ID plan is the one written in can/control.dbc; an ID means the same frame
+on either bus. Used here: 0x280 and 0x290 (the 0x080 and 0x090 status frames
+plus 0x200, in the medium data range) and 0x610-0x64F (slow pack detail).
+
+Every frame is little-endian. Bits are numbered from bit 0 of byte 0. A bit or
+byte with no signal is spare: sent as 0, ignored on receive. No frame has a
+CRC or counter.
+
+The pack frames come once per module, named <Name>_00 to <Name>_15 with evenly
+spaced IDs. All sixteen copies of a frame must have the same layout:
+can/generate.py refuses to run otherwise, and it generates C for the _00 copy
+only. The firmware packs module n with the _00 code and sends it on the _00
+ID plus n times the spacing. Modules count 0-15, cells and temperature
+sensors 0-7 within a module.";
+
+CM_ BU_ VCU "TIM running the VCU image. Records every DAQ bus frame in its Data log.";
+CM_ BU_ BMS "TIM running the BMS image.";
+CM_ BO_ 640 "Warnings from the BMS image that are not faults. Every 100 ms, from the DAQ publisher. Byte 0 and byte 1 bits, bytes 2-3 spare, bytes 4-7 Records dropped. Same layout in both images.";
+CM_ SG_ 640 OverrunSeen "At least one Overrun since power-on.";
+CM_ SG_ 640 BackgroundStalled "Housekeeping has not run for 1 s.";
+CM_ SG_ 640 ControlBusState "State of the Control bus controller (CAN1).";
+CM_ SG_ 640 CardState "State of the Data log card. Never a fault.";
+CM_ SG_ 640 EventsDropped "An Event was dropped because the queue to the Event writer was full.";
+CM_ SG_ 640 AllocationFailed "The failed-allocation hook has run.";
+CM_ SG_ 640 RecordsDropped "Data log Records dropped at the ring since power-on.";
+CM_ BO_ 656 "Warnings from the VCU image that are not faults. Every 100 ms, from the DAQ publisher. Byte 0 and byte 1 bits, bytes 2-3 spare, bytes 4-7 Records dropped. Same layout in both images.";
+CM_ SG_ 656 OverrunSeen "At least one Overrun since power-on.";
+CM_ SG_ 656 BackgroundStalled "Housekeeping has not run for 1 s.";
+CM_ SG_ 656 ControlBusState "State of the Control bus controller (CAN1).";
+CM_ SG_ 656 CardState "State of the Data log card. Never a fault.";
+CM_ SG_ 656 EventsDropped "An Event was dropped because the queue to the Event writer was full.";
+CM_ SG_ 656 AllocationFailed "The failed-allocation hook has run.";
+CM_ SG_ 656 RecordsDropped "Data log Records dropped at the ring since power-on.";
+CM_ BO_ 1552 "Summary of module 0. Every 200 ms. ID = 0x610 + module. Same layout for every module. Cell and sensor numbers count from 0.";
+CM_ BO_ 1553 "Summary of module 1. Every 200 ms. ID = 0x610 + module. Same layout for every module. Cell and sensor numbers count from 0.";
+CM_ BO_ 1554 "Summary of module 2. Every 200 ms. ID = 0x610 + module. Same layout for every module. Cell and sensor numbers count from 0.";
+CM_ BO_ 1555 "Summary of module 3. Every 200 ms. ID = 0x610 + module. Same layout for every module. Cell and sensor numbers count from 0.";
+CM_ BO_ 1556 "Summary of module 4. Every 200 ms. ID = 0x610 + module. Same layout for every module. Cell and sensor numbers count from 0.";
+CM_ BO_ 1557 "Summary of module 5. Every 200 ms. ID = 0x610 + module. Same layout for every module. Cell and sensor numbers count from 0.";
+CM_ BO_ 1558 "Summary of module 6. Every 200 ms. ID = 0x610 + module. Same layout for every module. Cell and sensor numbers count from 0.";
+CM_ BO_ 1559 "Summary of module 7. Every 200 ms. ID = 0x610 + module. Same layout for every module. Cell and sensor numbers count from 0.";
+CM_ BO_ 1560 "Summary of module 8. Every 200 ms. ID = 0x610 + module. Same layout for every module. Cell and sensor numbers count from 0.";
+CM_ BO_ 1561 "Summary of module 9. Every 200 ms. ID = 0x610 + module. Same layout for every module. Cell and sensor numbers count from 0.";
+CM_ BO_ 1562 "Summary of module 10. Every 200 ms. ID = 0x610 + module. Same layout for every module. Cell and sensor numbers count from 0.";
+CM_ BO_ 1563 "Summary of module 11. Every 200 ms. ID = 0x610 + module. Same layout for every module. Cell and sensor numbers count from 0.";
+CM_ BO_ 1564 "Summary of module 12. Every 200 ms. ID = 0x610 + module. Same layout for every module. Cell and sensor numbers count from 0.";
+CM_ BO_ 1565 "Summary of module 13. Every 200 ms. ID = 0x610 + module. Same layout for every module. Cell and sensor numbers count from 0.";
+CM_ BO_ 1566 "Summary of module 14. Every 200 ms. ID = 0x610 + module. Same layout for every module. Cell and sensor numbers count from 0.";
+CM_ BO_ 1567 "Summary of module 15. Every 200 ms. ID = 0x610 + module. Same layout for every module. Cell and sensor numbers count from 0.";
+CM_ BO_ 1568 "Voltages of cells 0-3 of module 0. Every 1 s. ID = 0x620 + 3 x module. Same layout for every module.";
+CM_ BO_ 1569 "Voltages of cells 4-7 of module 0. Every 1 s. ID = 0x621 + 3 x module. Same layout for every module.";
+CM_ BO_ 1570 "Temperatures and bleed flags of module 0. Every 1 s. ID = 0x622 + 3 x module. 20 bytes (CAN FD): bytes 0-15 eight temperatures, byte 16 one bleed flag per cell (bit n = cell n is being bled by Balancing), bytes 17-19 spare. Same layout for every module.";
+CM_ BO_ 1571 "Voltages of cells 0-3 of module 1. Every 1 s. ID = 0x620 + 3 x module. Same layout for every module.";
+CM_ BO_ 1572 "Voltages of cells 4-7 of module 1. Every 1 s. ID = 0x621 + 3 x module. Same layout for every module.";
+CM_ BO_ 1573 "Temperatures and bleed flags of module 1. Every 1 s. ID = 0x622 + 3 x module. 20 bytes (CAN FD): bytes 0-15 eight temperatures, byte 16 one bleed flag per cell (bit n = cell n is being bled by Balancing), bytes 17-19 spare. Same layout for every module.";
+CM_ BO_ 1574 "Voltages of cells 0-3 of module 2. Every 1 s. ID = 0x620 + 3 x module. Same layout for every module.";
+CM_ BO_ 1575 "Voltages of cells 4-7 of module 2. Every 1 s. ID = 0x621 + 3 x module. Same layout for every module.";
+CM_ BO_ 1576 "Temperatures and bleed flags of module 2. Every 1 s. ID = 0x622 + 3 x module. 20 bytes (CAN FD): bytes 0-15 eight temperatures, byte 16 one bleed flag per cell (bit n = cell n is being bled by Balancing), bytes 17-19 spare. Same layout for every module.";
+CM_ BO_ 1577 "Voltages of cells 0-3 of module 3. Every 1 s. ID = 0x620 + 3 x module. Same layout for every module.";
+CM_ BO_ 1578 "Voltages of cells 4-7 of module 3. Every 1 s. ID = 0x621 + 3 x module. Same layout for every module.";
+CM_ BO_ 1579 "Temperatures and bleed flags of module 3. Every 1 s. ID = 0x622 + 3 x module. 20 bytes (CAN FD): bytes 0-15 eight temperatures, byte 16 one bleed flag per cell (bit n = cell n is being bled by Balancing), bytes 17-19 spare. Same layout for every module.";
+CM_ BO_ 1580 "Voltages of cells 0-3 of module 4. Every 1 s. ID = 0x620 + 3 x module. Same layout for every module.";
+CM_ BO_ 1581 "Voltages of cells 4-7 of module 4. Every 1 s. ID = 0x621 + 3 x module. Same layout for every module.";
+CM_ BO_ 1582 "Temperatures and bleed flags of module 4. Every 1 s. ID = 0x622 + 3 x module. 20 bytes (CAN FD): bytes 0-15 eight temperatures, byte 16 one bleed flag per cell (bit n = cell n is being bled by Balancing), bytes 17-19 spare. Same layout for every module.";
+CM_ BO_ 1583 "Voltages of cells 0-3 of module 5. Every 1 s. ID = 0x620 + 3 x module. Same layout for every module.";
+CM_ BO_ 1584 "Voltages of cells 4-7 of module 5. Every 1 s. ID = 0x621 + 3 x module. Same layout for every module.";
+CM_ BO_ 1585 "Temperatures and bleed flags of module 5. Every 1 s. ID = 0x622 + 3 x module. 20 bytes (CAN FD): bytes 0-15 eight temperatures, byte 16 one bleed flag per cell (bit n = cell n is being bled by Balancing), bytes 17-19 spare. Same layout for every module.";
+CM_ BO_ 1586 "Voltages of cells 0-3 of module 6. Every 1 s. ID = 0x620 + 3 x module. Same layout for every module.";
+CM_ BO_ 1587 "Voltages of cells 4-7 of module 6. Every 1 s. ID = 0x621 + 3 x module. Same layout for every module.";
+CM_ BO_ 1588 "Temperatures and bleed flags of module 6. Every 1 s. ID = 0x622 + 3 x module. 20 bytes (CAN FD): bytes 0-15 eight temperatures, byte 16 one bleed flag per cell (bit n = cell n is being bled by Balancing), bytes 17-19 spare. Same layout for every module.";
+CM_ BO_ 1589 "Voltages of cells 0-3 of module 7. Every 1 s. ID = 0x620 + 3 x module. Same layout for every module.";
+CM_ BO_ 1590 "Voltages of cells 4-7 of module 7. Every 1 s. ID = 0x621 + 3 x module. Same layout for every module.";
+CM_ BO_ 1591 "Temperatures and bleed flags of module 7. Every 1 s. ID = 0x622 + 3 x module. 20 bytes (CAN FD): bytes 0-15 eight temperatures, byte 16 one bleed flag per cell (bit n = cell n is being bled by Balancing), bytes 17-19 spare. Same layout for every module.";
+CM_ BO_ 1592 "Voltages of cells 0-3 of module 8. Every 1 s. ID = 0x620 + 3 x module. Same layout for every module.";
+CM_ BO_ 1593 "Voltages of cells 4-7 of module 8. Every 1 s. ID = 0x621 + 3 x module. Same layout for every module.";
+CM_ BO_ 1594 "Temperatures and bleed flags of module 8. Every 1 s. ID = 0x622 + 3 x module. 20 bytes (CAN FD): bytes 0-15 eight temperatures, byte 16 one bleed flag per cell (bit n = cell n is being bled by Balancing), bytes 17-19 spare. Same layout for every module.";
+CM_ BO_ 1595 "Voltages of cells 0-3 of module 9. Every 1 s. ID = 0x620 + 3 x module. Same layout for every module.";
+CM_ BO_ 1596 "Voltages of cells 4-7 of module 9. Every 1 s. ID = 0x621 + 3 x module. Same layout for every module.";
+CM_ BO_ 1597 "Temperatures and bleed flags of module 9. Every 1 s. ID = 0x622 + 3 x module. 20 bytes (CAN FD): bytes 0-15 eight temperatures, byte 16 one bleed flag per cell (bit n = cell n is being bled by Balancing), bytes 17-19 spare. Same layout for every module.";
+CM_ BO_ 1598 "Voltages of cells 0-3 of module 10. Every 1 s. ID = 0x620 + 3 x module. Same layout for every module.";
+CM_ BO_ 1599 "Voltages of cells 4-7 of module 10. Every 1 s. ID = 0x621 + 3 x module. Same layout for every module.";
+CM_ BO_ 1600 "Temperatures and bleed flags of module 10. Every 1 s. ID = 0x622 + 3 x module. 20 bytes (CAN FD): bytes 0-15 eight temperatures, byte 16 one bleed flag per cell (bit n = cell n is being bled by Balancing), bytes 17-19 spare. Same layout for every module.";
+CM_ BO_ 1601 "Voltages of cells 0-3 of module 11. Every 1 s. ID = 0x620 + 3 x module. Same layout for every module.";
+CM_ BO_ 1602 "Voltages of cells 4-7 of module 11. Every 1 s. ID = 0x621 + 3 x module. Same layout for every module.";
+CM_ BO_ 1603 "Temperatures and bleed flags of module 11. Every 1 s. ID = 0x622 + 3 x module. 20 bytes (CAN FD): bytes 0-15 eight temperatures, byte 16 one bleed flag per cell (bit n = cell n is being bled by Balancing), bytes 17-19 spare. Same layout for every module.";
+CM_ BO_ 1604 "Voltages of cells 0-3 of module 12. Every 1 s. ID = 0x620 + 3 x module. Same layout for every module.";
+CM_ BO_ 1605 "Voltages of cells 4-7 of module 12. Every 1 s. ID = 0x621 + 3 x module. Same layout for every module.";
+CM_ BO_ 1606 "Temperatures and bleed flags of module 12. Every 1 s. ID = 0x622 + 3 x module. 20 bytes (CAN FD): bytes 0-15 eight temperatures, byte 16 one bleed flag per cell (bit n = cell n is being bled by Balancing), bytes 17-19 spare. Same layout for every module.";
+CM_ BO_ 1607 "Voltages of cells 0-3 of module 13. Every 1 s. ID = 0x620 + 3 x module. Same layout for every module.";
+CM_ BO_ 1608 "Voltages of cells 4-7 of module 13. Every 1 s. ID = 0x621 + 3 x module. Same layout for every module.";
+CM_ BO_ 1609 "Temperatures and bleed flags of module 13. Every 1 s. ID = 0x622 + 3 x module. 20 bytes (CAN FD): bytes 0-15 eight temperatures, byte 16 one bleed flag per cell (bit n = cell n is being bled by Balancing), bytes 17-19 spare. Same layout for every module.";
+CM_ BO_ 1610 "Voltages of cells 0-3 of module 14. Every 1 s. ID = 0x620 + 3 x module. Same layout for every module.";
+CM_ BO_ 1611 "Voltages of cells 4-7 of module 14. Every 1 s. ID = 0x621 + 3 x module. Same layout for every module.";
+CM_ BO_ 1612 "Temperatures and bleed flags of module 14. Every 1 s. ID = 0x622 + 3 x module. 20 bytes (CAN FD): bytes 0-15 eight temperatures, byte 16 one bleed flag per cell (bit n = cell n is being bled by Balancing), bytes 17-19 spare. Same layout for every module.";
+CM_ BO_ 1613 "Voltages of cells 0-3 of module 15. Every 1 s. ID = 0x620 + 3 x module. Same layout for every module.";
+CM_ BO_ 1614 "Voltages of cells 4-7 of module 15. Every 1 s. ID = 0x621 + 3 x module. Same layout for every module.";
+CM_ BO_ 1615 "Temperatures and bleed flags of module 15. Every 1 s. ID = 0x622 + 3 x module. 20 bytes (CAN FD): bytes 0-15 eight temperatures, byte 16 one bleed flag per cell (bit n = cell n is being bled by Balancing), bytes 17-19 spare. Same layout for every module.";
+
+BA_DEF_ "BusType" STRING ;
+BA_DEF_ BO_ "GenMsgCycleTime" INT 0 65535;
+BA_DEF_ BO_ "VFrameFormat" ENUM "StandardCAN","ExtendedCAN","reserved","J1939PG","reserved","reserved","reserved","reserved","reserved","reserved","reserved","reserved","reserved","reserved","StandardCAN_FD","ExtendedCAN_FD";
+BA_DEF_DEF_ "BusType" "CAN";
+BA_DEF_DEF_ "GenMsgCycleTime" 0;
+BA_DEF_DEF_ "VFrameFormat" "StandardCAN_FD";
+BA_ "BusType" "CAN FD";
+BA_ "GenMsgCycleTime" BO_ 640 100;
+BA_ "GenMsgCycleTime" BO_ 656 100;
+BA_ "GenMsgCycleTime" BO_ 1552 200;
+BA_ "GenMsgCycleTime" BO_ 1553 200;
+BA_ "GenMsgCycleTime" BO_ 1554 200;
+BA_ "GenMsgCycleTime" BO_ 1555 200;
+BA_ "GenMsgCycleTime" BO_ 1556 200;
+BA_ "GenMsgCycleTime" BO_ 1557 200;
+BA_ "GenMsgCycleTime" BO_ 1558 200;
+BA_ "GenMsgCycleTime" BO_ 1559 200;
+BA_ "GenMsgCycleTime" BO_ 1560 200;
+BA_ "GenMsgCycleTime" BO_ 1561 200;
+BA_ "GenMsgCycleTime" BO_ 1562 200;
+BA_ "GenMsgCycleTime" BO_ 1563 200;
+BA_ "GenMsgCycleTime" BO_ 1564 200;
+BA_ "GenMsgCycleTime" BO_ 1565 200;
+BA_ "GenMsgCycleTime" BO_ 1566 200;
+BA_ "GenMsgCycleTime" BO_ 1567 200;
+BA_ "GenMsgCycleTime" BO_ 1568 1000;
+BA_ "GenMsgCycleTime" BO_ 1569 1000;
+BA_ "GenMsgCycleTime" BO_ 1570 1000;
+BA_ "GenMsgCycleTime" BO_ 1571 1000;
+BA_ "GenMsgCycleTime" BO_ 1572 1000;
+BA_ "GenMsgCycleTime" BO_ 1573 1000;
+BA_ "GenMsgCycleTime" BO_ 1574 1000;
+BA_ "GenMsgCycleTime" BO_ 1575 1000;
+BA_ "GenMsgCycleTime" BO_ 1576 1000;
+BA_ "GenMsgCycleTime" BO_ 1577 1000;
+BA_ "GenMsgCycleTime" BO_ 1578 1000;
+BA_ "GenMsgCycleTime" BO_ 1579 1000;
+BA_ "GenMsgCycleTime" BO_ 1580 1000;
+BA_ "GenMsgCycleTime" BO_ 1581 1000;
+BA_ "GenMsgCycleTime" BO_ 1582 1000;
+BA_ "GenMsgCycleTime" BO_ 1583 1000;
+BA_ "GenMsgCycleTime" BO_ 1584 1000;
+BA_ "GenMsgCycleTime" BO_ 1585 1000;
+BA_ "GenMsgCycleTime" BO_ 1586 1000;
+BA_ "GenMsgCycleTime" BO_ 1587 1000;
+BA_ "GenMsgCycleTime" BO_ 1588 1000;
+BA_ "GenMsgCycleTime" BO_ 1589 1000;
+BA_ "GenMsgCycleTime" BO_ 1590 1000;
+BA_ "GenMsgCycleTime" BO_ 1591 1000;
+BA_ "GenMsgCycleTime" BO_ 1592 1000;
+BA_ "GenMsgCycleTime" BO_ 1593 1000;
+BA_ "GenMsgCycleTime" BO_ 1594 1000;
+BA_ "GenMsgCycleTime" BO_ 1595 1000;
+BA_ "GenMsgCycleTime" BO_ 1596 1000;
+BA_ "GenMsgCycleTime" BO_ 1597 1000;
+BA_ "GenMsgCycleTime" BO_ 1598 1000;
+BA_ "GenMsgCycleTime" BO_ 1599 1000;
+BA_ "GenMsgCycleTime" BO_ 1600 1000;
+BA_ "GenMsgCycleTime" BO_ 1601 1000;
+BA_ "GenMsgCycleTime" BO_ 1602 1000;
+BA_ "GenMsgCycleTime" BO_ 1603 1000;
+BA_ "GenMsgCycleTime" BO_ 1604 1000;
+BA_ "GenMsgCycleTime" BO_ 1605 1000;
+BA_ "GenMsgCycleTime" BO_ 1606 1000;
+BA_ "GenMsgCycleTime" BO_ 1607 1000;
+BA_ "GenMsgCycleTime" BO_ 1608 1000;
+BA_ "GenMsgCycleTime" BO_ 1609 1000;
+BA_ "GenMsgCycleTime" BO_ 1610 1000;
+BA_ "GenMsgCycleTime" BO_ 1611 1000;
+BA_ "GenMsgCycleTime" BO_ 1612 1000;
+BA_ "GenMsgCycleTime" BO_ 1613 1000;
+BA_ "GenMsgCycleTime" BO_ 1614 1000;
+BA_ "GenMsgCycleTime" BO_ 1615 1000;
+BA_ "VFrameFormat" BO_ 640 14;
+BA_ "VFrameFormat" BO_ 656 14;
+BA_ "VFrameFormat" BO_ 1552 14;
+BA_ "VFrameFormat" BO_ 1553 14;
+BA_ "VFrameFormat" BO_ 1554 14;
+BA_ "VFrameFormat" BO_ 1555 14;
+BA_ "VFrameFormat" BO_ 1556 14;
+BA_ "VFrameFormat" BO_ 1557 14;
+BA_ "VFrameFormat" BO_ 1558 14;
+BA_ "VFrameFormat" BO_ 1559 14;
+BA_ "VFrameFormat" BO_ 1560 14;
+BA_ "VFrameFormat" BO_ 1561 14;
+BA_ "VFrameFormat" BO_ 1562 14;
+BA_ "VFrameFormat" BO_ 1563 14;
+BA_ "VFrameFormat" BO_ 1564 14;
+BA_ "VFrameFormat" BO_ 1565 14;
+BA_ "VFrameFormat" BO_ 1566 14;
+BA_ "VFrameFormat" BO_ 1567 14;
+BA_ "VFrameFormat" BO_ 1568 14;
+BA_ "VFrameFormat" BO_ 1569 14;
+BA_ "VFrameFormat" BO_ 1570 14;
+BA_ "VFrameFormat" BO_ 1571 14;
+BA_ "VFrameFormat" BO_ 1572 14;
+BA_ "VFrameFormat" BO_ 1573 14;
+BA_ "VFrameFormat" BO_ 1574 14;
+BA_ "VFrameFormat" BO_ 1575 14;
+BA_ "VFrameFormat" BO_ 1576 14;
+BA_ "VFrameFormat" BO_ 1577 14;
+BA_ "VFrameFormat" BO_ 1578 14;
+BA_ "VFrameFormat" BO_ 1579 14;
+BA_ "VFrameFormat" BO_ 1580 14;
+BA_ "VFrameFormat" BO_ 1581 14;
+BA_ "VFrameFormat" BO_ 1582 14;
+BA_ "VFrameFormat" BO_ 1583 14;
+BA_ "VFrameFormat" BO_ 1584 14;
+BA_ "VFrameFormat" BO_ 1585 14;
+BA_ "VFrameFormat" BO_ 1586 14;
+BA_ "VFrameFormat" BO_ 1587 14;
+BA_ "VFrameFormat" BO_ 1588 14;
+BA_ "VFrameFormat" BO_ 1589 14;
+BA_ "VFrameFormat" BO_ 1590 14;
+BA_ "VFrameFormat" BO_ 1591 14;
+BA_ "VFrameFormat" BO_ 1592 14;
+BA_ "VFrameFormat" BO_ 1593 14;
+BA_ "VFrameFormat" BO_ 1594 14;
+BA_ "VFrameFormat" BO_ 1595 14;
+BA_ "VFrameFormat" BO_ 1596 14;
+BA_ "VFrameFormat" BO_ 1597 14;
+BA_ "VFrameFormat" BO_ 1598 14;
+BA_ "VFrameFormat" BO_ 1599 14;
+BA_ "VFrameFormat" BO_ 1600 14;
+BA_ "VFrameFormat" BO_ 1601 14;
+BA_ "VFrameFormat" BO_ 1602 14;
+BA_ "VFrameFormat" BO_ 1603 14;
+BA_ "VFrameFormat" BO_ 1604 14;
+BA_ "VFrameFormat" BO_ 1605 14;
+BA_ "VFrameFormat" BO_ 1606 14;
+BA_ "VFrameFormat" BO_ 1607 14;
+BA_ "VFrameFormat" BO_ 1608 14;
+BA_ "VFrameFormat" BO_ 1609 14;
+BA_ "VFrameFormat" BO_ 1610 14;
+BA_ "VFrameFormat" BO_ 1611 14;
+BA_ "VFrameFormat" BO_ 1612 14;
+BA_ "VFrameFormat" BO_ 1613 14;
+BA_ "VFrameFormat" BO_ 1614 14;
+BA_ "VFrameFormat" BO_ 1615 14;
+
+VAL_ 640 ControlBusState 0 "ERROR_ACTIVE" 1 "ERROR_PASSIVE" 2 "BUS_OFF" 3 "BUS_OFF_LATCHED" ;
+VAL_ 640 CardState 0 "MISSING" 1 "LOGGING" 2 "ERROR" ;
+VAL_ 656 ControlBusState 0 "ERROR_ACTIVE" 1 "ERROR_PASSIVE" 2 "BUS_OFF" 3 "BUS_OFF_LATCHED" ;
+VAL_ 656 CardState 0 "MISSING" 1 "LOGGING" 2 "ERROR" ;

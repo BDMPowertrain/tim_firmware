@@ -61,3 +61,30 @@ jobs:
       # A failing test, a sanitizer report or an empty test list fails the job.
       - name: Run the host tests
         run: ctest --preset host-tests-sanitize
+
+  message-database:
+    name: Message database (generated C is current)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      # cantools is pinned in requirements.txt (ADR 0003).
+      - name: Install cantools
+        run: pip install -r requirements.txt
+
+      # Also fails if a DBC does not load or the per-module frames disagree.
+      - name: Regenerate the C from the DBC files
+        run: python can/generate.py
+
+      - name: Fail if the committed C differs
+        run: |
+          if [ -n "$(git status --porcelain -- App/common/logic/can_db)" ]; then
+            git status --short -- App/common/logic/can_db
+            git diff -- App/common/logic/can_db
+            echo "::error::App/common/logic/can_db is stale. Run python can/generate.py and commit the result."
+            exit 1
+          fi

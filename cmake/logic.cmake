@@ -6,7 +6,8 @@
 # image builds (cross compiler) and the host tests (native compiler), so the
 # same source goes into both.
 #
-# A logic library gets its own Inc/ folder as its only include path. It never
+# A logic library gets its own Inc/ folder as its include path (logic_common
+# adds can_db/, the generated Message database code, ADR 0003). It never
 # links stm32cubemx, which is what carries the HAL, CMSIS, FreeRTOS and
 # generated include paths, so a HAL or RTOS include in logic fails to compile.
 
