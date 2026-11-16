@@ -57,6 +57,10 @@ void Error_Handler(void);
 /* USER CODE END EFP */
 
 /* Private defines -----------------------------------------------------------*/
+#define Can_Term_2_Pin GPIO_PIN_13
+#define Can_Term_2_GPIO_Port GPIOC
+#define GPIO_CAN2LED_Pin GPIO_PIN_6
+#define GPIO_CAN2LED_GPIO_Port GPIOC
 #define GPIO_CAN1LED_Pin GPIO_PIN_7
 #define GPIO_CAN1LED_GPIO_Port GPIOC
 #define GPIO_HBLED_Pin GPIO_PIN_8
@@ -73,6 +77,8 @@ void Error_Handler(void);
 #define SPI3_CS_GPIO_Port GPIOD
 #define SWO_Pin GPIO_PIN_3
 #define SWO_GPIO_Port GPIOB
+#define FDCAN2_STB_Pin GPIO_PIN_9
+#define FDCAN2_STB_GPIO_Port GPIOB
 
 /* USER CODE BEGIN Private defines */
 
