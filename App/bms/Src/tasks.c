@@ -11,9 +11,11 @@
 #include "FreeRTOS.h"
 #include "task.h"
 
+#include "bms_params.h"
 #include "bms_step.h"
 #include "control_step.h"
 #include "main.h"
+#include "parameters.h"
 #include "print.h"
 #include "shell.h"
 
@@ -57,6 +59,9 @@ void tasks_init(void)
        that interrupt can fire. The BMS has no shell commands of its own
        yet, so it never calls shell_register_commands(). */
     bool ok = print_init();
+    /* Parameters before anything that reads them, read once (ADR 0015).
+       The BMS accepts a save at any time, so it has no save hook. */
+    ok = parameters_init(&bms_param_table, NULL) && ok;
     ok = shell_init() && ok;
     ok = bms_step_init() && ok;
 

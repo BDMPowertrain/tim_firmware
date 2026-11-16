@@ -8,6 +8,7 @@
 #include "can_control.h"
 #include "control_bus.h"
 #include "e2e_p11.h"
+#include "parameters.h"
 
 #define BMS_STEP_PERIOD_MS 20u
 
@@ -49,6 +50,7 @@ static void phase_output(control_step_ctx_t *ctx)
         /* BMS_OK is commanded low in STARTUP: every other signal is 0. */
         struct can_control_bms_status_t status = {
             .state = ctx->state,
+            .parameters_defaulted = parameters_defaulted() ? 1u : 0u,
         };
         uint8_t frame[CAN_CONTROL_BMS_STATUS_LENGTH];
 

@@ -15,6 +15,7 @@
 #include "control_step.h"
 
 #include "main.h"
+#include "parameters.h"
 #include "print.h"
 #include "stats.h"
 #include "stream_buffer.h"
@@ -84,6 +85,7 @@ static const shell_cmd_t commandTable[] = {
     { "tasks",     cmd_tasks,     "list tasks: state, priority, stack free" },
     { "reset",     cmd_reset,     "software reset" },
     { "step",      cmd_step,      "control step: state, overruns, last and worst times" },
+    { "param",     parameters_cmd, "param [dump] | set <name> <value> | save" },
 };
 
 #define COMMAND_TABLE_COUNT (sizeof(commandTable) / sizeof(commandTable[0]))

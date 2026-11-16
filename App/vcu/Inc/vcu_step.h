@@ -16,4 +16,8 @@ bool vcu_step_init(void);
 /* The step itself, for control_step_task(). */
 extern const control_step_def_t vcu_step_def;
 
+/* The VCU's Parameter save hook (parameters.h): a save is accepted only in
+   GLV_ON (ADR 0015), so nothing is written while the car can move. */
+const char *vcu_step_save_refusal(void);
+
 #endif /* APP_VCU_INC_VCU_STEP_H */

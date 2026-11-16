@@ -7,6 +7,7 @@
 #include "can_control.h"
 #include "control_bus.h"
 #include "e2e_p11.h"
+#include "parameters.h"
 #include "vcu_tx.h"
 
 #define VCU_STEP_PERIOD_MS 10u
@@ -59,6 +60,7 @@ static void phase_output(control_step_ctx_t *ctx)
         struct can_control_vcu_status_t status = {
             .state = ctx->state,
             .startup_blocked = (!ctx->startup_ok || !canStarted) ? 1u : 0u,
+            .parameters_defaulted = parameters_defaulted() ? 1u : 0u,
         };
         uint8_t frame[CAN_CONTROL_VCU_STATUS_LENGTH];
 
@@ -78,6 +80,17 @@ static const char *vcu_state_name(uint8_t state)
     case CAN_CONTROL_VCU_STATUS_STATE_READY_TO_DRIVE_CHOICE: return "READY_TO_DRIVE";
     default:                                                 return "?";
     }
+}
+
+const char *vcu_step_save_refusal(void)
+{
+    control_snapshot_t snap;
+
+    control_step_read(&snap);
+    if (!snap.running || snap.state != CAN_CONTROL_VCU_STATUS_STATE_GLV_ON_CHOICE) {
+        return "only in GLV_ON";
+    }
+    return NULL;
 }
 
 static const control_phase_t vcuPhases[] = {

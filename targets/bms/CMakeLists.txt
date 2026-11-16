@@ -56,6 +56,8 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     ../../App/common/Src/control_bus.c
     ../../App/common/Src/control_step.c
     ../../App/common/Src/fdcan_irq.c
+    ../../App/common/Src/flash_bank2.c
+    ../../App/common/Src/parameters.c
     ../../App/common/Src/print.c
     ../../App/common/Src/shell.c
     ../../App/common/Src/stats.c

@@ -13,10 +13,12 @@
 #include "imu.h"
 #include "logger.h"
 #include "main.h"
+#include "parameters.h"
 #include "print.h"
 #include "shell.h"
 #include "spi3_bus.h"
 #include "vbat.h"
+#include "vcu_params.h"
 #include "vcu_shell.h"
 #include "vcu_step.h"
 
@@ -85,6 +87,8 @@ void tasks_init(void)
        interrupt, so it must run before that interrupt can fire; creating
        shellTask afterward is what actually drains what it collects. */
     bool ok = print_init();
+    /* Parameters before anything that reads them, read once (ADR 0015). */
+    ok = parameters_init(&vcu_param_table, vcu_step_save_refusal) && ok;
     ok = shell_init() && ok;
     vcu_shell_register();
     ok = spi3_bus_init() && ok;
