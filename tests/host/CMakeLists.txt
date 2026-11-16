@@ -45,3 +45,5 @@ endfunction()
 
 add_host_test(test_e2e_p11 logic_common common/test_e2e_p11.c)
 add_host_test(test_can_db logic_common common/test_can_db.c)
+add_host_test(test_mailbox logic_common common/test_mailbox.c)
+add_host_test(test_control_rx logic_common common/test_control_rx.c)
