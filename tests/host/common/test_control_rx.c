@@ -3,9 +3,10 @@
  * (App/common/logic/Inc/control_rx.h, ADR 0004).
  *
  * The expected timeouts are the spec's (issue 36, "Message database and
- * CAN": BMS_Status 100 ms, BMS_Limits 300 ms, BMS_Power 100 ms, inverter
- * frames 100 ms, Energy Meter 100 ms, iso175 500 ms; "Charge mode": charger
- * 5 s). Each Substitute is unpacked with the generated code and judged by
+ * CAN": BMS_Status 100 ms, BMS_Power 100 ms, inverter frames 100 ms, Energy
+ * Meter 100 ms, iso175 500 ms; "Charge mode": charger 5 s). BMS_Limits is
+ * 500 ms, raised from the spec's 300 ms so that it tolerates two lost frames
+ * (issue 12: "Each timeout tolerates at least two lost frames in a row"). Each Substitute is unpacked with the generated code and judged by
  * what it tells a reader.
  */
 #include <string.h>
@@ -42,7 +43,7 @@ static void assert_row(control_rx_t frame, uint32_t id, bool extended, bool e2e,
 static void test_every_received_frame_has_its_id_checks_and_timeout(void)
 {
     assert_row(CONTROL_RX_BMS_STATUS, 0x080, false, true, 100);
-    assert_row(CONTROL_RX_BMS_LIMITS, 0x081, false, true, 300);
+    assert_row(CONTROL_RX_BMS_LIMITS, 0x081, false, true, 500);
     assert_row(CONTROL_RX_BMS_POWER, 0x082, false, true, 100);
     assert_row(CONTROL_RX_INV_MOTOR_POSITION, 0x0A5, false, false, 100);
     assert_row(CONTROL_RX_INV_VOLTAGE, 0x0A7, false, false, 100);
@@ -228,11 +229,71 @@ static void test_a_reader_of_bms_status_gets_the_frame_while_valid_and_bms_fault
     TEST_ASSERT_EQUAL_UINT8(0, read.bms_ok);
 }
 
+/* The sender's next frame of one of our own, every signal 0. */
+static void send_ours(const mailbox_config_t *config, e2e_p11_tx_t *sender,
+                      mailbox_rx_t *rx, uint32_t at)
+{
+    uint8_t frame[8] = {0};
+
+    e2e_p11_protect(sender, config->e2e_data_id, frame, sizeof frame);
+    mailbox_rx_store(rx, frame, sizeof frame, at);
+}
+
+/*
+ * Issue 12: "Each timeout tolerates at least two lost frames in a row."
+ * Two frames are lost, the next is dropped for its skipped counter, and the
+ * one after that is good. The mailbox must be VALID throughout, checked on
+ * every millisecond.
+ */
+static void assert_survives_two_lost_frames(control_rx_t frame, uint32_t period_ms)
+{
+    const mailbox_config_t *config = row(frame);
+    e2e_p11_tx_t sender = {0};
+    e2e_p11_tx_t unheard;
+    mailbox_rx_t rx;
+    mailbox_t mb;
+    uint8_t lost[8] = {0};
+    uint32_t t = 1000;
+
+    memset(&rx, 0, sizeof rx);
+    memset(&mb, 0, sizeof mb);
+    for (int i = 0; i < 3; i++, t += period_ms) {
+        send_ours(config, &sender, &rx, t);
+        mailbox_update(&mb, config, &rx, t);
+    }
+    TEST_ASSERT_EQUAL(MAILBOX_VALID, mb.state);
+    const uint32_t last_good = t - period_ms;
+
+    /* Two frames the sender built and the bus lost. */
+    unheard = sender;
+    e2e_p11_protect(&unheard, config->e2e_data_id, lost, sizeof lost);
+    e2e_p11_protect(&unheard, config->e2e_data_id, lost, sizeof lost);
+    sender = unheard;
+
+    for (uint32_t now = last_good + 1u; now <= last_good + 4u * period_ms; now++) {
+        if (now == last_good + 3u * period_ms || now == last_good + 4u * period_ms) {
+            send_ours(config, &sender, &rx, now);
+        }
+        TEST_ASSERT_EQUAL_MESSAGE(MAILBOX_VALID, mailbox_update(&mb, config, &rx, now),
+                                  "went INVALID with two frames lost");
+    }
+    TEST_ASSERT_EQUAL_UINT32(1, mb.counters.bad_counter);
+    TEST_ASSERT_EQUAL_UINT32(4, mb.counters.good);
+}
+
+static void test_each_of_our_frames_survives_two_lost_frames_in_a_row(void)
+{
+    assert_survives_two_lost_frames(CONTROL_RX_BMS_STATUS, 20);
+    assert_survives_two_lost_frames(CONTROL_RX_BMS_LIMITS, 100);
+    assert_survives_two_lost_frames(CONTROL_RX_BMS_POWER, 20);
+}
+
 int main(void)
 {
     UNITY_BEGIN();
     RUN_TEST(test_every_received_frame_has_its_id_checks_and_timeout);
     RUN_TEST(test_every_timeout_is_at_least_three_periods);
+    RUN_TEST(test_each_of_our_frames_survives_two_lost_frames_in_a_row);
     RUN_TEST(test_the_bms_status_substitute_says_bms_faulted);
     RUN_TEST(test_the_bms_limits_and_power_substitutes_allow_no_current);
     RUN_TEST(test_the_inverter_substitutes_say_inverter_not_ready);

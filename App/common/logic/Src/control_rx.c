@@ -30,8 +30,8 @@
 
 /*
  * Timeouts and Substitutes. The values are the spec's (issue 36, "Message
- * database and CAN") except the two marked "derived", which the spec does
- * not give. Every timeout is at least three periods.
+ * database and CAN") except BMS_Limits and the two marked "derived", which
+ * the spec does not give. Every timeout is at least three periods.
  *
  * A Substitute is written as frame bytes so that a reader unpacks it exactly
  * as it unpacks a real frame; tests/host/common/test_control_rx.c unpacks
@@ -43,8 +43,12 @@ const mailbox_config_t control_rx_config[CONTROL_RX_COUNT] = {
     [CONTROL_RX_BMS_STATUS] = OURS(BMS_STATUS, 100u,
         {0x00, 0x30, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}),
 
-    /* Charge limit 0 A. */
-    [CONTROL_RX_BMS_LIMITS] = OURS(BMS_LIMITS, 300u, ALL_ZERO),
+    /* Charge limit 0 A. 500 ms, not the 300 ms first decided (issue 12):
+     * the frame after a lost one is dropped for its skipped counter, so two
+     * lost frames leave 400 ms between good ones. Nothing the driving car
+     * reacts to quickly is in this frame; the Discharge limit is in
+     * BMS_Power. */
+    [CONTROL_RX_BMS_LIMITS] = OURS(BMS_LIMITS, 500u, ALL_ZERO),
 
     /* Discharge limit 0 A, so zero torque. */
     [CONTROL_RX_BMS_POWER] = OURS(BMS_POWER, 100u, ALL_ZERO),
