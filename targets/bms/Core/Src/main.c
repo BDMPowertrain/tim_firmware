@@ -232,7 +232,7 @@ static void MX_FDCAN1_Init(void)
   hfdcan1.Init.DataTimeSeg2 = 1;
   hfdcan1.Init.StdFiltersNbr = 0;
   hfdcan1.Init.ExtFiltersNbr = 1;
-  hfdcan1.Init.TxFifoQueueMode = FDCAN_TX_QUEUE_MODE;
+  hfdcan1.Init.TxFifoQueueMode = FDCAN_TX_QUEUE_OPERATION;
   if (HAL_FDCAN_Init(&hfdcan1) != HAL_OK)
   {
     Error_Handler();

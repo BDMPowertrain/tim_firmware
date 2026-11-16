@@ -449,7 +449,7 @@ static void MX_FDCAN1_Init(void)
   hfdcan1.Init.DataTimeSeg2 = 3;
   hfdcan1.Init.StdFiltersNbr = 10;
   hfdcan1.Init.ExtFiltersNbr = 1;
-  hfdcan1.Init.TxFifoQueueMode = FDCAN_TX_QUEUE_MODE;
+  hfdcan1.Init.TxFifoQueueMode = FDCAN_TX_QUEUE_OPERATION;
   if (HAL_FDCAN_Init(&hfdcan1) != HAL_OK)
   {
     Error_Handler();
@@ -881,7 +881,7 @@ static void MX_GPIO_Init(void)
   HAL_GPIO_Init(IMU_INT_GPIO_Port, &GPIO_InitStruct);
 
   /* EXTI interrupt init*/
-  HAL_NVIC_SetPriority(EXTI4_IRQn, 5, 0);
+  HAL_NVIC_SetPriority(EXTI4_IRQn, 8, 0);
   HAL_NVIC_EnableIRQ(EXTI4_IRQn);
 
   /* USER CODE BEGIN MX_GPIO_Init_2 */
