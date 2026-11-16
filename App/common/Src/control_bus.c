@@ -6,6 +6,7 @@
 
 #include "cmsis_os2.h"
 
+#include "control_step.h"
 #include "fdcan_irq.h"
 #include "main.h"
 #include "masked_copy.h"
@@ -34,24 +35,16 @@ static mailbox_rx_t rxLatest[CONTROL_BUS_RX_MAX];
 static mailbox_rx_t rxSnapshot[CONTROL_BUS_RX_MAX];
 static mailbox_t mailboxes[CONTROL_BUS_RX_MAX];
 
-/* The bus-off policy's state, owned by the step. */
+/* Owned by the step. Other tasks see them only through the Control
+   step's published snapshot (control_bus_report()). */
 static bus_recovery_t recovery;
-static bool rxOverflowed;
-
-/* What the shell sees of the step's state: written by the step with
-   interrupts masked, read the same way. */
-typedef struct {
-    control_bus_health_t    health;
-    bus_recovery_counters_t counters;
-} published_t;
-static published_t published;
+static uint32_t rxOverflows;
 
 static volatile bool started;
 static volatile uint32_t busOffEvents;   /* written only by the interrupt */
 static volatile bool     controllerOff;  /* written only by the interrupt */
 static volatile uint32_t rxFrames;
 static volatile uint32_t rxUnknown;
-static volatile uint32_t rxOverflows;
 static volatile uint32_t txSent;
 static volatile uint32_t txSkipped;
 
@@ -191,7 +184,6 @@ static void read_rx_overflow(void)
     if (lost != 0u) {
         hfdcan1.Instance->IR = lost;
         rxOverflows++;
-        rxOverflowed = true;
     }
 }
 
@@ -232,12 +224,6 @@ void control_bus_update(uint32_t now_ms, bool latch_may_clear)
         read_rx_overflow();
         run_recovery(now_ms, latch_may_clear);
     }
-
-    const published_t snapshot = {
-        .health = control_bus_health(),
-        .counters = recovery.counters,
-    };
-    masked_copy(&published, &snapshot, sizeof(published));
 }
 
 const mailbox_t *control_bus_mailbox(size_t row)
@@ -261,7 +247,16 @@ control_bus_health_t control_bus_health(void)
         .off = recovery.off,
         .latched = recovery.latched,
         .error_passive = recovery.error_passive,
-        .rx_overflowed = rxOverflowed,
+        .rx_overflowed = (rxOverflows != 0u),
+    };
+}
+
+control_bus_report_t control_bus_report(void)
+{
+    return (control_bus_report_t){
+        .health = control_bus_health(),
+        .recovery = recovery.counters,
+        .rx_overflows = rxOverflows,
     };
 }
 
@@ -317,14 +312,12 @@ bool control_bus_get_status(control_bus_status_t *out)
     out->rx_error_count = errors.RxErrorCnt;
     out->rx_frames = rxFrames;
     out->rx_unknown = rxUnknown;
-    out->rx_overflows = rxOverflows;
     out->tx_sent = txSent;
     out->tx_skipped = txSkipped;
 
-    published_t snapshot;
-    masked_copy(&snapshot, &published, sizeof(snapshot));
-    out->health = snapshot.health;
-    out->recovery = snapshot.counters;
+    control_snapshot_t snapshot;
+    control_step_read(&snapshot);
+    out->report = snapshot.bus;
     return true;
 }
 
@@ -337,18 +330,19 @@ void control_bus_print_status(void)
         return;
     }
 
-    const char *state = !st.started            ? "not started"
-                        : st.health.latched    ? "BUS-OFF LATCHED (retry 1/s)"
-                        : st.health.off        ? "bus-off, restarting"
-                                               : "running";
+    const control_bus_report_t *r = &st.report;
+    const char *state = !st.started             ? "not started"
+                        : r->health.latched     ? "BUS-OFF LATCHED (retry 1/s)"
+                        : r->health.off         ? "bus-off, restarting"
+                                                : "running";
     shell_printf("CAN1  Control bus, classic: %s\r\n", state);
     shell_printf("     bus_off=%u err_passive=%u last_err=0x%02lX tx_err=%lu rx_err=%lu\r\n",
                  (unsigned)st.bus_off, (unsigned)st.error_passive,
                  (unsigned long)st.last_error_code, (unsigned long)st.tx_error_count,
                  (unsigned long)st.rx_error_count);
     shell_printf("     bus_offs=%lu restarts=%lu err_passives=%lu fifo_overflows=%lu\r\n",
-                 (unsigned long)st.recovery.bus_offs, (unsigned long)st.recovery.restarts,
-                 (unsigned long)st.recovery.error_passives, (unsigned long)st.rx_overflows);
+                 (unsigned long)r->recovery.bus_offs, (unsigned long)r->recovery.restarts,
+                 (unsigned long)r->recovery.error_passives, (unsigned long)r->rx_overflows);
     shell_printf("     rx=%lu rx_unknown=%lu tx=%lu tx_skipped=%lu\r\n",
                  (unsigned long)st.rx_frames, (unsigned long)st.rx_unknown,
                  (unsigned long)st.tx_sent, (unsigned long)st.tx_skipped);

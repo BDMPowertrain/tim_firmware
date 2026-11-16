@@ -68,6 +68,7 @@ void control_step_task(void *argument)
             .startup_ok = ctx.startup_ok,
             .overruns = sched.overruns,
             .stats = stats,
+            .bus = control_bus_report(),
         };
         masked_copy(&published, &snapshot, sizeof(published));
     }

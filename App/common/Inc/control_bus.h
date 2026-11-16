@@ -57,6 +57,14 @@ typedef struct {
     bool rx_overflowed; /* a receive FIFO has overflowed since power-on */
 } control_bus_health_t;
 
+/* The step's view of the bus. It leaves the step only inside the Control
+   step's published snapshot (control_step.h, ADR 0010). */
+typedef struct {
+    control_bus_health_t    health;
+    bus_recovery_counters_t recovery;
+    uint32_t                rx_overflows; /* steps that found a receive FIFO had lost a frame */
+} control_bus_report_t;
+
 typedef struct {
     bool     started;
     bool     bus_off;       /* the controller's own flag, read now */
@@ -66,11 +74,9 @@ typedef struct {
     uint32_t rx_error_count;
     uint32_t rx_frames;   /* frames written into a mailbox */
     uint32_t rx_unknown;  /* frames past the filters with no mailbox: 0 */
-    uint32_t rx_overflows; /* steps that found a receive FIFO had lost a frame */
     uint32_t tx_sent;     /* frames handed to a send slot */
     uint32_t tx_skipped;  /* frames skipped: no free slot, not started, or bus-off */
-    control_bus_health_t    health;   /* as of the last step */
-    bus_recovery_counters_t recovery; /* as of the last step */
+    control_bus_report_t report; /* as of the last published step */
 } control_bus_status_t;
 
 /* Sets the acceptance filters for rows (the image's received frames, one
@@ -102,6 +108,10 @@ bool control_bus_all_valid(void);
 /* The bus's health after the last update. Only the Control step calls
    this; other tasks use control_bus_get_status(). */
 control_bus_health_t control_bus_health(void);
+
+/* The bus's health and counters after the last update, for the step's
+   published snapshot. Only the Control step calls this. */
+control_bus_report_t control_bus_report(void);
 
 /* Hands one classic frame of up to 8 bytes to a free send slot. False if
    none is free, CAN1 has not started or it is bus-off; that is counted as

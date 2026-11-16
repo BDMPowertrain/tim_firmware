@@ -9,13 +9,16 @@
 
    An Overrun is counted and the next step starts on the next period
    boundary, with no catch-up (step_timing.h). The image says what its
-   phases are; the runner knows nothing else about it, so this file never
-   checks which image it is built into. */
+   phases are; beyond them the runner knows only the Control bus, which
+   every image has, and whose report it publishes with the step so the
+   step leaves through one snapshot (ADR 0010). This file never checks
+   which image it is built into. */
 
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
+#include "control_bus.h"
 #include "step_timing.h"
 
 /* What a phase is handed. now_ms and step_count are set before the first
@@ -55,6 +58,7 @@ typedef struct {
     bool         startup_ok;
     uint32_t     overruns;   /* since power-on */
     step_stats_t stats;      /* last and worst since power-on, in us */
+    control_bus_report_t bus; /* the Control bus as this step left it */
 } control_snapshot_t;
 
 /* The task entry point. argument is a control_step_args_t *. The first
