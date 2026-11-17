@@ -120,13 +120,18 @@ void shell_register_commands(const shell_cmd_t *commands, size_t count)
     imageCommandCount = count;
 }
 
-/* The image's refusal hook for `hang` and `crash`, or none. Written once
+/* The image's refusal hook for the bench commands, or none. Written once
    from tasks_init() before shellTask exists, only read after that. */
 static shell_refusal_hook_t benchRefusal;
 
 void shell_register_bench_refusal(shell_refusal_hook_t hook)
 {
     benchRefusal = hook;
+}
+
+const char *shell_bench_refusal(void)
+{
+    return benchRefusal != NULL ? benchRefusal() : NULL;
 }
 
 /* The checks `hang` and `crash` share: the confirmation word, then the
@@ -138,7 +143,7 @@ static bool bench_command_allowed(int argc, char **argv)
         return false;
     }
 
-    const char *refusal = benchRefusal != NULL ? benchRefusal() : NULL;
+    const char *refusal = shell_bench_refusal();
 
     if (refusal != NULL) {
         shell_printf("%s: refused: %s\r\n", argv[0], refusal);

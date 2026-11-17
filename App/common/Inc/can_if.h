@@ -58,7 +58,9 @@ typedef struct {
    frame by default), starts FDCAN2, activates the RX FIFO0 interrupt, and
    brings STBY low (out of standby) per the ADM3057EBRWZ's confirmed
    polarity, then sets termination to terminate, the image's CAN2
-   termination Parameter (termination.h). publisher must outlive daqTask.
+   termination Parameter (termination.h). Unlike CAN1, FDCAN2 is started
+   before termination is written and has no settle time: the DAQ bus
+   carries nothing safety-related. publisher must outlive daqTask.
    Must run after parameters_init() and before canRxTask/daqTask are
    created -- see tasks_init(). Returns false if a queue, the mutex or the
    controller could not be set up. */

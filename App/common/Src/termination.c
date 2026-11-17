@@ -9,6 +9,7 @@
 #include "bus_term.h"
 #include "main.h"
 #include "print.h"
+#include "shell.h"
 
 #define TERM_USAGE "usage: term [1|2 on|off|stored]\r\n"
 
@@ -39,8 +40,10 @@ void termination_write_stored(termination_bus_t bus, bool stored)
     if (bus >= TERMINATION_BUS_COUNT) {
         return;
     }
-    bus_term_write_stored(&term[bus], stored, osKernelGetTickCount());
+    term[bus].relay = stored;
     drive(bus);
+    /* Stamped after the pin moves, so the settle time is never short. */
+    bus_term_write_stored(&term[bus], stored, osKernelGetTickCount());
 }
 
 bool termination_settled(termination_bus_t bus, uint32_t now_ms)
@@ -95,6 +98,15 @@ int termination_cmd(int argc, char **argv)
         return 0;
     }
 
+    /* The image's bench refusal (the VCU: not in READY_TO_DRIVE), as for
+       `hang` and `crash`: opening the Control bus's termination can stop
+       it. */
+    const char *refusal = shell_bench_refusal();
+    if (refusal != NULL) {
+        shell_printf("term: refused: %s\r\n", refusal);
+        return 0;
+    }
+
     if (strcmp(argv[2], "on") == 0) {
         termination_override(bus, true);
     } else if (strcmp(argv[2], "off") == 0) {
@@ -107,7 +119,8 @@ int termination_cmd(int argc, char **argv)
     }
     print_bus(bus);
     if (bus_term_overridden(&term[bus])) {
-        shell_printf("bench override until reset; `param set can%c_term` changes the stored value\r\n",
+        shell_printf("bench override until reset; `param set can%c_term` then `param save`"
+                     " changes what the next start-up writes\r\n",
                      argv[1][0]);
     }
     return 0;

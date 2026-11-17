@@ -39,9 +39,10 @@ bool vcu_step_read_inputs(vcu_inputs_t *out);
    GLV_ON (ADR 0015), so nothing is written while the car can move. */
 const char *vcu_step_save_refusal(void);
 
-/* The VCU's refusal hook for the bench commands `hang` and `crash`
-   (shell.h): refused in READY_TO_DRIVE (ADR 0002 amendment), where either
-   would cut the drive with no warning to the driver. */
+/* The VCU's refusal hook for the bench commands `hang`, `crash` and a
+   `term` override (shell.h): refused in READY_TO_DRIVE (ADR 0002
+   amendment), where any of them could cut the drive with no warning to
+   the driver. */
 const char *vcu_step_bench_refusal(void);
 
 #endif /* APP_VCU_INC_VCU_STEP_H */

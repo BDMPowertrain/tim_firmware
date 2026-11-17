@@ -38,14 +38,19 @@ typedef struct {
 void shell_register_commands(const shell_cmd_t *commands, size_t count);
 
 /* Asked before the bench commands `hang` and `crash` (ADR 0002 amendment,
-   issue 48 and 49). NULL allows them; otherwise the reason they are
+   issue 48 and 49) and before a `term` override (issue 52). NULL allows
+   them; otherwise the reason they are
    refused, which the shell prints. Runs on the shell task. */
 typedef const char *(*shell_refusal_hook_t)(void);
 
-/* Sets the image's one refusal hook for `hang` and `crash`. Call once,
+/* Sets the image's one refusal hook for the bench commands. Call once,
    before shellTask is created. An image that never refuses them (the BMS)
    never calls this. */
 void shell_register_bench_refusal(shell_refusal_hook_t hook);
+
+/* The image's refusal hook's answer now: NULL if a bench command may go
+   ahead, otherwise the reason it is refused. Shell task only. */
+const char *shell_bench_refusal(void);
 
 /* For a command that streams until a key is pressed: blocks the calling
    command for up to timeout_ms and returns true if a key arrived. The key

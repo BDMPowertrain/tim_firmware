@@ -39,9 +39,9 @@ bool bms_step_init(void)
 static void phase_input(control_step_ctx_t *ctx)
 {
     /* CAN1 starts on the first step, a full period after the transceiver
-       left standby and termination was written in bms_step_init(). A failure is visible as zero frames
-       sent in the shell's `step`, on the bench tool and as a 5 Hz
-       heartbeat. */
+       left standby and termination was written in bms_step_init(). A
+       failure is visible as zero frames sent in the shell's `step`, on the
+       bench tool and as a 5 Hz heartbeat. */
     if (ctx->step_count == 0u) {
         canStarted = control_bus_start(ctx->now_ms);
     }

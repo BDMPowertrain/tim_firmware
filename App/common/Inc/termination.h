@@ -16,7 +16,9 @@
    step comes a full step period after it, so no one waits for it.
 
    The shell's `term` command overrides either relay for bench use and
-   never changes the stored value. Any task may override; only the bus
+   never changes the stored value. An override is refused whenever the
+   image's bench refusal hook refuses (shell.h): the VCU in
+   READY_TO_DRIVE. Any task may override; only the bus
    drivers write the stored value, once each, from tasks_init(). */
 
 #include <stdbool.h>
