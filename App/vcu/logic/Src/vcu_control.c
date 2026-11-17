@@ -779,6 +779,19 @@ void vcu_control_step(vcu_control_t *vc, const vcu_control_in_t *in,
     send_status(vc, in, &bus, out->send_command ? torque : 0, out);
 }
 
+bool vcu_control_latch_may_clear(const mailbox_t *mailboxes)
+{
+    for (size_t row = 0; row < VCU_RX_COUNT; row++) {
+        if (row == VCU_RX_EM_MEASUREMENT || row == VCU_RX_EM_STATUS) {
+            continue;
+        }
+        if (mailboxes[row].state != MAILBOX_VALID) {
+            return false;
+        }
+    }
+    return true;
+}
+
 const char *vcu_control_state_name(uint8_t state)
 {
     switch (state) {
