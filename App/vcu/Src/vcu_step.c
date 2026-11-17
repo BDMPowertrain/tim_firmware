@@ -118,6 +118,9 @@ static void phase_logic(control_step_ctx_t *ctx)
         .start_pressed = in.start_pressed,
         .brake_engaged = out.brake_engaged,
         .start_blockers = out.start_blockers,
+        .cuts = out.cuts,
+        .torque_request = out.torque_request,
+        .torque = out.torque,
     };
 }
 

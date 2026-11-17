@@ -182,6 +182,30 @@ static uint16_t higher_travel(const vcu_sensors_t *sensors)
     return (a > b) ? a : b;
 }
 
+static uint16_t lower_travel(const vcu_sensors_t *sensors)
+{
+    const uint16_t a = sensors->apps[0].travel;
+    const uint16_t b = sensors->apps[1].travel;
+    return (a < b) ? a : b;
+}
+
+/* The driver's request from the lower Pedal travel, 0.1 N.m: 0 below 5%,
+   then linear from 0 at 5% to max_torque at 100%, so there is no step at
+   5%. Never negative, and never above max_torque. */
+static int16_t driver_request(const vcu_control_t *vc, uint16_t travel)
+{
+    if (travel < VCU_TRAVEL_RELEASED) {
+        return 0;
+    }
+    if (travel > VCU_TRAVEL_FULL) {
+        travel = VCU_TRAVEL_FULL;
+    }
+    const uint32_t max = (vc->config.max_torque > (uint16_t)INT16_MAX) ? (uint32_t)INT16_MAX
+                                                                        : vc->config.max_torque;
+    return (int16_t)((max * (uint32_t)(travel - VCU_TRAVEL_RELEASED)) /
+                     (VCU_TRAVEL_FULL - VCU_TRAVEL_RELEASED));
+}
+
 /* Everything that refuses the Start procedure now. */
 static uint16_t start_blockers(const vcu_control_t *vc, const vcu_control_in_t *in,
                                const bus_view_t *bus, const vcu_control_out_t *out)
@@ -225,8 +249,11 @@ static uint16_t start_blockers(const vcu_control_t *vc, const vcu_control_in_t *
     if (!ts_up(bus)) {
         b |= VCU_START_BUS_VOLTAGE;
     }
-    if (in->timing_fault) {
+    if ((out->cuts & (1u << VCU_CUT_TIMING)) != 0u) {
         b |= VCU_START_TIMING_FAULT;
+    }
+    if (out->cuts != 0u) {
+        b |= VCU_START_TORQUE_CUT;
     }
     return b;
 }
@@ -245,6 +272,71 @@ static void post_event(vcu_control_out_t *out, uint16_t code,
     }
 }
 
+/* ------------------------------------------------------------------ */
+/* Torque cuts (ADR 0006)                                             */
+/* ------------------------------------------------------------------ */
+
+static void post_cut_event(const vcu_control_t *vc, vcu_control_out_t *out, vcu_cut_t cause,
+                           bool started)
+{
+    const vcu_sensors_t *sn = &out->sensors;
+    const event_torque_cut_t ev = {
+        .cause = (uint8_t)cause,
+        .started = started,
+        .state = vc->state,
+        .travel = { sn->apps[0].travel, sn->apps[1].travel },
+        .apps_status = { (uint8_t)sn->apps[0].status, (uint8_t)sn->apps[1].status },
+        .brake_status = { (uint8_t)sn->brake[0].status, (uint8_t)sn->brake[1].status },
+    };
+    uint8_t data[EVENT_DATA_SIZE];
+
+    event_data_torque_cut(data, &ev);
+    post_event(out, EVENT_TORQUE_CUT, data);
+}
+
+/* One Torque cut: it starts once its cause has held for persist_ms, and
+   ends only once the cause is gone and the higher Pedal travel is below
+   5%, so torque never returns under a pressed pedal (ADR 0006). Each start
+   and end is an Event. */
+static void run_cut(vcu_control_t *vc, const vcu_control_in_t *in, vcu_control_out_t *out,
+                    vcu_cut_t cause, bool holds, uint32_t persist_ms)
+{
+    vcu_cut_timer_t *c = &vc->cut[cause];
+
+    if (!holds) {
+        c->pending = false;
+    } else if (!c->pending) {
+        c->pending = true;
+        c->since_ms = in->now_ms;
+    }
+
+    if (!c->active) {
+        if (holds && (uint32_t)(in->now_ms - c->since_ms) >= persist_ms) {
+            c->active = true;
+            post_cut_event(vc, out, cause, true);
+        }
+    } else if (!holds && higher_travel(&out->sensors) < VCU_TRAVEL_RELEASED) {
+        c->active = false;
+        post_cut_event(vc, out, cause, false);
+    }
+
+    if (c->active) {
+        out->cuts |= (uint16_t)(1u << cause);
+    }
+}
+
+/* T.4.2.4: implausible is more than 10 points apart, or either sensor not
+   OK (out of range, its supply out of its window, no sample). */
+static bool apps_implausible(const vcu_sensors_t *sn)
+{
+    const uint16_t a = sn->apps[0].travel;
+    const uint16_t b = sn->apps[1].travel;
+    const uint16_t diff = (a > b) ? (uint16_t)(a - b) : (uint16_t)(b - a);
+
+    return sn->apps[0].status != VCU_SENSOR_OK || sn->apps[1].status != VCU_SENSOR_OK ||
+           diff > VCU_APPS_AGREE;
+}
+
 static void enter(vcu_control_t *vc, const vcu_control_in_t *in, vcu_control_out_t *out,
                   const bus_view_t *bus, uint8_t to, vcu_cause_t cause, uint16_t causes)
 {
@@ -260,6 +352,14 @@ static void enter(vcu_control_t *vc, const vcu_control_in_t *in, vcu_control_out
 
     event_data_vcu_state(data, &ev);
     post_event(out, EVENT_VCU_STATE, data);
+    /* Leaving Ready to Drive needs the Start procedure again: the fault
+       LED is solid until it is done, or until the Tractive System is
+       down and there is nothing to restart (ADR 0006). */
+    if (vc->state == VCU_STATE_READY_TO_DRIVE) {
+        vc->restart_needed = true;
+    } else if (to == VCU_STATE_READY_TO_DRIVE || to == VCU_STATE_GLV_ON) {
+        vc->restart_needed = false;
+    }
     vc->state = to;
     vc->entered_ms = in->now_ms;
 }
@@ -343,11 +443,14 @@ static void send_status(vcu_control_t *vc, const vcu_control_in_t *in,
     }
     const struct can_control_vcu_status_t status = {
         .state = vc->state,
+        .apps_implausible = (out->cuts & (1u << VCU_CUT_APPS)) != 0u ? 1u : 0u,
+        .brake_sensor_failed = (out->cuts & (1u << VCU_CUT_BRAKE_SENSOR)) != 0u ? 1u : 0u,
+        .brake_pedal_cut = (out->cuts & (1u << VCU_CUT_BRAKE_PEDAL)) != 0u ? 1u : 0u,
         .bms_status_timeout = bus->bms_status_valid ? 0u : 1u,
         .bms_limits_timeout = bus->bms_limits_valid ? 0u : 1u,
         .bms_power_timeout = bus->bms_power_valid ? 0u : 1u,
         .inverter_timeout = bus->inverter_valid ? 0u : 1u,
-        .timing_fault = in->timing_fault ? 1u : 0u,
+        .timing_fault = (out->cuts & (1u << VCU_CUT_TIMING)) != 0u ? 1u : 0u,
         .bms_fault_reported = bus->bms_fault ? 1u : 0u,
         .inverter_fault_reported = bus->inverter_fault ? 1u : 0u,
         .shutdown_circuit_open = in->sdc_closed ? 0u : 1u,
@@ -385,12 +488,21 @@ void vcu_control_step(vcu_control_t *vc, const vcu_control_in_t *in,
     /* 2. The pedal and brake sensors. */
     vcu_sensors_compute(&in->raw, &vc->config.cal, &out->sensors);
     out->samples_ready = all_sampled(&in->raw);
+    run_cut(vc, in, out, VCU_CUT_APPS, apps_implausible(&out->sensors), VCU_CUT_PERSIST_MS);
+    run_cut(vc, in, out, VCU_CUT_BRAKE_SENSOR,
+            out->sensors.brake[0].status != VCU_SENSOR_OK ||
+                out->sensors.brake[1].status != VCU_SENSOR_OK,
+            VCU_CUT_PERSIST_MS);
+    run_cut(vc, in, out, VCU_CUT_TIMING, in->timing_fault, 0u);
 
-    /* 3. Brake engaged. */
+    /* 3. Brake engaged, and the brake-and-pedal check (EV.4.7) on it. */
     out->brake_engaged = brake_engaged(vc, &out->sensors);
+    run_cut(vc, in, out, VCU_CUT_BRAKE_PEDAL,
+            out->brake_engaged && higher_travel(&out->sensors) > VCU_TRAVEL_BRAKE_CUT, 0u);
     const bool press = start_press(vc, in);
 
     /* 4. The state transitions, at most one per step. */
+    const uint8_t was = vc->state;
     switch (vc->state) {
     case VCU_STATE_STARTUP:
         if (in->startup_ok && in->can_running && out->samples_ready) {
@@ -431,10 +543,21 @@ void vcu_control_step(vcu_control_t *vc, const vcu_control_in_t *in,
     out->start_blockers = start_blockers(vc, in, &bus, out);
     vc->brake_was_engaged = out->brake_engaged;
 
-    /* 5-7. The driver request, the limiters and the gates: no torque yet
-       (issue 57). Whatever they become, the first 0x0C0 after entry into
-       READY_TO_DRIVE must carry zero torque. */
-    const int16_t torque = 0;
+    /* 5. The driver request, from the lower Pedal travel. */
+    out->torque_request = driver_request(vc, lower_travel(&out->sensors));
+
+    /* 6. The limiters: an empty slot until the Power limiter (issue 60).
+       A limiter only ever lowers the request (EV.3.1.3). */
+    int16_t torque = out->torque_request;
+
+    /* 7. The gates: zero torque outside READY_TO_DRIVE, on the first
+       0x0C0 after entry, and during any Torque cut. Nothing runs after
+       them. */
+    if (vc->state != VCU_STATE_READY_TO_DRIVE || was != VCU_STATE_READY_TO_DRIVE ||
+        out->cuts != 0u) {
+        torque = 0;
+    }
+    out->torque = torque;
 
     /* 8. Send and set the outputs, in the same step. Nothing runs after. */
     if (vc->state != VCU_STATE_STARTUP) {
@@ -444,12 +567,23 @@ void vcu_control_step(vcu_control_t *vc, const vcu_control_in_t *in,
         (uint32_t)(in->now_ms - vc->config.reset_ms) >= VCU_LAMP_CHECK_MS) {
         vc->lamp_check_done = true;
     }
-    out->brake_light = out->brake_engaged;
+    out->brake_light = out->brake_engaged || (out->cuts & (1u << VCU_CUT_BRAKE_SENSOR)) != 0u;
     out->sound = vc->state == VCU_STATE_READY_TO_DRIVE &&
                  (uint32_t)(in->now_ms - vc->entered_ms) < VCU_SOUND_MS;
-    out->fault_led = !vc->lamp_check_done || vc->state == VCU_STATE_STARTUP;
-    out->test_point = false; /* the torque path's (issue 57) */
-    out->fault_active = out->startup_blocked;
+    /* The fault LED: on for the lamp check and in STARTUP, solid while a
+       restart is needed, blinking while a Torque cut lasts, from its first
+       step (ADR 0006). */
+    const bool cut = out->cuts != 0u;
+    if (cut && !vc->cut_was) {
+        vc->blink_from_ms = in->now_ms;
+    }
+    vc->cut_was = cut;
+    const bool blink_on = ((uint32_t)(in->now_ms - vc->blink_from_ms) / VCU_FAULT_BLINK_MS) % 2u == 0u;
+    out->fault_led = !vc->lamp_check_done || vc->state == VCU_STATE_STARTUP ||
+                     vc->restart_needed || (cut && blink_on);
+    /* The test point changes in the step that zeroes the command. */
+    out->test_point = cut || vc->restart_needed;
+    out->fault_active = out->startup_blocked || out->test_point;
     send_status(vc, in, &bus, out->send_command ? torque : 0, out);
 }
 

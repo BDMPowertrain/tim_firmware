@@ -41,20 +41,45 @@
  *
  * Brake engaged: either brake sensor reads OK and above the brake_engaged
  * Parameter, with VCU_BRAKE_HYSTERESIS counts of hysteresis per sensor. The
- * brake light follows it in every state. (A failed brake sensor lighting
- * it is the brake-sensor Torque cut's, issue 57.)
+ * brake light follows it in every state, and is also on while the
+ * brake-sensor Torque cut lasts.
+ *
+ * The torque path (issue 57), in the step's order: the pedal sensors and
+ * the plausibility timers; Brake engaged and the brake-and-pedal check;
+ * the state transitions; the driver request; the limiters (an empty slot
+ * until issue 60); the gates; the send.
+ *   Driver request: from the lower Pedal travel, 0 below 5%, then linear
+ *   from 0 at 5% to the max_torque Parameter at 100%. Never negative.
+ *   Gates: zero torque outside READY_TO_DRIVE, on the first 0x0C0 after
+ *   entry, and while any Torque cut is active.
+ *
+ * Torque cuts (ADR 0006, vcu_cut_t). Each keeps Enable=1 with zero torque,
+ * is tracked in every state, and ends only once its cause is gone and the
+ * higher Pedal travel is below 5%, so torque never returns under a pressed
+ * pedal. Each start and end is an EVENT_TORQUE_CUT Event.
+ *   APPS implausible  more than 10 points apart, or either APPS not OK
+ *                     (out of range, its supply out of window, no sample),
+ *                     for VCU_CUT_PERSIST_MS (T.4.2.4, T.4.2.5, T.4.2.10)
+ *   brake sensor      either brake sensor not OK for VCU_CUT_PERSIST_MS
+ *                     (T.4.3.3, T.4.3.4)
+ *   brake and pedal   Brake engaged with the higher travel above 25%, at
+ *                     once (EV.4.7)
+ *   timing fault      three Overruns within a second (in.timing_fault)
  *
  * Inverter command (0x0C0): every step in every state after STARTUP, the
  * rolling counter one more each frame, direction forward, the torque limit
  * bytes the maximum-torque Parameter. Enable=1 only in READY_TO_DRIVE, and
- * the first frame after entry carries zero torque. The torque is always 0
- * until the torque path (issue 57).
+ * the first frame after entry carries zero torque.
  *
  * Ready to Drive sound (EV.10.7): on for VCU_SOUND_MS from entry into
  * READY_TO_DRIVE, off at once if it is left.
  *
  * Fault LED: on in STARTUP and for VCU_LAMP_CHECK_MS after reset release
- * (config.reset_ms), OR-ed with its normal function (issues 57, 58).
+ * (config.reset_ms); solid from Leaving Ready to Drive until the Start
+ * procedure is done again or the state is GLV_ON; otherwise blinking every
+ * VCU_FAULT_BLINK_MS while a Torque cut lasts. The fault-active test point
+ * and fault_active (the heartbeat's 5 Hz) are on for a Torque cut or a
+ * restart needed, in the same step that zeroes the command.
  *
  * VCU_Status: every second step from the first, with the state, the bits
  * this step knows, the flags and the torque in this step's 0x0C0.
@@ -126,7 +151,8 @@ extern const control_rx_t vcu_rx_frames[VCU_RX_COUNT];
 #define VCU_START_SDC_OPEN         0x0200u /* the Shutdown Circuit input reads open */
 #define VCU_START_BUS_OFF          0x0400u /* the bus-off latch is set */
 #define VCU_START_BUS_VOLTAGE      0x0800u /* bus below 60 V or below 90% of pack */
-#define VCU_START_TIMING_FAULT     0x1000u /* three Overruns within a second */
+#define VCU_START_TIMING_FAULT     0x1000u /* the timing-fault Torque cut is active */
+#define VCU_START_TORQUE_CUT       0x2000u /* any Torque cut is active */
 
 /* An EVENT_VCU_STATE Event's cause (event_codes.h). */
 typedef enum {
@@ -142,6 +168,21 @@ typedef enum {
     VCU_CAUSE_BUS_OFF_LATCHED = 8,
     VCU_CAUSE_BUS_VOLTAGE_LOW = 9,
 } vcu_cause_t;
+
+/* A Torque cut's cause (ADR 0006): bit (1 << cause) of cuts, and byte 0 of
+   an EVENT_TORQUE_CUT Event. Each keeps Enable=1 with zero torque. */
+typedef enum {
+    VCU_CUT_APPS         = 1, /* APPS implausible for VCU_CUT_PERSIST_MS */
+    VCU_CUT_BRAKE_SENSOR = 2, /* a brake sensor failed for VCU_CUT_PERSIST_MS */
+    VCU_CUT_BRAKE_PEDAL  = 3, /* Brake engaged with the higher travel above 25% */
+    VCU_CUT_TIMING       = 4, /* three Overruns within a second */
+    VCU_CUT_LIMIT
+} vcu_cut_t;
+
+#define VCU_CUT_PERSIST_MS   80u  /* T.4.2.5, T.4.3.3 allow 100 ms */
+#define VCU_APPS_AGREE       100u /* T.4.2.4: 10 points, in tenths */
+#define VCU_TRAVEL_BRAKE_CUT 250u /* EV.4.7: 25%, in tenths */
+#define VCU_FAULT_BLINK_MS   250u /* fault LED half-period in a Torque cut: 2 Hz */
 
 /* Fixed from start-up to the next reset (ADR 0015). */
 typedef struct {
@@ -174,7 +215,8 @@ typedef struct {
     uint8_t  data[EVENT_DATA_SIZE];
 } vcu_event_t;
 
-#define VCU_CONTROL_EVENTS_MAX 4u
+/* A state Event and every Torque cut starting or ending in one step. */
+#define VCU_CONTROL_EVENTS_MAX 8u
 
 typedef struct {
     uint8_t       state;
@@ -184,6 +226,9 @@ typedef struct {
     uint16_t      start_blockers; /* VCU_START_... bits; 0: a press would start */
     bool          startup_blocked;
     bool          fault_active;   /* for the heartbeat LED */
+    int16_t       torque_request; /* the driver's, from the lower Pedal travel, 0.1 N.m */
+    int16_t       torque;         /* in this step's 0x0C0 after the gates, 0.1 N.m */
+    uint16_t      cuts;           /* the Torque cuts active: bit (1 << vcu_cut_t) */
 
     /* Pin levels, true = on. */
     bool          brake_light;
@@ -200,8 +245,19 @@ typedef struct {
     vcu_event_t   events[VCU_CONTROL_EVENTS_MAX];
 } vcu_control_out_t;
 
+/* One Torque cut's timer and latch. */
+typedef struct {
+    bool     pending;   /* the cause holds now */
+    uint32_t since_ms;  /* since when */
+    bool     active;    /* the cut is on */
+} vcu_cut_timer_t;
+
 /* The step's own state. vcu_control_init() it; touch nothing inside. */
 typedef struct {
+    vcu_cut_timer_t cut[VCU_CUT_LIMIT]; /* by vcu_cut_t; [0] unused */
+    bool         cut_was;        /* a Torque cut was active on the last step */
+    uint32_t     blink_from_ms;  /* the first step of the Torque cuts now active */
+    bool         restart_needed; /* Ready to Drive was left for a fault */
     vcu_control_config_t config;
     uint8_t      state;
     uint32_t     entered_ms;     /* when the state was entered */

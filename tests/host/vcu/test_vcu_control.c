@@ -24,6 +24,15 @@
  *   button already held does not count (EV.10.6).
  * - Ready to Drive sound 2.0 s from entry (EV.10.7), stopped at once if
  *   Ready to Drive is lost.
+ *
+ * The torque path (issue 57; spec #36, reaction table; ADR 0006):
+ * - Pedal map: 0 N.m below 5%, linear to the max_torque Parameter at 100%,
+ *   from the lower Pedal travel; never negative.
+ * - APPS implausible (more than 10 points apart, or either not OK) for
+ *   80 ms, either brake sensor failed for 80 ms, or Brake engaged with the
+ *   higher travel above 25%, is a Torque cut: Enable=1, zero torque, until
+ *   the cause is gone and the higher travel is below 5%.
+ * - Three Overruns within a second are a Torque cut ("timing fault").
  */
 #include <string.h>
 
@@ -77,6 +86,14 @@ static void set_pedal(uint16_t travel_tenths)
     const uint32_t span = APPS_MAX - APPS_MIN;
     in.raw.apps[0] = (uint16_t)(APPS_MIN + (span * travel_tenths) / 1000u);
     in.raw.apps[1] = (uint16_t)(APPS_MAX - (span * travel_tenths) / 1000u);
+}
+
+/* Each APPS at its own travel, in tenths of a percent. */
+static void set_pedals(uint16_t apps1_tenths, uint16_t apps2_tenths)
+{
+    const uint32_t span = APPS_MAX - APPS_MIN;
+    in.raw.apps[0] = (uint16_t)(APPS_MIN + (span * apps1_tenths) / 1000u);
+    in.raw.apps[1] = (uint16_t)(APPS_MAX - (span * apps2_tenths) / 1000u);
 }
 
 /* Both brake sensors at this many counts above their zero. */
@@ -993,8 +1010,493 @@ static void test_leaving_ready_to_drive_sends_enable_0_in_the_same_step(void)
     TEST_ASSERT_EQUAL_UINT8(0u, status_frame().enable_sent);
 }
 
+
 /* ------------------------------------------------------------------ */
-/* The fault LED and VCU_Status                                       */
+/* The torque path: pedal map and gates                               */
+/* ------------------------------------------------------------------ */
+
+static int16_t torque_sent(void)
+{
+    return command_frame().torque_command;
+}
+
+/* Spec #36: 0 N.m below 5%, linear to max_torque (100.0 N.m) at 100%. */
+static void test_the_pedal_map_is_zero_below_5_percent_and_max_at_100(void)
+{
+    to_ready_to_drive();
+    brake_off();
+    step();
+
+    set_pedal(49u);
+    step();
+    TEST_ASSERT_EQUAL_INT16(0, torque_sent());
+
+    set_pedal(50u);
+    step();
+    TEST_ASSERT_EQUAL_INT16(0, torque_sent());
+
+    set_pedal(525u); /* halfway from 5% to 100% */
+    step();
+    TEST_ASSERT_EQUAL_INT16(500, torque_sent());
+
+    set_pedal(1000u);
+    step();
+    TEST_ASSERT_EQUAL_INT16(1000, torque_sent());
+    TEST_ASSERT_EQUAL_INT16(1000, command_frame().torque_limit);
+    TEST_ASSERT_EQUAL_INT16(1000, status_frame().torque_sent);
+}
+
+/* Spec #36: the request uses the lower Pedal travel. */
+static void test_the_request_uses_the_lower_pedal_travel(void)
+{
+    to_ready_to_drive();
+    brake_off();
+    set_pedals(575u, 525u);
+    step();
+    TEST_ASSERT_EQUAL_INT16(500, torque_sent());
+    set_pedals(525u, 575u);
+    step();
+    TEST_ASSERT_EQUAL_INT16(500, torque_sent());
+}
+
+/* EV.3.1.3 (user story 19): the command never exceeds the request, and is
+   never negative, even with max_torque at 0. */
+static void test_the_command_is_never_negative(void)
+{
+    config.max_torque = 0u;
+    vcu_control_init(&vc, &config);
+    to_ready_to_drive();
+    brake_off();
+    for (uint16_t t = 0u; t <= 1000u; t = (uint16_t)(t + 50u)) {
+        set_pedal(t);
+        step();
+        TEST_ASSERT_EQUAL_INT16(0, torque_sent());
+    }
+}
+
+/* Spec #36: any state but READY_TO_DRIVE forces zero torque and Enable=0. */
+static void test_no_torque_outside_ready_to_drive(void)
+{
+    to_ts_active();
+    set_pedal(800u);
+    run_ms(200u);
+    TEST_ASSERT_EQUAL_INT16(0, torque_sent());
+    TEST_ASSERT_EQUAL_UINT8(0u, command_frame().inverter_enable);
+}
+
+/* Issue 13: the first frame after entry carries zero torque, whatever the
+   pedal; the second carries the request. */
+static void test_the_entry_frame_has_zero_torque_and_the_next_the_request(void)
+{
+    to_ts_active();
+    brake_on();
+    run_ms(VCU_START_RELEASE_MS);
+    in.start_pressed = true;
+    step();
+    TEST_ASSERT_EQUAL_UINT8(VCU_STATE_READY_TO_DRIVE, out.state);
+    TEST_ASSERT_EQUAL_INT16(0, torque_sent());
+    brake_off();
+    set_pedal(525u);
+    step();
+    TEST_ASSERT_EQUAL_INT16(500, torque_sent());
+}
+
+/* Leaving Ready to Drive zeroes torque in the same step. */
+static void test_leaving_ready_to_drive_zeroes_torque_in_the_same_step(void)
+{
+    to_ready_to_drive();
+    brake_off();
+    set_pedal(525u);
+    step();
+    TEST_ASSERT_EQUAL_INT16(500, torque_sent());
+    in.sdc_closed = false;
+    step();
+    TEST_ASSERT_EQUAL_INT16(0, torque_sent());
+    TEST_ASSERT_EQUAL_UINT8(0u, command_frame().inverter_enable);
+}
+
+/* ------------------------------------------------------------------ */
+/* Torque cuts (ADR 0006)                                             */
+/* ------------------------------------------------------------------ */
+
+/* One step ms after the last one, not the usual 10 ms. */
+static void step_after(uint32_t ms)
+{
+    in.now_ms = in.now_ms - STEP_MS + ms;
+    step();
+}
+
+/* The EVENT_TORQUE_CUT Event for this cause this step, or NULL. */
+static const vcu_event_t *cut_event(vcu_cut_t cause)
+{
+    for (size_t i = 0; i < out.event_count; i++) {
+        if (out.events[i].code == EVENT_TORQUE_CUT && out.events[i].data[0] == (uint8_t)cause) {
+            return &out.events[i];
+        }
+    }
+    return NULL;
+}
+
+static void assert_cut_starts(vcu_cut_t cause)
+{
+    const vcu_event_t *ev = cut_event(cause);
+    TEST_ASSERT_NOT_NULL_MESSAGE(ev, "no torque cut Event this step");
+    TEST_ASSERT_EQUAL_UINT8(1u, ev->data[1]);
+    TEST_ASSERT_BITS_HIGH(1u << cause, out.cuts);
+}
+
+static void assert_cut_ends(vcu_cut_t cause)
+{
+    const vcu_event_t *ev = cut_event(cause);
+    TEST_ASSERT_NOT_NULL_MESSAGE(ev, "no torque cut Event this step");
+    TEST_ASSERT_EQUAL_UINT8(0u, ev->data[1]);
+    TEST_ASSERT_BITS_LOW(1u << cause, out.cuts);
+}
+
+/* In READY_TO_DRIVE, brake off, pedal at 52.5%: 50.0 N.m going out. */
+static void driving(void)
+{
+    to_ready_to_drive();
+    brake_off();
+    set_pedal(525u);
+    step();
+    TEST_ASSERT_EQUAL_INT16(500, torque_sent());
+    TEST_ASSERT_EQUAL_UINT8(0u, out.cuts);
+}
+
+/* T.4.2.4, T.4.2.5: more than 10 points apart for 80 ms (the rule allows
+   100 ms) cuts torque; 79 ms does not. */
+static void test_apps_disagreeing_for_80_ms_cuts_torque_79_ms_does_not(void)
+{
+    driving();
+    set_pedals(640u, 525u); /* 11.5 points apart */
+    step();
+    for (uint32_t t = 10u; t <= 70u; t += STEP_MS) {
+        step();
+    }
+    step_after(9u); /* 79 ms after the disagreement was first seen */
+    TEST_ASSERT_EQUAL_UINT8(0u, out.cuts);
+    TEST_ASSERT_NOT_EQUAL(0, torque_sent());
+    TEST_ASSERT_FALSE(out.test_point);
+
+    step_after(1u); /* 80 ms */
+    assert_cut_starts(VCU_CUT_APPS);
+    TEST_ASSERT_EQUAL_INT16(0, torque_sent());
+    TEST_ASSERT_EQUAL_UINT8(1u, command_frame().inverter_enable);
+    TEST_ASSERT_TRUE(out.test_point);
+    TEST_ASSERT_TRUE(out.fault_active);
+    TEST_ASSERT_EQUAL_UINT8(VCU_STATE_READY_TO_DRIVE, out.state);
+    step();
+    TEST_ASSERT_EQUAL_UINT8(1u, status_frame().apps_implausible);
+}
+
+/* T.4.2.4: exactly 10 points apart is plausible. */
+static void test_apps_exactly_10_points_apart_is_plausible(void)
+{
+    driving();
+    set_pedals(625u, 525u);
+    run_ms(1000u);
+    TEST_ASSERT_EQUAL_UINT8(0u, out.cuts);
+}
+
+/* T.4.2.10 via T.4.2.4: an APPS out of range (open wire) is implausible. */
+static void test_an_apps_out_of_range_for_80_ms_cuts_torque(void)
+{
+    driving();
+    in.raw.apps[1] = 4000u; /* far above its range */
+    run_ms(80u);
+    TEST_ASSERT_EQUAL_UINT8(0u, out.cuts);
+    step();
+    assert_cut_starts(VCU_CUT_APPS);
+}
+
+/* A disagreement that clears before 80 ms restarts the timer. */
+static void test_an_apps_glitch_under_80_ms_restarts_the_timer(void)
+{
+    driving();
+    set_pedals(800u, 525u);
+    run_ms(70u);
+    set_pedal(525u);
+    step();
+    set_pedals(800u, 525u);
+    run_ms(80u);
+    TEST_ASSERT_EQUAL_UINT8(0u, out.cuts);
+    step();
+    assert_cut_starts(VCU_CUT_APPS);
+}
+
+/* ADR 0006, T.4.2.5: the cut ends once plausible and the higher travel is
+   below 5%, not before; then torque returns. */
+static void test_an_apps_cut_recovers_only_below_5_percent(void)
+{
+    driving();
+    set_pedals(800u, 525u);
+    run_ms(90u);
+    TEST_ASSERT_BITS_HIGH(1u << VCU_CUT_APPS, out.cuts);
+
+    set_pedal(300u); /* plausible again, pedal pressed */
+    run_ms(500u);
+    TEST_ASSERT_BITS_HIGH(1u << VCU_CUT_APPS, out.cuts);
+    TEST_ASSERT_EQUAL_INT16(0, torque_sent());
+
+    set_pedal(50u); /* 5.0%: not below */
+    run_ms(100u);
+    TEST_ASSERT_BITS_HIGH(1u << VCU_CUT_APPS, out.cuts);
+
+    set_pedal(49u);
+    step();
+    assert_cut_ends(VCU_CUT_APPS);
+    TEST_ASSERT_FALSE(out.test_point);
+
+    set_pedal(525u);
+    step();
+    TEST_ASSERT_EQUAL_INT16(500, torque_sent());
+}
+
+/* Still implausible below 5% (one sensor stuck at 0): no recovery. */
+static void test_an_apps_cut_does_not_recover_while_still_implausible(void)
+{
+    driving();
+    set_pedals(0u, 0u);
+    in.raw.apps[0] = 50u; /* APPS1 open, far below its min */
+    run_ms(500u);
+    TEST_ASSERT_BITS_HIGH(1u << VCU_CUT_APPS, out.cuts);
+}
+
+/* T.4.2.5 across the 32-bit millisecond wrap. */
+static void test_the_apps_timer_works_across_the_clock_wrap(void)
+{
+    in.now_ms = 0xFFFFFF90u;
+    driving();
+    TEST_ASSERT_TRUE(in.now_ms > 0xFFFFFF00u); /* the wrap is still ahead */
+    set_pedals(800u, 525u); /* first seen before the wrap, trips after it */
+    run_ms(80u);
+    TEST_ASSERT_TRUE(in.now_ms < 0x100u);
+    TEST_ASSERT_EQUAL_UINT8(0u, out.cuts);
+    step();
+    assert_cut_starts(VCU_CUT_APPS);
+}
+
+/* T.4.3.3, T.4.3.4: a brake sensor failed for 80 ms cuts torque, 79 ms
+   does not; the brake light is on while the cut lasts (spec #36). */
+static void test_a_brake_sensor_failed_for_80_ms_cuts_torque(void)
+{
+    driving();
+    in.raw.brake[0] = 3800u; /* above its 4.75 V window: shorted */
+    run_ms(80u);
+    step_after(9u);
+    TEST_ASSERT_EQUAL_UINT8(0u, out.cuts);
+    TEST_ASSERT_FALSE(out.brake_light);
+
+    step_after(1u);
+    assert_cut_starts(VCU_CUT_BRAKE_SENSOR);
+    TEST_ASSERT_EQUAL_INT16(0, torque_sent());
+    TEST_ASSERT_EQUAL_UINT8(1u, command_frame().inverter_enable);
+    TEST_ASSERT_TRUE(out.brake_light);
+    TEST_ASSERT_TRUE(out.test_point);
+    step();
+    TEST_ASSERT_EQUAL_UINT8(1u, status_frame().brake_sensor_failed);
+}
+
+/* ADR 0006: back in range is not enough; the pedal must be below 5%. The
+   brake light stays on until the cut ends. */
+static void test_a_brake_sensor_cut_recovers_only_below_5_percent(void)
+{
+    driving();
+    in.raw.brake[1] = 10u; /* below its window: open wire */
+    run_ms(100u);
+    TEST_ASSERT_BITS_HIGH(1u << VCU_CUT_BRAKE_SENSOR, out.cuts);
+
+    brake_off(); /* in range again */
+    run_ms(200u);
+    TEST_ASSERT_BITS_HIGH(1u << VCU_CUT_BRAKE_SENSOR, out.cuts);
+    TEST_ASSERT_TRUE(out.brake_light);
+
+    set_pedal(49u);
+    step();
+    assert_cut_ends(VCU_CUT_BRAKE_SENSOR);
+    TEST_ASSERT_FALSE(out.brake_light);
+}
+
+/* Spec #36: the brake light is on for a failed brake sensor in any state. */
+static void test_a_failed_brake_sensor_lights_the_brake_light_in_glv_on(void)
+{
+    to_glv_on();
+    in.raw.brake[1] = 3800u;
+    run_ms(100u);
+    TEST_ASSERT_EQUAL_UINT8(VCU_STATE_GLV_ON, out.state);
+    TEST_ASSERT_TRUE(out.brake_light);
+}
+
+/* EV.4.7: Brake engaged with more than 25% travel cuts torque in the same
+   step; exactly 25% does not. */
+static void test_brake_with_the_pedal_above_25_percent_cuts_torque_at_once(void)
+{
+    driving();
+    set_pedal(250u);
+    brake_on();
+    step();
+    TEST_ASSERT_EQUAL_UINT8(0u, out.cuts);
+
+    set_pedal(251u);
+    step();
+    assert_cut_starts(VCU_CUT_BRAKE_PEDAL);
+    TEST_ASSERT_EQUAL_INT16(0, torque_sent());
+    TEST_ASSERT_EQUAL_UINT8(1u, command_frame().inverter_enable);
+    TEST_ASSERT_TRUE(out.test_point);
+    step();
+    TEST_ASSERT_EQUAL_UINT8(1u, status_frame().brake_pedal_cut);
+}
+
+/* EV.4.7: the 25% check uses the higher Pedal travel. */
+static void test_the_25_percent_check_uses_the_higher_travel(void)
+{
+    driving();
+    brake_on();
+    set_pedals(260u, 200u); /* plausible; only APPS1 above 25% */
+    step();
+    assert_cut_starts(VCU_CUT_BRAKE_PEDAL);
+}
+
+/* EV.4.7: power stays off until the APPS read below 5%, whether or not the
+   brake is still on; releasing the brake alone does not restore it. */
+static void test_a_brake_pedal_cut_recovers_below_5_percent_with_the_brake_held(void)
+{
+    driving();
+    brake_on();
+    set_pedal(600u);
+    step();
+    TEST_ASSERT_BITS_HIGH(1u << VCU_CUT_BRAKE_PEDAL, out.cuts);
+
+    brake_off();
+    run_ms(500u);
+    TEST_ASSERT_BITS_HIGH(1u << VCU_CUT_BRAKE_PEDAL, out.cuts);
+    TEST_ASSERT_EQUAL_INT16(0, torque_sent());
+
+    brake_on();
+    set_pedal(49u);
+    step();
+    assert_cut_ends(VCU_CUT_BRAKE_PEDAL);
+}
+
+/* Spec #36: three Overruns within a second are a Torque cut ("timing
+   fault"), held until the pedal is below 5%. */
+static void test_a_timing_fault_cuts_torque_until_below_5_percent(void)
+{
+    driving();
+    in.timing_fault = true; /* true for the one step after the third */
+    step();
+    in.timing_fault = false;
+    assert_cut_starts(VCU_CUT_TIMING);
+    TEST_ASSERT_EQUAL_INT16(0, torque_sent());
+    TEST_ASSERT_EQUAL_UINT8(1u, command_frame().inverter_enable);
+    run_ms(500u);
+    TEST_ASSERT_BITS_HIGH(1u << VCU_CUT_TIMING, out.cuts);
+    TEST_ASSERT_EQUAL_UINT8(1u, status_frame().timing_fault);
+
+    set_pedal(49u);
+    step();
+    assert_cut_ends(VCU_CUT_TIMING);
+}
+
+/* ------------------------------------------------------------------ */
+/* The fault LED: blinking for a Torque cut, solid for a restart       */
+/* ------------------------------------------------------------------ */
+
+/* ADR 0006: the fault LED blinks while a Torque cut lasts, from the step
+   that zeroes the command. */
+static void test_the_fault_led_blinks_during_a_torque_cut(void)
+{
+    in.now_ms = 10000u; /* well past the lamp check */
+    driving();
+    TEST_ASSERT_FALSE(out.fault_led);
+
+    brake_on();
+    set_pedal(600u);
+    step(); /* the cut starts */
+    TEST_ASSERT_TRUE(out.fault_led);
+    for (uint32_t t = STEP_MS; t < VCU_FAULT_BLINK_MS; t += STEP_MS) {
+        step();
+        TEST_ASSERT_TRUE(out.fault_led);
+    }
+    for (uint32_t t = 0u; t < VCU_FAULT_BLINK_MS; t += STEP_MS) {
+        step();
+        TEST_ASSERT_FALSE(out.fault_led);
+    }
+    step();
+    TEST_ASSERT_TRUE(out.fault_led);
+
+    set_pedal(0u);
+    step(); /* the cut ends */
+    TEST_ASSERT_FALSE(out.fault_led);
+    TEST_ASSERT_FALSE(out.fault_active);
+}
+
+/* ADR 0006, issue 47: Leaving Ready to Drive lights the fault LED solid and
+   sets fault_active and the test point in the step that disables the
+   inverter, until the Start procedure is done again. */
+static void test_leaving_ready_to_drive_lights_the_fault_led_solid(void)
+{
+    in.now_ms = 10000u;
+    driving();
+    TEST_ASSERT_FALSE(out.fault_active);
+    in.sdc_closed = false;
+    step();
+    TEST_ASSERT_EQUAL_UINT8(0u, command_frame().inverter_enable);
+    TEST_ASSERT_TRUE(out.test_point);
+    TEST_ASSERT_TRUE(out.fault_active);
+    TEST_ASSERT_TRUE(out.fault_led);
+
+    in.sdc_closed = true;
+    set_pedal(0u);
+    for (int i = 0; i < 100; i++) {
+        step();
+        TEST_ASSERT_TRUE(out.fault_led); /* solid, never blinking */
+        TEST_ASSERT_TRUE(out.fault_active);
+    }
+
+    brake_on();
+    press_start();
+    TEST_ASSERT_EQUAL_UINT8(VCU_STATE_READY_TO_DRIVE, out.state);
+    TEST_ASSERT_FALSE(out.fault_led);
+    TEST_ASSERT_FALSE(out.fault_active);
+    TEST_ASSERT_FALSE(out.test_point);
+}
+
+/* Back in GLV_ON (the bus discharged) there is nothing to restart. */
+static void test_the_restart_light_goes_out_in_glv_on(void)
+{
+    in.now_ms = 10000u;
+    driving();
+    in.sdc_closed = false;
+    step();
+    TEST_ASSERT_TRUE(out.fault_led);
+    set_bus_dv(0);
+    step();
+    TEST_ASSERT_EQUAL_UINT8(VCU_STATE_GLV_ON, out.state);
+    TEST_ASSERT_FALSE(out.fault_led);
+    TEST_ASSERT_FALSE(out.fault_active);
+}
+
+/* A restart needed wins over a Torque cut's blink. */
+static void test_the_restart_light_is_solid_through_a_torque_cut(void)
+{
+    in.now_ms = 10000u;
+    driving();
+    invFaults.run_faults = 1u;
+    in.timing_fault = true;
+    step();
+    in.timing_fault = false;
+    TEST_ASSERT_EQUAL_UINT8(VCU_STATE_TS_ACTIVE, out.state);
+    TEST_ASSERT_BITS_HIGH(1u << VCU_CUT_TIMING, out.cuts);
+    for (int i = 0; i < 60; i++) {
+        step();
+        TEST_ASSERT_TRUE(out.fault_led);
+    }
+}
+
+/* ------------------------------------------------------------------ */
+/* The fault LED and VCU_Status                                    */
 /* ------------------------------------------------------------------ */
 
 static void test_the_fault_led_is_on_in_startup(void)
@@ -1158,6 +1660,30 @@ int main(void)
     RUN_TEST(test_the_first_command_in_ready_to_drive_enables_with_zero_torque);
     RUN_TEST(test_ready_to_drive_keeps_enable_1_and_reports_it);
     RUN_TEST(test_leaving_ready_to_drive_sends_enable_0_in_the_same_step);
+    RUN_TEST(test_the_pedal_map_is_zero_below_5_percent_and_max_at_100);
+    RUN_TEST(test_the_request_uses_the_lower_pedal_travel);
+    RUN_TEST(test_the_command_is_never_negative);
+    RUN_TEST(test_no_torque_outside_ready_to_drive);
+    RUN_TEST(test_the_entry_frame_has_zero_torque_and_the_next_the_request);
+    RUN_TEST(test_leaving_ready_to_drive_zeroes_torque_in_the_same_step);
+    RUN_TEST(test_apps_disagreeing_for_80_ms_cuts_torque_79_ms_does_not);
+    RUN_TEST(test_apps_exactly_10_points_apart_is_plausible);
+    RUN_TEST(test_an_apps_out_of_range_for_80_ms_cuts_torque);
+    RUN_TEST(test_an_apps_glitch_under_80_ms_restarts_the_timer);
+    RUN_TEST(test_an_apps_cut_recovers_only_below_5_percent);
+    RUN_TEST(test_an_apps_cut_does_not_recover_while_still_implausible);
+    RUN_TEST(test_the_apps_timer_works_across_the_clock_wrap);
+    RUN_TEST(test_a_brake_sensor_failed_for_80_ms_cuts_torque);
+    RUN_TEST(test_a_brake_sensor_cut_recovers_only_below_5_percent);
+    RUN_TEST(test_a_failed_brake_sensor_lights_the_brake_light_in_glv_on);
+    RUN_TEST(test_brake_with_the_pedal_above_25_percent_cuts_torque_at_once);
+    RUN_TEST(test_the_25_percent_check_uses_the_higher_travel);
+    RUN_TEST(test_a_brake_pedal_cut_recovers_below_5_percent_with_the_brake_held);
+    RUN_TEST(test_a_timing_fault_cuts_torque_until_below_5_percent);
+    RUN_TEST(test_the_fault_led_blinks_during_a_torque_cut);
+    RUN_TEST(test_leaving_ready_to_drive_lights_the_fault_led_solid);
+    RUN_TEST(test_the_restart_light_goes_out_in_glv_on);
+    RUN_TEST(test_the_restart_light_is_solid_through_a_torque_cut);
     RUN_TEST(test_the_fault_led_is_on_in_startup);
     RUN_TEST(test_the_fault_led_is_held_3_s_after_reset);
     RUN_TEST(test_the_fault_led_lamp_check_ends_across_the_clock_wrap);

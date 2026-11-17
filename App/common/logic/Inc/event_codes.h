@@ -4,7 +4,7 @@
  * A code is never reused for another meaning once an image has written
  * it: a stored Event outlives the image that wrote it.
  *
- * Codes for Events whose source is not built yet (torque cut, BMS fault
+ * Codes for Events whose source is not built yet (BMS fault
  * trip, charger, balancing, pedal check and the rest of the spec's list)
  * are added here when their source is.
  *
@@ -46,7 +46,8 @@ typedef enum {
     EVENT_MAILBOX_TIMEOUT   = 52, /* event_data_mailbox_timeout() */
 
     /* The VCU's states (ADR 0006, vcu_control.h). */
-    EVENT_VCU_STATE = 64, /* event_data_vcu_state() */
+    EVENT_VCU_STATE  = 64, /* event_data_vcu_state() */
+    EVENT_TORQUE_CUT = 65, /* event_data_torque_cut(): one cause starting or ending */
 
     /* The Data log (ADR 0021, data_log.h). */
     EVENT_DATA_LOG_CARD = 80, /* event_data_data_log_card(): no card, or a card error */
@@ -130,6 +131,20 @@ typedef struct {
 /* 0 from (u8), 1 to (u8), 2 cause (u8), 4 bus voltage (i16, 0.1 V),
    6 pack voltage (u16, 0.1 V), 8 causes (u16). */
 void event_data_vcu_state(uint8_t data[EVENT_DATA_SIZE], const event_vcu_state_t *state);
+
+typedef struct {
+    uint8_t  cause;           /* vcu_cut_t (vcu_control.h) */
+    bool     started;         /* true: the cut starts; false: it ends */
+    uint8_t  state;           /* VCU_Status State value at the time */
+    uint16_t travel[2];       /* APPS1, APPS2 Pedal travel, tenths of a percent */
+    uint8_t  apps_status[2];  /* vcu_sensor_status_t (vcu_sensors.h) */
+    uint8_t  brake_status[2]; /* front, rear */
+} event_torque_cut_t;
+
+/* 0 cause (u8), 1 started (u8), 2 state (u8), 4 APPS1 travel (u16),
+   6 APPS2 travel (u16), 8 APPS1 status (u8), 9 APPS2 status (u8),
+   10 front brake status (u8), 11 rear brake status (u8). */
+void event_data_torque_cut(uint8_t data[EVENT_DATA_SIZE], const event_torque_cut_t *cut);
 
 typedef struct {
     uint8_t  state;   /* data_log_state_t (data_log_card.h): MISSING or ERROR */

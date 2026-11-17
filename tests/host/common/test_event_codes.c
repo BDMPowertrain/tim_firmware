@@ -99,6 +99,25 @@ static void test_the_vcu_state_event(void)
     TEST_ASSERT_EQUAL_HEX8_ARRAY(want, data, EVENT_DATA_SIZE);
 }
 
+/* A Torque cut starting or ending (issue 57): cause, started, state,
+   both Pedal travels, the four sensor statuses. */
+static void test_the_torque_cut_event(void)
+{
+    const event_torque_cut_t cut = {
+        .cause = 3u, .started = true, .state = 4u,
+        .travel = { 0x0102u, 0x0304u },
+        .apps_status = { 0u, 4u }, .brake_status = { 2u, 0u },
+    };
+    const uint8_t want[EVENT_DATA_SIZE] = {
+        3, 1, 4, 0, 0x02, 0x01, 0x04, 0x03, 0, 4, 2, 0, 0, 0, 0, 0,
+    };
+    uint8_t data[EVENT_DATA_SIZE];
+
+    memset(data, 0xAA, sizeof data);
+    event_data_torque_cut(data, &cut);
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(want, data, EVENT_DATA_SIZE);
+}
+
 /* A Data log card failure (issue 53): the state it went to, the FatFS
    result, Records written and dropped so far. */
 static void test_the_data_log_card_event(void)
@@ -120,6 +139,7 @@ static void test_names(void)
 {
     TEST_ASSERT_EQUAL_STRING("data log card", event_code_name(EVENT_DATA_LOG_CARD));
     TEST_ASSERT_EQUAL_STRING("VCU state", event_code_name(EVENT_VCU_STATE));
+    TEST_ASSERT_EQUAL_STRING("torque cut", event_code_name(EVENT_TORQUE_CUT));
     TEST_ASSERT_EQUAL_STRING("boot", event_code_name(EVENT_BOOT));
     TEST_ASSERT_EQUAL_STRING("bus-off", event_code_name(EVENT_BUS_OFF));
     TEST_ASSERT_EQUAL_STRING("?", event_code_name(0xBEEFu));
@@ -133,6 +153,7 @@ int main(void)
     RUN_TEST(test_the_overrun_event);
     RUN_TEST(test_the_crash_event);
     RUN_TEST(test_the_vcu_state_event);
+    RUN_TEST(test_the_torque_cut_event);
     RUN_TEST(test_the_data_log_card_event);
     RUN_TEST(test_names);
     return UNITY_END();

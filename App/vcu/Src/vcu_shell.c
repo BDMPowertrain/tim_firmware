@@ -386,6 +386,7 @@ static void print_start_blockers(uint16_t blockers)
         { VCU_START_BUS_OFF,          "bus-off latched" },
         { VCU_START_BUS_VOLTAGE,      "bus voltage" },
         { VCU_START_TIMING_FAULT,     "timing fault" },
+        { VCU_START_TORQUE_CUT,       "torque cut" },
     };
 
     if (blockers == 0u) {
@@ -396,6 +397,33 @@ static void print_start_blockers(uint16_t blockers)
     for (size_t i = 0; i < sizeof(names) / sizeof(names[0]); i++) {
         if ((blockers & names[i].bit) != 0u) {
             shell_printf(" %s;", names[i].name);
+        }
+    }
+    shell_printf("\r\n");
+}
+
+/* The driver request, the torque sent and the Torque cuts active
+   (vcu_control.h). Provisional (#28). */
+static void print_torque(const vcu_inputs_t *in)
+{
+    static const char *const cutName[VCU_CUT_LIMIT] = {
+        [VCU_CUT_APPS]         = "APPS implausible",
+        [VCU_CUT_BRAKE_SENSOR] = "brake sensor",
+        [VCU_CUT_BRAKE_PEDAL]  = "brake and pedal",
+        [VCU_CUT_TIMING]       = "timing fault",
+    };
+    const int req = in->torque_request;
+    const int sent = in->torque;
+
+    shell_printf("torque request %d.%d N.m, sent %d.%d N.m; torque cut", req / 10, req % 10,
+                 sent / 10, sent % 10);
+    if (in->cuts == 0u) {
+        shell_printf(" none\r\n");
+        return;
+    }
+    for (unsigned i = 1u; i < VCU_CUT_LIMIT; i++) {
+        if ((in->cuts & (1u << i)) != 0u) {
+            shell_printf(" %s;", cutName[i]);
         }
     }
     shell_printf("\r\n");
@@ -431,6 +459,7 @@ static void print_inputs(const vcu_inputs_t *in)
                  in->samples_ready ? "ready" : "NOT ready");
     shell_printf("brake %s; start procedure ", in->brake_engaged ? "engaged" : "released");
     print_start_blockers(in->start_blockers);
+    print_torque(in);
 }
 
 #define CMD_INPUTS_USAGE "usage: inputs [stream]\r\n"
