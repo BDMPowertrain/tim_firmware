@@ -20,4 +20,9 @@ The rules this firmware must meet (APPS/BSE plausibility, torque limits, BMS fau
 - Host tests use Unity, vendored in `third_party/unity/`, run by CTest, and live in `tests/host/`. A `host-tests` CMake preset builds them with a native GCC and `-Wall -Wextra -Werror`. The GitHub Actions workflow runs them with ASan and UBSan on every push and pull request to `dev`; a failing test blocks the merge.
 - Logic uses fixed-width integer types, takes time as a 32-bit millisecond count compared only by subtraction (with a host test across the wrap for every timed module), and uses `float`, never `double` (`-Wdouble-promotion`).
 - Every firmware-binding rule has at least one host test that cites the rule number in a comment. Rules only hardware or timing can prove get a bench test instead.
-- Images carry no fault-injection code. Bench tests inject faults from outside the board and measure reaction times on the wires.
+- Images carry no fault-injection code: nothing in an image fakes an input, a received frame or a fault condition. Bench tests inject faults from outside the board and measure reaction times on the wires.
+- **Amended (issue #48): two bench commands are the exception.** `hang` makes the Control step spin, and the planned `crash` command calls the crash routine. Only a real hang reaches the watchdog path, and only a real crash reaches the crash routine; no outside stimulus can trigger either on a working image. The rule exists so that the code measured on the bench is the code that races, and these commands keep it: they fake no value, and they reach the real path through the real code. So they follow the rule's purpose instead of breaking it, on four conditions:
+  - Each needs a confirmation word.
+  - Both exist in every build, never behind a debug or bench flag, so the image measured is the image raced.
+  - The VCU refuses both in READY_TO_DRIVE.
+  - Nothing else in an image may inject a fault. A new command that does needs its own amendment here.
