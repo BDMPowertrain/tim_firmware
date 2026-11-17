@@ -95,9 +95,12 @@
  *   inverter fault  each new set of 64 bits a VALID INV_FaultCodes reports
  *                   is an EVENT_INVERTER_FAULT Event.
  *   discharge slow  a VALID INV_Voltage above 60 V VCU_DISCHARGE_SLOW_MS
- *                   after the Shutdown Circuit input opened sets the
- *                   VCU_Status flag until the input closes, and writes one
- *                   EVENT_DISCHARGE_SLOW per opening.
+ *                   after the Shutdown Circuit input first opened, on a
+ *                   step reading it open, unless the bus already read below
+ *                   60 V, sets the VCU_Status flag and writes one
+ *                   EVENT_DISCHARGE_SLOW. Only VCU_SDC_RECLOSED_MS of
+ *                   closed readings in a row end the watch and clear the
+ *                   flag, so a chattering input never restarts the time.
  *   Energy Meter    a timeout is only the VCU_Status bit; each time a VALID
  *                   EM_Status sets Violation is an EVENT_EM_VIOLATION.
  *
@@ -226,6 +229,9 @@ typedef enum {
 /* Discharge slow: the bus still above VCU_TS_MIN_DV this long after the
    Shutdown Circuit input opened (spec #36; EV.5.4.5 wants 60 V in 5 s). */
 #define VCU_DISCHARGE_SLOW_MS 5000u
+/* The Shutdown Circuit input closed this long in a row ends the watch: a
+   closed reading alone is not trusted (spec #36, the safe direction). */
+#define VCU_SDC_RECLOSED_MS   1000u
 
 /* Fixed from start-up to the next reset (ADR 0015). */
 typedef struct {
@@ -308,8 +314,11 @@ typedef struct {
     uint32_t     post_faults_seen; /* the last VALID INV_FaultCodes */
     uint32_t     run_faults_seen;
     bool         violation_seen; /* the last VALID EM_Status had Violation set */
-    bool         sdc_open;       /* the input read open on the last step */
-    uint32_t     sdc_open_ms;    /* the first step it read open */
+    bool         sdc_watching;   /* an opening is being watched for discharge slow */
+    uint32_t     sdc_open_ms;    /* its first step reading open */
+    bool         sdc_reclosing;  /* the input has read closed since the last open reading */
+    uint32_t     sdc_reclosed_ms; /* since when */
+    bool         discharged;     /* a VALID bus read below 60 V in this opening */
     bool         discharge_slow; /* flagged for this opening */
     bool         clear_pending;  /* a fault clear went and its result is not in */
     uint32_t     clear_sent_ms;

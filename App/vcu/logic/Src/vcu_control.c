@@ -40,7 +40,7 @@ typedef struct {
     bool     bms_power_valid;
     bool     bms_valid;      /* all three BMS frames */
     bool     inverter_valid; /* every inverter frame the VCU acts on */
-    bool     em_valid;
+    bool     em_valid;       /* both Energy Meter frames */
     bool     bms_fault;      /* a VALID BMS_Status reports a fault */
     bool     inverter_fault; /* a VALID INV_FaultCodes reports a fault */
     bool     faults_valid;   /* INV_FaultCodes is VALID */
@@ -109,7 +109,7 @@ static void read_bus(const vcu_control_in_t *in, bus_view_t *bus)
                           valid(in, VCU_RX_INV_VOLTAGE) &&
                           valid(in, VCU_RX_INV_INTERNAL_STATES) &&
                           valid(in, VCU_RX_INV_FAULT_CODES);
-    bus->em_valid = valid(in, VCU_RX_EM_MEASUREMENT);
+    bus->em_valid = valid(in, VCU_RX_EM_MEASUREMENT) && valid(in, VCU_RX_EM_STATUS);
     bus->bms_fault = bus->bms_status_valid && bms_reports_fault(&bmsStatus);
     bus->faults_valid = valid(in, VCU_RX_INV_FAULT_CODES);
     bus->post_faults = invFaults.post_faults;
@@ -408,25 +408,43 @@ static void record_em_violation(vcu_control_t *vc, const bus_view_t *bus,
 }
 
 /* Discharge slow (spec #36): a VALID INV_Voltage above 60 V
-   VCU_DISCHARGE_SLOW_MS or more after the Shutdown Circuit input opened.
-   One Event per opening; the flag holds until the input closes. The VCU
-   never asks the inverter to discharge: that is hardware-only. */
+   VCU_DISCHARGE_SLOW_MS or more after the Shutdown Circuit input first
+   opened, judged on a step that reads it open. A closed reading is trusted
+   only after VCU_SDC_RECLOSED_MS of them in a row, so a chattering input
+   never restarts the time; that ends the watch and clears the flag. A
+   VALID bus below 60 V also ends this opening's watch: it discharged. One
+   Event per opening. The VCU never asks the inverter to discharge: that is
+   hardware-only. */
 static void watch_discharge(vcu_control_t *vc, const vcu_control_in_t *in,
                             const bus_view_t *bus, vcu_control_out_t *out)
 {
     if (in->sdc_closed) {
-        vc->sdc_open = false;
-        vc->discharge_slow = false;
+        if (!vc->sdc_watching) {
+            return;
+        }
+        if (!vc->sdc_reclosing) {
+            vc->sdc_reclosing = true;
+            vc->sdc_reclosed_ms = in->now_ms;
+        } else if ((uint32_t)(in->now_ms - vc->sdc_reclosed_ms) >= VCU_SDC_RECLOSED_MS) {
+            vc->sdc_watching = false;
+            vc->discharge_slow = false;
+        }
         return;
     }
-    if (!vc->sdc_open) {
-        vc->sdc_open = true;
+    vc->sdc_reclosing = false;
+    if (!vc->sdc_watching) {
+        vc->sdc_watching = true;
         vc->sdc_open_ms = in->now_ms;
+        vc->discharged = false;
     }
+    const bool volts = valid(in, VCU_RX_INV_VOLTAGE);
     const uint32_t open_ms = (uint32_t)(in->now_ms - vc->sdc_open_ms);
 
-    if (!vc->discharge_slow && open_ms >= VCU_DISCHARGE_SLOW_MS &&
-        valid(in, VCU_RX_INV_VOLTAGE) && bus->bus_dv > VCU_TS_MIN_DV) {
+    if (volts && bus->bus_dv < VCU_TS_MIN_DV) {
+        vc->discharged = true;
+    }
+    if (!vc->discharge_slow && !vc->discharged && open_ms >= VCU_DISCHARGE_SLOW_MS && volts &&
+        bus->bus_dv > VCU_TS_MIN_DV) {
         uint8_t data[EVENT_DATA_SIZE];
 
         vc->discharge_slow = true;

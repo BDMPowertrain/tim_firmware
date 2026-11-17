@@ -885,7 +885,7 @@ struct can_control_vcu_status_t {
     uint8_t startup_blocked;
 
     /**
-     * The EM_Measurement mailbox is not VALID. Cuts nothing.
+     * The EM_Measurement or EM_Status mailbox is not VALID. Cuts nothing.
      *
      * Range: 0..1 (0..1 -)
      * Scale: 1
