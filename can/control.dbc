@@ -300,7 +300,7 @@ CM_ SG_ 144 ShutdownCircuitOpen "The Shutdown Circuit input reads open.";
 CM_ SG_ 144 BusOffLatched "Third bus-off without 1 s clean; clears after 5 s clean.";
 CM_ SG_ 144 ParametersDefaulted "No valid stored parameters: not calibrated, no torque, Start procedure refused.";
 CM_ SG_ 144 StartupBlocked "A start-up check has not passed and the VCU is staying in STARTUP.";
-CM_ SG_ 144 EnergyMeterTimeout "The EM_Measurement mailbox is not VALID. Cuts nothing.";
+CM_ SG_ 144 EnergyMeterTimeout "The EM_Measurement or EM_Status mailbox is not VALID. Cuts nothing.";
 CM_ SG_ 144 ErrorPassive "The CAN1 controller is error-passive.";
 CM_ SG_ 144 ReceiveOverflow "A CAN1 receive FIFO has overflowed since power-up.";
 CM_ SG_ 144 DischargeSlow "The bus was still above 60 V 5 s after the Shutdown Circuit opened.";
