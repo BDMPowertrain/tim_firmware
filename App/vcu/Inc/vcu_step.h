@@ -27,6 +27,9 @@ typedef struct {
     bool start_pressed;         /* start button (PA15) reads low */
     bool brake_engaged;
     uint16_t start_blockers;    /* VCU_START_... bits (vcu_control.h) */
+    uint16_t cuts;              /* Torque cuts active: bit (1 << vcu_cut_t) */
+    int16_t  torque_request;    /* the driver's, 0.1 N.m */
+    int16_t  torque;            /* in the 0x0C0 sent, 0.1 N.m */
 } vcu_inputs_t;
 
 /* Reads the Parameters the step needs and sets up the Control bus for the
