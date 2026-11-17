@@ -53,10 +53,12 @@
  *   Gates: zero torque outside READY_TO_DRIVE, on the first 0x0C0 after
  *   entry, and while any Torque cut is active.
  *
- * Torque cuts (ADR 0006, vcu_cut_t). Each keeps Enable=1 with zero torque
- * and ends only once its cause is gone and the
- * higher Pedal travel is below 5%, so torque never returns under a pressed
- * pedal. Each start and end is an EVENT_TORQUE_CUT Event. A cut only zeroes
+ * Torque cuts (ADR 0006, vcu_cut_t). Each keeps Enable=1 with zero torque,
+ * except the mailbox cut, which sends Enable=0, and ends only once its
+ * cause is gone and the higher Pedal travel is below 5%, so torque never
+ * returns under a pressed pedal. However long it lasts, a Torque cut never
+ * becomes Leaving Ready to Drive. Each start and end is an EVENT_TORQUE_CUT
+ * Event. A cut only zeroes
  * torque in Ready to Drive (the Glossary's Torque cut), but its timer and
  * latch run in every state, so a cause already present when Ready to
  * Drive is entered cuts from the first step, and the Start procedure is
@@ -69,21 +71,47 @@
  *   brake and pedal   Brake engaged with the higher travel above 25%, at
  *                     once (EV.4.7)
  *   timing fault      three Overruns within a second (in.timing_fault)
+ *   mailbox           BMS_Status, BMS_Limits, BMS_Power or an inverter
+ *                     mailbox not VALID, at once (its timeout is the
+ *                     persistence), in TS_ACTIVE and READY_TO_DRIVE only: in
+ *                     GLV_ON a silent device is expected. control_bus posts
+ *                     the EVENT_MAILBOX_TIMEOUT itself.
  *
  * Inverter command (0x0C0): every step in every state after STARTUP, the
  * rolling counter one more each frame, direction forward, the torque limit
- * bytes the maximum-torque Parameter. Enable=1 only in READY_TO_DRIVE, and
- * the first frame after entry carries zero torque.
+ * bytes the maximum-torque Parameter. Enable=1 only in READY_TO_DRIVE and
+ * not during the mailbox cut, and the first frame after entry carries zero
+ * torque. The discharge bit is never set: discharge is hardware-only.
+ *
+ * Inverter fault clear (0x0C1, issue 58): in GLV_ON or TS_ACTIVE, a press
+ * of the start button with an inverter fault reported, the inverter
+ * disabled (the last 0x0C0 had Enable=0 and a VALID INV_InternalStates
+ * reads it disabled) and the higher Pedal travel below 5% sends one fault
+ * clear and spends the press: the next press runs the Start procedure. The
+ * attempt and its result (cleared, or not within VCU_FAULT_CLEAR_WAIT_MS)
+ * are EVENT_INVERTER_FAULT_CLEAR Events.
+ *
+ * Device reports (issue 58), none of which touches the torque path:
+ *   inverter fault  each new set of 64 bits a VALID INV_FaultCodes reports
+ *                   is an EVENT_INVERTER_FAULT Event.
+ *   discharge slow  a VALID INV_Voltage above 60 V VCU_DISCHARGE_SLOW_MS
+ *                   after the Shutdown Circuit input opened sets the
+ *                   VCU_Status flag until the input closes, and writes one
+ *                   EVENT_DISCHARGE_SLOW per opening.
+ *   Energy Meter    a timeout is only the VCU_Status bit; each time a VALID
+ *                   EM_Status sets Violation is an EVENT_EM_VIOLATION.
  *
  * Ready to Drive sound (EV.10.7): on for VCU_SOUND_MS from entry into
  * READY_TO_DRIVE, off at once if it is left.
  *
  * Fault LED: on in STARTUP and for VCU_LAMP_CHECK_MS after reset release
  * (config.reset_ms); solid from Leaving Ready to Drive until the Start
- * procedure is done again or the state is GLV_ON; otherwise blinking every
- * VCU_FAULT_BLINK_MS while a Torque cut lasts. The fault-active test point
- * and fault_active (the heartbeat's 5 Hz) are on for a Torque cut or a
- * restart needed, in the same step that zeroes the command.
+ * procedure is done again or the state is GLV_ON, while the bus-off latch
+ * is set, and in TS_ACTIVE while a cause of Leaving Ready to Drive is
+ * present; otherwise blinking every VCU_FAULT_BLINK_MS while a Torque cut
+ * lasts. The fault-active test point and fault_active (the heartbeat's
+ * 5 Hz) are on whenever it is solid or a Torque cut lasts, in the same step
+ * that zeroes the command.
  *
  * VCU_Status: every second step from the first, with the state, the bits
  * this step knows, the flags and the torque in this step's 0x0C0.
@@ -174,12 +202,15 @@ typedef enum {
 } vcu_cause_t;
 
 /* A Torque cut's cause (ADR 0006): bit (1 << cause) of cuts, and byte 0 of
-   an EVENT_TORQUE_CUT Event. Each keeps Enable=1 with zero torque. */
+   an EVENT_TORQUE_CUT Event. Each keeps Enable=1 with zero torque, except
+   the mailbox cut, which sends Enable=0. */
 typedef enum {
     VCU_CUT_APPS         = 1, /* APPS implausible for VCU_CUT_PERSIST_MS */
     VCU_CUT_BRAKE_SENSOR = 2, /* a brake sensor failed for VCU_CUT_PERSIST_MS */
     VCU_CUT_BRAKE_PEDAL  = 3, /* Brake engaged with the higher travel above 25% */
     VCU_CUT_TIMING       = 4, /* three Overruns within a second */
+    VCU_CUT_MAILBOX      = 5, /* a BMS or inverter mailbox not VALID, in TS_ACTIVE or
+                                 READY_TO_DRIVE: Enable=0 as well (issue 58) */
     VCU_CUT_COUNT             /* one past the last; arrays by vcu_cut_t leave [0] unused */
 } vcu_cut_t;
 
@@ -187,6 +218,14 @@ typedef enum {
 #define VCU_APPS_AGREE       100u /* T.4.2.4: 10 points, in tenths */
 #define VCU_TRAVEL_BRAKE_CUT 250u /* EV.4.7: 25%, in tenths */
 #define VCU_FAULT_BLINK_MS   250u /* fault LED half-period in a Torque cut: 2 Hz */
+
+/* The inverter fault clear (0x0C1, issue 58). */
+#define VCU_FAULT_CLEAR_ADDRESS 20u   /* Fault Clear, CM manual section 8.8.3, p.94 */
+#define VCU_FAULT_CLEAR_WAIT_MS 1000u /* for INV_FaultCodes to read no fault */
+
+/* Discharge slow: the bus still above VCU_TS_MIN_DV this long after the
+   Shutdown Circuit input opened (spec #36; EV.5.4.5 wants 60 V in 5 s). */
+#define VCU_DISCHARGE_SLOW_MS 5000u
 
 /* Fixed from start-up to the next reset (ADR 0015). */
 typedef struct {
@@ -219,8 +258,10 @@ typedef struct {
     uint8_t  data[EVENT_DATA_SIZE];
 } vcu_event_t;
 
-/* A state Event and every Torque cut starting or ending in one step. */
-#define VCU_CONTROL_EVENTS_MAX 8u
+/* A state Event, every Torque cut starting or ending, an inverter fault, a
+   fault clear and its result, discharge slow and an Energy Meter Violation,
+   all in one step. */
+#define VCU_CONTROL_EVENTS_MAX 12u
 
 typedef struct {
     uint8_t       state;
@@ -242,6 +283,8 @@ typedef struct {
 
     bool          send_command;   /* command holds an INV_Command (0x0C0) */
     uint8_t       command[CAN_CONTROL_INV_COMMAND_LENGTH];
+    bool          send_fault_clear; /* fault_clear holds an INV_ParameterCommand (0x0C1) */
+    uint8_t       fault_clear[CAN_CONTROL_INV_PARAMETER_COMMAND_LENGTH];
     bool          send_status;    /* status holds a VCU_Status (0x090) */
     uint8_t       status[CAN_CONTROL_VCU_STATUS_LENGTH];
 
@@ -262,6 +305,14 @@ typedef struct {
     bool         cut_was;        /* a Torque cut was active on the last step */
     uint32_t     blink_from_ms;  /* the first step of the Torque cuts now active */
     bool         restart_needed; /* Ready to Drive was left for a fault */
+    uint32_t     post_faults_seen; /* the last VALID INV_FaultCodes */
+    uint32_t     run_faults_seen;
+    bool         violation_seen; /* the last VALID EM_Status had Violation set */
+    bool         sdc_open;       /* the input read open on the last step */
+    uint32_t     sdc_open_ms;    /* the first step it read open */
+    bool         discharge_slow; /* flagged for this opening */
+    bool         clear_pending;  /* a fault clear went and its result is not in */
+    uint32_t     clear_sent_ms;
     vcu_control_config_t config;
     uint8_t      state;
     uint32_t     entered_ms;     /* when the state was entered */

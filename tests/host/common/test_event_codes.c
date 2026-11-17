@@ -118,6 +118,62 @@ static void test_the_torque_cut_event(void)
     TEST_ASSERT_EQUAL_HEX8_ARRAY(want, data, EVENT_DATA_SIZE);
 }
 
+/* An inverter-reported fault (issue 58): all 64 bits, POST then run. */
+static void test_the_inverter_fault_event(void)
+{
+    const uint8_t want[EVENT_DATA_SIZE] = {
+        0x04, 0x03, 0x02, 0x01, 0x08, 0x07, 0x06, 0x05, 0, 0, 0, 0, 0, 0, 0, 0,
+    };
+    uint8_t data[EVENT_DATA_SIZE];
+
+    memset(data, 0xAA, sizeof data);
+    event_data_inverter_fault(data, 0x01020304u, 0x05060708u);
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(want, data, EVENT_DATA_SIZE);
+}
+
+/* A fault-clear attempt or its result (issue 58): what happened, the state,
+   the 64 fault bits then, the time since the 0x0C1 went. */
+static void test_the_inverter_fault_clear_event(void)
+{
+    const event_fault_clear_t clear = {
+        .result = EVENT_FAULT_CLEAR_FAILED, .state = 3u,
+        .post_faults = 0x11223344u, .run_faults = 0x55667788u, .since_ms = 0x0400u,
+    };
+    const uint8_t want[EVENT_DATA_SIZE] = {
+        2, 3, 0, 0, 0x44, 0x33, 0x22, 0x11, 0x88, 0x77, 0x66, 0x55, 0x00, 0x04, 0, 0,
+    };
+    uint8_t data[EVENT_DATA_SIZE];
+
+    memset(data, 0xAA, sizeof data);
+    event_data_fault_clear(data, &clear);
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(want, data, EVENT_DATA_SIZE);
+}
+
+/* Discharge slow (issue 58): the bus voltage, and how long the Shutdown
+   Circuit input has been open. */
+static void test_the_discharge_slow_event(void)
+{
+    const uint8_t want[EVENT_DATA_SIZE] = {
+        0x58, 0x02, 0, 0, 0x88, 0x13, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    };
+    uint8_t data[EVENT_DATA_SIZE];
+
+    memset(data, 0xAA, sizeof data);
+    event_data_discharge_slow(data, 600, 5000u);
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(want, data, EVENT_DATA_SIZE);
+}
+
+/* The Energy Meter's Violation bit set (issue 58): the VCU state. */
+static void test_the_energy_meter_violation_event(void)
+{
+    const uint8_t want[EVENT_DATA_SIZE] = { 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 };
+    uint8_t data[EVENT_DATA_SIZE];
+
+    memset(data, 0xAA, sizeof data);
+    event_data_em_violation(data, 4u);
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(want, data, EVENT_DATA_SIZE);
+}
+
 /* A Data log card failure (issue 53): the state it went to, the FatFS
    result, Records written and dropped so far. */
 static void test_the_data_log_card_event(void)
@@ -140,6 +196,10 @@ static void test_names(void)
     TEST_ASSERT_EQUAL_STRING("data log card", event_code_name(EVENT_DATA_LOG_CARD));
     TEST_ASSERT_EQUAL_STRING("VCU state", event_code_name(EVENT_VCU_STATE));
     TEST_ASSERT_EQUAL_STRING("torque cut", event_code_name(EVENT_TORQUE_CUT));
+    TEST_ASSERT_EQUAL_STRING("inverter fault", event_code_name(EVENT_INVERTER_FAULT));
+    TEST_ASSERT_EQUAL_STRING("inverter fault clear", event_code_name(EVENT_INVERTER_FAULT_CLEAR));
+    TEST_ASSERT_EQUAL_STRING("discharge slow", event_code_name(EVENT_DISCHARGE_SLOW));
+    TEST_ASSERT_EQUAL_STRING("energy meter violation", event_code_name(EVENT_EM_VIOLATION));
     TEST_ASSERT_EQUAL_STRING("boot", event_code_name(EVENT_BOOT));
     TEST_ASSERT_EQUAL_STRING("bus-off", event_code_name(EVENT_BUS_OFF));
     TEST_ASSERT_EQUAL_STRING("?", event_code_name(0xBEEFu));
@@ -154,6 +214,10 @@ int main(void)
     RUN_TEST(test_the_crash_event);
     RUN_TEST(test_the_vcu_state_event);
     RUN_TEST(test_the_torque_cut_event);
+    RUN_TEST(test_the_inverter_fault_event);
+    RUN_TEST(test_the_inverter_fault_clear_event);
+    RUN_TEST(test_the_discharge_slow_event);
+    RUN_TEST(test_the_energy_meter_violation_event);
     RUN_TEST(test_the_data_log_card_event);
     RUN_TEST(test_names);
     return UNITY_END();
