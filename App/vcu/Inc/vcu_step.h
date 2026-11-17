@@ -7,8 +7,9 @@
              Circuit monitor and start button (issue 55);
      logic   vcu_control_step() (vcu_control.h): the states, the Start
              procedure, the frames and the outputs, all logic;
-     output  send 0x0C0, write the test point, brake light, Ready to Drive
-             sound and fault LED, send VCU_Status, post the Events.
+     output  send 0x0C0 and any fault clear (0x0C1), write the test
+             point, brake light, Ready to Drive sound and fault LED, send
+             VCU_Status, post the Events.
    What the step read and decided about the driver's inputs is published
    with the step's snapshot. */
 

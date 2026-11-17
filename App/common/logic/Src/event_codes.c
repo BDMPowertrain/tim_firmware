@@ -44,6 +44,10 @@ const char *event_code_name(uint16_t code)
     case EVENT_MAILBOX_TIMEOUT:    return "mailbox timeout";
     case EVENT_VCU_STATE:          return "VCU state";
     case EVENT_TORQUE_CUT:         return "torque cut";
+    case EVENT_INVERTER_FAULT:     return "inverter fault";
+    case EVENT_INVERTER_FAULT_CLEAR: return "inverter fault clear";
+    case EVENT_DISCHARGE_SLOW:     return "discharge slow";
+    case EVENT_EM_VIOLATION:       return "energy meter violation";
     case EVENT_PEDAL_CHECK:        return "pedal check passed";
     case EVENT_PEDAL_CHECK_FAILED: return "pedal check failed";
     case EVENT_NOT_CALIBRATED:     return "not calibrated";
@@ -195,6 +199,37 @@ void event_data_torque_cut(uint8_t data[EVENT_DATA_SIZE], const event_torque_cut
     data[9] = cut->apps_status[1];
     data[10] = cut->brake_status[0];
     data[11] = cut->brake_status[1];
+}
+
+void event_data_inverter_fault(uint8_t data[EVENT_DATA_SIZE], uint32_t post_faults,
+                               uint32_t run_faults)
+{
+    memset(data, 0, EVENT_DATA_SIZE);
+    put_u32(&data[0], post_faults);
+    put_u32(&data[4], run_faults);
+}
+
+void event_data_fault_clear(uint8_t data[EVENT_DATA_SIZE], const event_fault_clear_t *clear)
+{
+    memset(data, 0, EVENT_DATA_SIZE);
+    data[0] = (uint8_t)clear->result;
+    data[1] = clear->state;
+    put_u32(&data[4], clear->post_faults);
+    put_u32(&data[8], clear->run_faults);
+    put_u32(&data[12], clear->since_ms);
+}
+
+void event_data_discharge_slow(uint8_t data[EVENT_DATA_SIZE], int16_t bus_dv, uint32_t open_ms)
+{
+    memset(data, 0, EVENT_DATA_SIZE);
+    put_u16(&data[0], (uint16_t)bus_dv);
+    put_u32(&data[4], open_ms);
+}
+
+void event_data_em_violation(uint8_t data[EVENT_DATA_SIZE], uint8_t state)
+{
+    memset(data, 0, EVENT_DATA_SIZE);
+    data[0] = state;
 }
 
 void event_data_data_log_card(uint8_t data[EVENT_DATA_SIZE], const event_data_log_card_t *card)

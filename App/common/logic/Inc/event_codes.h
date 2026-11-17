@@ -48,11 +48,15 @@ typedef enum {
     /* The VCU's states (ADR 0006, vcu_control.h). */
     EVENT_VCU_STATE  = 64, /* event_data_vcu_state() */
     EVENT_TORQUE_CUT = 65, /* event_data_torque_cut(): one cause starting or ending */
+    EVENT_INVERTER_FAULT       = 66, /* event_data_inverter_fault(): new fault bits reported */
+    EVENT_INVERTER_FAULT_CLEAR = 67, /* event_data_fault_clear(): a 0x0C1 sent, or its result */
+    EVENT_DISCHARGE_SLOW       = 68, /* event_data_discharge_slow() */
+    EVENT_EM_VIOLATION         = 69, /* event_data_em_violation(): the Violation bit set */
 
     /* Calibration and the Pedal check (ADR 0016, vcu_control.h). */
-    EVENT_PEDAL_CHECK        = 66, /* event_data_pedal_check(): a pass */
-    EVENT_PEDAL_CHECK_FAILED = 67, /* event_data_pedal_check_failed() */
-    EVENT_NOT_CALIBRATED     = 68, /* event_data_not_calibrated() */
+    EVENT_PEDAL_CHECK        = 70, /* event_data_pedal_check(): a pass */
+    EVENT_PEDAL_CHECK_FAILED = 71, /* event_data_pedal_check_failed() */
+    EVENT_NOT_CALIBRATED     = 72, /* event_data_not_calibrated() */
 
     /* The Data log (ADR 0021, data_log.h). */
     EVENT_DATA_LOG_CARD = 80, /* event_data_data_log_card(): no card, or a card error */
@@ -150,6 +154,36 @@ typedef struct {
    6 APPS2 travel (u16), 8 APPS1 status (u8), 9 APPS2 status (u8),
    10 front brake status (u8), 11 rear brake status (u8). */
 void event_data_torque_cut(uint8_t data[EVENT_DATA_SIZE], const event_torque_cut_t *cut);
+
+/* 0 POST faults (u32), 4 run faults (u32): INV_FaultCodes as read. */
+void event_data_inverter_fault(uint8_t data[EVENT_DATA_SIZE], uint32_t post_faults,
+                               uint32_t run_faults);
+
+/* An EVENT_INVERTER_FAULT_CLEAR Event's result. */
+typedef enum {
+    EVENT_FAULT_CLEAR_SENT    = 0, /* the 0x0C1 went out */
+    EVENT_FAULT_CLEAR_CLEARED = 1, /* INV_FaultCodes then read no fault */
+    EVENT_FAULT_CLEAR_FAILED  = 2, /* still a fault, or no VALID frame, in time */
+} event_fault_clear_result_t;
+
+typedef struct {
+    event_fault_clear_result_t result;
+    uint8_t  state;       /* VCU_Status State value at the time */
+    uint32_t post_faults; /* INV_FaultCodes as last read */
+    uint32_t run_faults;
+    uint32_t since_ms;    /* since the 0x0C1 went; 0 for EVENT_FAULT_CLEAR_SENT */
+} event_fault_clear_t;
+
+/* 0 result (u8), 1 state (u8), 4 POST faults (u32), 8 run faults (u32),
+   12 ms since the 0x0C1 (u32). */
+void event_data_fault_clear(uint8_t data[EVENT_DATA_SIZE], const event_fault_clear_t *clear);
+
+/* 0 bus voltage (i16, 0.1 V), 4 ms since the Shutdown Circuit input
+   opened (u32). */
+void event_data_discharge_slow(uint8_t data[EVENT_DATA_SIZE], int16_t bus_dv, uint32_t open_ms);
+
+/* 0 VCU state (u8). */
+void event_data_em_violation(uint8_t data[EVENT_DATA_SIZE], uint8_t state);
 
 /* 0 build ID (u32), 4 parameter save counter (u32), 8 flags (u8): bit 0,
    a dirty build; 12 the calibration's fingerprint (u32,
