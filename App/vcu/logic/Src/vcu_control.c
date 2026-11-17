@@ -49,6 +49,9 @@ typedef struct {
     int16_t  bus_dv;         /* INV_Voltage, or its Substitute (0 V) */
     uint16_t pack_dv;        /* BMS_Limits, or its Substitute (0 V) */
     bool     voltages_valid; /* both of those are VALID */
+    bool     inverter_reads_disabled; /* a VALID INV_InternalStates: not enabled */
+    bool     em_status_valid;
+    bool     em_violation;   /* a VALID EM_Status has Violation set */
 } bus_view_t;
 
 static bool valid(const vcu_control_in_t *in, vcu_rx_t row)
@@ -80,6 +83,8 @@ static void read_bus(const vcu_control_in_t *in, bus_view_t *bus)
     struct can_control_bms_limits_t bmsLimits;
     struct can_control_inv_voltage_t invVoltage;
     struct can_control_inv_fault_codes_t invFaults;
+    struct can_control_inv_internal_states_t invStates;
+    struct can_control_em_status_t emStatus;
 
     (void)can_control_bms_status_unpack(&bmsStatus, frame(in, VCU_RX_BMS_STATUS),
                                         CAN_CONTROL_BMS_STATUS_LENGTH);
@@ -89,6 +94,11 @@ static void read_bus(const vcu_control_in_t *in, bus_view_t *bus)
                                          CAN_CONTROL_INV_VOLTAGE_LENGTH);
     (void)can_control_inv_fault_codes_unpack(&invFaults, frame(in, VCU_RX_INV_FAULT_CODES),
                                              CAN_CONTROL_INV_FAULT_CODES_LENGTH);
+    (void)can_control_inv_internal_states_unpack(&invStates,
+                                                 frame(in, VCU_RX_INV_INTERNAL_STATES),
+                                                 CAN_CONTROL_INV_INTERNAL_STATES_LENGTH);
+    (void)can_control_em_status_unpack(&emStatus, frame(in, VCU_RX_EM_STATUS),
+                                       CAN_CONTROL_EM_STATUS_LENGTH);
 
     bus->bms_status_valid = valid(in, VCU_RX_BMS_STATUS);
     bus->bms_limits_valid = valid(in, VCU_RX_BMS_LIMITS);
@@ -109,6 +119,10 @@ static void read_bus(const vcu_control_in_t *in, bus_view_t *bus)
     bus->bus_dv = invVoltage.dc_bus_voltage;
     bus->pack_dv = bmsLimits.pack_voltage;
     bus->voltages_valid = valid(in, VCU_RX_INV_VOLTAGE) && bus->bms_limits_valid;
+    bus->inverter_reads_disabled = valid(in, VCU_RX_INV_INTERNAL_STATES) &&
+                                   invStates.enable_state == 0u;
+    bus->em_status_valid = valid(in, VCU_RX_EM_STATUS);
+    bus->em_violation = bus->em_status_valid && emStatus.violation != 0u;
 }
 
 /* The bus is at least percent of the pack voltage. */
@@ -378,25 +392,19 @@ static void record_inverter_fault(vcu_control_t *vc, const bus_view_t *bus,
 
 /* The Energy Meter's Violation bit is an Event each time a VALID EM_Status
    sets it (spec #36). Nothing in the torque path reads the meter. */
-static void record_em_violation(vcu_control_t *vc, const vcu_control_in_t *in,
+static void record_em_violation(vcu_control_t *vc, const bus_view_t *bus,
                                 vcu_control_out_t *out)
 {
-    struct can_control_em_status_t em;
-
-    if (!valid(in, VCU_RX_EM_STATUS)) {
+    if (!bus->em_status_valid) {
         return;
     }
-    (void)can_control_em_status_unpack(&em, frame(in, VCU_RX_EM_STATUS),
-                                       CAN_CONTROL_EM_STATUS_LENGTH);
-    const bool violation = em.violation != 0u;
-
-    if (violation && !vc->violation_seen) {
+    if (bus->em_violation && !vc->violation_seen) {
         uint8_t data[EVENT_DATA_SIZE];
 
         event_data_em_violation(data, vc->state);
         post_event(out, EVENT_EM_VIOLATION, data);
     }
-    vc->violation_seen = violation;
+    vc->violation_seen = bus->em_violation;
 }
 
 /* Discharge slow (spec #36): a VALID INV_Voltage above 60 V
@@ -427,16 +435,16 @@ static void watch_discharge(vcu_control_t *vc, const vcu_control_in_t *in,
     }
 }
 
-static void post_fault_clear(const vcu_control_t *vc, const vcu_control_in_t *in,
-                             const bus_view_t *bus, vcu_control_out_t *out, uint8_t result)
+static void post_fault_clear(const vcu_control_t *vc, const bus_view_t *bus,
+                             vcu_control_out_t *out, event_fault_clear_result_t result,
+                             uint32_t since_ms)
 {
     const event_fault_clear_t ev = {
         .result = result,
         .state = vc->state,
         .post_faults = bus->post_faults,
         .run_faults = bus->run_faults,
-        .since_ms = (result == EVENT_FAULT_CLEAR_SENT) ? 0u
-                                                       : (uint32_t)(in->now_ms - vc->clear_sent_ms),
+        .since_ms = since_ms,
     };
     uint8_t data[EVENT_DATA_SIZE];
 
@@ -444,18 +452,11 @@ static void post_fault_clear(const vcu_control_t *vc, const vcu_control_in_t *in
     post_event(out, EVENT_INVERTER_FAULT_CLEAR, data);
 }
 
-/* The inverter reads disabled: the last 0x0C0 carried Enable=0 and a VALID
+/* The inverter is disabled: the last 0x0C0 carried Enable=0 and a VALID
    INV_InternalStates reports the inverter not enabled. */
-static bool inverter_disabled(const vcu_control_t *vc, const vcu_control_in_t *in)
+static bool inverter_disabled(const vcu_control_t *vc, const bus_view_t *bus)
 {
-    struct can_control_inv_internal_states_t states;
-
-    if (vc->enable_sent || !valid(in, VCU_RX_INV_INTERNAL_STATES)) {
-        return false;
-    }
-    (void)can_control_inv_internal_states_unpack(&states, frame(in, VCU_RX_INV_INTERNAL_STATES),
-                                                 CAN_CONTROL_INV_INTERNAL_STATES_LENGTH);
-    return states.enable_state == 0u;
+    return !vc->enable_sent && bus->inverter_reads_disabled;
 }
 
 /* The inverter fault clear (spec #36): a press of the start button, with an
@@ -463,24 +464,31 @@ static bool inverter_disabled(const vcu_control_t *vc, const vcu_control_in_t *i
    travel below 5%, sends one 0x0C1. The press is then spent, so only the
    next press can run the Start procedure, and nothing re-enables by
    itself. The result is an Event: cleared once a VALID INV_FaultCodes
-   reads no fault, failed if none has within VCU_FAULT_CLEAR_WAIT_MS. */
-static void fault_clear(vcu_control_t *vc, const vcu_control_in_t *in, const bus_view_t *bus,
-                        bool press, vcu_control_out_t *out)
+   reads no fault, failed if none has within VCU_FAULT_CLEAR_WAIT_MS or if
+   the next clear goes first (the fault is still reported then). */
+static void run_fault_clear(vcu_control_t *vc, const vcu_control_in_t *in,
+                            const bus_view_t *bus, bool press, vcu_control_out_t *out)
 {
+    const uint32_t since_ms = (uint32_t)(in->now_ms - vc->clear_sent_ms);
+
     if (vc->clear_pending) {
         if (bus->faults_valid && !bus->inverter_fault) {
-            post_fault_clear(vc, in, bus, out, EVENT_FAULT_CLEAR_CLEARED);
+            post_fault_clear(vc, bus, out, EVENT_FAULT_CLEAR_CLEARED, since_ms);
             vc->clear_pending = false;
-        } else if ((uint32_t)(in->now_ms - vc->clear_sent_ms) >= VCU_FAULT_CLEAR_WAIT_MS) {
-            post_fault_clear(vc, in, bus, out, EVENT_FAULT_CLEAR_FAILED);
+        } else if (since_ms >= VCU_FAULT_CLEAR_WAIT_MS) {
+            post_fault_clear(vc, bus, out, EVENT_FAULT_CLEAR_FAILED, since_ms);
             vc->clear_pending = false;
         }
     }
 
-    if (!press || !bus->inverter_fault ||
-        (vc->state != VCU_STATE_GLV_ON && vc->state != VCU_STATE_TS_ACTIVE) ||
-        !inverter_disabled(vc, in) || higher_travel(&out->sensors) >= VCU_TRAVEL_RELEASED) {
+    const bool clear_allowed_state = vc->state == VCU_STATE_GLV_ON ||
+                                     vc->state == VCU_STATE_TS_ACTIVE;
+    if (!press || !bus->inverter_fault || !clear_allowed_state || !inverter_disabled(vc, bus) ||
+        higher_travel(&out->sensors) >= VCU_TRAVEL_RELEASED) {
         return;
+    }
+    if (vc->clear_pending) {
+        post_fault_clear(vc, bus, out, EVENT_FAULT_CLEAR_FAILED, since_ms);
     }
     const struct can_control_inv_parameter_command_t command = {
         .parameter_address = VCU_FAULT_CLEAR_ADDRESS,
@@ -488,12 +496,12 @@ static void fault_clear(vcu_control_t *vc, const vcu_control_in_t *in, const bus
         .data = 0u,
     };
 
-    (void)can_control_inv_parameter_command_pack(out->fault_clear, &command,
+    (void)can_control_inv_parameter_command_pack(out->fault_clear_frame, &command,
                                                  CAN_CONTROL_INV_PARAMETER_COMMAND_LENGTH);
     out->send_fault_clear = true;
     vc->clear_pending = true;
     vc->clear_sent_ms = in->now_ms;
-    post_fault_clear(vc, in, bus, out, EVENT_FAULT_CLEAR_SENT);
+    post_fault_clear(vc, bus, out, EVENT_FAULT_CLEAR_SENT, 0u);
 }
 
 static void enter(vcu_control_t *vc, const vcu_control_in_t *in, vcu_control_out_t *out,
@@ -548,7 +556,10 @@ static uint16_t leave_causes(const vcu_control_in_t *in, const bus_view_t *bus)
     if (in->bus_off_latched) {
         c |= cause_bit(VCU_CAUSE_BUS_OFF_LATCHED);
     }
-    if (bus->voltages_valid && !bus_at_least(bus, VCU_TS_LOST_PERCENT)) {
+    /* Below 60 V is lost whatever the pack voltage says, so a VALID pack
+       voltage of 0 cannot hide it. */
+    if (bus->voltages_valid &&
+        (bus->bus_dv < VCU_TS_MIN_DV || !bus_at_least(bus, VCU_TS_LOST_PERCENT))) {
         c |= cause_bit(VCU_CAUSE_BUS_VOLTAGE_LOW);
     }
     return c;
@@ -647,7 +658,7 @@ void vcu_control_step(vcu_control_t *vc, const vcu_control_in_t *in,
 
     record_inverter_fault(vc, &bus, out);
     watch_discharge(vc, in, &bus, out);
-    record_em_violation(vc, in, out);
+    record_em_violation(vc, &bus, out);
 
     /* 2. The pedal and brake sensors. */
     vcu_sensors_compute(&in->raw, &vc->config.cal, &out->sensors);
@@ -709,7 +720,7 @@ void vcu_control_step(vcu_control_t *vc, const vcu_control_in_t *in,
 
     /* The same press is never both: a fault clear needs an inverter fault,
        which refuses the Start procedure. */
-    fault_clear(vc, in, &bus, press, out);
+    run_fault_clear(vc, in, &bus, press, out);
 
     out->state = vc->state;
     out->start_blockers = start_blockers(vc, in, &bus, out);
@@ -745,12 +756,15 @@ void vcu_control_step(vcu_control_t *vc, const vcu_control_in_t *in,
                  (uint32_t)(in->now_ms - vc->entered_ms) < VCU_SOUND_MS;
     /* The fault LED: on for the lamp check and in STARTUP, solid while a
        restart is needed, blinking while a Torque cut lasts, from its first
-       step (ADR 0006). Solid also while the bus-off latch is set, and in
-       TS_ACTIVE while a condition that leaves Ready to Drive is present
-       (issue 58). */
-    const bool solid = vc->restart_needed ||
-                       (vc->state != VCU_STATE_STARTUP && in->bus_off_latched) ||
-                       (vc->state == VCU_STATE_TS_ACTIVE && leave_causes(in, &bus) != 0u);
+       step (ADR 0006). Solid also, after STARTUP, while the bus-off latch
+       is set or a device reports a fault, and in TS_ACTIVE while any cause
+       of Leaving Ready to Drive is present (issue 58). An open Shutdown
+       Circuit in GLV_ON is the parked car, not a fault. */
+    const bool fault_led_solid =
+        vc->restart_needed ||
+        (vc->state != VCU_STATE_STARTUP &&
+         (in->bus_off_latched || bus.bms_fault || bus.inverter_fault)) ||
+        (vc->state == VCU_STATE_TS_ACTIVE && leave_causes(in, &bus) != 0u);
     const bool cut = out->cuts != 0u;
     if (cut && !vc->cut_was) {
         vc->blink_from_ms = in->now_ms;
@@ -758,9 +772,9 @@ void vcu_control_step(vcu_control_t *vc, const vcu_control_in_t *in,
     vc->cut_was = cut;
     const bool blink_on = ((uint32_t)(in->now_ms - vc->blink_from_ms) / VCU_FAULT_BLINK_MS) % 2u == 0u;
     out->fault_led = !vc->lamp_check_done || vc->state == VCU_STATE_STARTUP ||
-                     solid || (cut && blink_on);
+                     fault_led_solid || (cut && blink_on);
     /* The test point changes in the step that zeroes the command. */
-    out->test_point = cut || solid;
+    out->test_point = cut || fault_led_solid;
     out->fault_active = out->startup_blocked || out->test_point;
     send_status(vc, in, &bus, out->send_command ? torque : 0, out);
 }
