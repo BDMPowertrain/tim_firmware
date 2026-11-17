@@ -201,7 +201,7 @@ void event_data_inverter_fault(uint8_t data[EVENT_DATA_SIZE], uint32_t post_faul
 void event_data_fault_clear(uint8_t data[EVENT_DATA_SIZE], const event_fault_clear_t *clear)
 {
     memset(data, 0, EVENT_DATA_SIZE);
-    data[0] = clear->result;
+    data[0] = (uint8_t)clear->result;
     data[1] = clear->state;
     put_u32(&data[4], clear->post_faults);
     put_u32(&data[8], clear->run_faults);
