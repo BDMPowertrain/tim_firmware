@@ -24,7 +24,7 @@
 /* How long the bus is given, from the termination write, before CAN1 is
    started. UNMEASURED: 5 ms is the spec's figure, not a reading taken on
    the TIM's relay (TLP172AM) and transceiver (ADM3057E). Measure it on
-   the bench before relying on it. A step period of more than this many
+   the bench before relying on it: issue 78. A step period of more than this many
    1 ms ticks is at least this long, whatever the phase of the tick. */
 #define BUS_TERM_SETTLE_MS 5u
 
