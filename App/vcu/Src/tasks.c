@@ -19,7 +19,7 @@
 #include "print.h"
 #include "shell.h"
 #include "spi3_bus.h"
-#include "vbat.h"
+#include "vcu_adc.h"
 #include "vcu_daq.h"
 #include "vcu_params.h"
 #include "vcu_shell.h"
@@ -54,9 +54,9 @@ static bool create_task(osThreadFunc_t func, void *argument, const char *name,
 /* Read by the control step for as long as it runs. */
 static control_step_args_t controlStepArgs;
 
-/* The VCU's own Housekeeping work: VBAT. */
+/* The VCU's own Housekeeping work: VBAT, from the ADC1 scan. */
 static const housekeeping_def_t housekeepingDef = {
-    .poll = vbat_sample,
+    .poll = vcu_adc_poll_vbat,
 };
 
 /* What the DAQ publisher sends from the VCU (can/daq.dbc). */
@@ -85,7 +85,9 @@ void tasks_init(void)
     ok = spi3_bus_init() && ok;
     ok = logger_init() && ok;
     ok = can_if_init(&daqPublisher) && ok;
-    ok = vbat_init() && ok;
+    /* The analog inputs run from here on, the first scan discarded, so the
+       control step's first read has samples (issue 55). */
+    ok = vcu_adc_start() && ok;
     ok = housekeeping_init() && ok;
     ok = vcu_step_init() && ok;
     ok = control_step_init() && ok;

@@ -24,8 +24,11 @@
 /* Indexes into vcu_param_table. Order only; the stored IDs are in the
    table. */
 typedef enum {
-    VCU_PARAM_APPS1_MIN,     /* ADC counts at 0% Pedal travel */
-    VCU_PARAM_APPS1_MAX,     /* ADC counts at 100% Pedal travel */
+    /* Each APPS's end points as the lower and the higher ADC count: APPS1
+       reads its min at 0% Pedal travel, APPS2 (falling) at 100%. Which
+       way each sensor runs is fixed in vcu_sensors.c. */
+    VCU_PARAM_APPS1_MIN,
+    VCU_PARAM_APPS1_MAX,
     VCU_PARAM_APPS2_MIN,
     VCU_PARAM_APPS2_MAX,
     VCU_PARAM_BRAKE1_ZERO,   /* ADC counts at no pressure */

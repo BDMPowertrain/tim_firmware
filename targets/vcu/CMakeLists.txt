@@ -67,6 +67,7 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     ../../App/common/Src/spi3_bus.c
     ../../App/common/Src/stats.c
     ../../App/vcu/Src/tasks.c
+    ../../App/vcu/Src/vcu_adc.c
     ../../App/vcu/Src/vcu_shell.c
     ../../App/vcu/Src/vcu_step.c
     ../../App/common/Src/vbat.c

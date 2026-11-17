@@ -2,6 +2,8 @@
 
 #include "control_step.h"
 
+#include <string.h>
+
 #include "cmsis_os2.h"
 
 #include "cycle_counter.h"
@@ -47,6 +49,9 @@ void control_step_task(void *argument)
     const uint32_t cyclesPerUs = SystemCoreClock / 1000000u;
     const size_t phaseCount = (def->phase_count < STEP_PHASE_MAX) ? def->phase_count
                                                                    : STEP_PHASE_MAX;
+    const size_t imageDataSize = (def->image_data_size < CONTROL_IMAGE_DATA_MAX)
+                                     ? def->image_data_size
+                                     : CONTROL_IMAGE_DATA_MAX;
 
     control_step_ctx_t ctx = {
         .startup_ok = args->startup_ok,
@@ -123,7 +128,7 @@ void control_step_task(void *argument)
             }
         }
 
-        const control_snapshot_t snapshot = {
+        control_snapshot_t snapshot = {
             .running = true,
             .step_count = ctx.step_count,
             .state = ctx.state,
@@ -137,6 +142,9 @@ void control_step_task(void *argument)
             .stats = stats,
             .bus = control_bus_report(),
         };
+        if (def->image_data != NULL) {
+            memcpy(snapshot.image_data.bytes, def->image_data, imageDataSize);
+        }
         masked_copy(&published, &snapshot, sizeof(published));
     }
 }

@@ -8,20 +8,12 @@
    the VBAT connector clamps at 24.4V max, well below the ADC-math
    figure. Treat 42.9V as an ADC-saturation reference number only.
 
-   Sampling is Housekeeping's (issue 47): the VCU hands vbat_sample() to
-   it as its 100 ms poll. One polled ADC conversion is microsecond-scale
-   even at the 640.5-cycle sample time VBAT's divider impedance needs
-   (CubeMX regen, see commit history), so it barely delays the heartbeat.
-
-   ADC1 has no other consumer right now, so no shared-access mutex is
-   needed here (unlike spi3_bus.c) — if a future mezzanine ADC1 channel
-   (PA0-3) gets its own driver, this will need one. */
+   The count comes from the image's ADC driver (vbat_record()); this file
+   touches no ADC. On the VCU it is ADC1 rank 4 of the TIM3-triggered
+   scan, at the 640.5-cycle sample time VBAT's divider impedance needs
+   (issue 55). */
 
 #include "vbat.h"
-
-#include "main.h"
-
-extern ADC_HandleTypeDef hadc1;
 
 /* raw * 3300mV/4095 (ADC full-scale) * 13 (divider) collapsed into one
    multiply-divide; 42900 = 3300 * 13. Integer-only, no floats — same
@@ -38,27 +30,11 @@ static volatile uint32_t latestRaw;
 static volatile uint32_t latestMillivolts;
 static volatile bool haveReading;
 
-void vbat_sample(void)
+void vbat_record(uint16_t raw)
 {
-    if (HAL_ADC_Start(&hadc1) != HAL_OK) {
-        return;
-    }
-    if (HAL_ADC_PollForConversion(&hadc1, 10) != HAL_OK) {
-        HAL_ADC_Stop(&hadc1);
-        return;
-    }
-
-    uint32_t raw = HAL_ADC_GetValue(&hadc1);
-    HAL_ADC_Stop(&hadc1);
-
     latestRaw = raw;
-    latestMillivolts = (raw * VBAT_MV_NUMERATOR) / VBAT_ADC_FULL_SCALE;
+    latestMillivolts = ((uint32_t)raw * VBAT_MV_NUMERATOR) / VBAT_ADC_FULL_SCALE;
     haveReading = true;
-}
-
-bool vbat_init(void)
-{
-    return HAL_ADCEx_Calibration_Start(&hadc1, ADC_SINGLE_ENDED) == HAL_OK;
 }
 
 bool vbat_get_reading(uint32_t *out_raw, uint32_t *out_mv)

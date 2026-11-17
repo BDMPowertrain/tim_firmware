@@ -3,11 +3,16 @@
 #include "vcu_step.h"
 
 #include <stddef.h>
+#include <string.h>
 
+#include "adc_window.h"
 #include "can_control.h"
 #include "control_bus.h"
 #include "e2e_p11.h"
+#include "main.h"
 #include "parameters.h"
+#include "vcu_adc.h"
+#include "vcu_params.h"
 #include "vcu_tx.h"
 
 #define VCU_STEP_PERIOD_MS 10u
@@ -32,10 +37,51 @@ static const control_bus_rx_t vcuRx[] = {
 /* Owned by the step; nothing else touches them. */
 static bool canStarted;
 static e2e_p11_tx_t statusTx;
+static vcu_inputs_t inputs;
+
+_Static_assert(sizeof(vcu_inputs_t) <= CONTROL_IMAGE_DATA_MAX,
+               "the VCU inputs must fit the published snapshot");
+
+/* The calibration in force: Parameters never change until a reset
+   (ADR 0015), so they are read once. */
+static vcu_sensor_cal_t calibration;
 
 bool vcu_step_init(void)
 {
+    calibration = (vcu_sensor_cal_t){
+        .apps_min = { parameters_value(VCU_PARAM_APPS1_MIN),
+                      parameters_value(VCU_PARAM_APPS2_MIN) },
+        .apps_max = { parameters_value(VCU_PARAM_APPS1_MAX),
+                      parameters_value(VCU_PARAM_APPS2_MAX) },
+        .brake_zero = { parameters_value(VCU_PARAM_BRAKE1_ZERO),
+                        parameters_value(VCU_PARAM_BRAKE2_ZERO) },
+    };
     return control_bus_init(vcuRx, sizeof(vcuRx) / sizeof(vcuRx[0]));
+}
+
+static bool all_sampled(const vcu_sensor_raw_t *raw)
+{
+    const uint16_t all[] = { raw->apps[0],  raw->apps[1],   raw->brake[0],
+                             raw->brake[1], raw->supply[0], raw->supply[1] };
+
+    for (size_t i = 0; i < sizeof(all) / sizeof(all[0]); i++) {
+        if (all[i] == ADC_WINDOW_EMPTY) {
+            return false;
+        }
+    }
+    return true;
+}
+
+static void read_inputs(void)
+{
+    vcu_adc_read_sensors(&inputs.raw);
+    vcu_sensors_compute(&inputs.raw, &calibration, &inputs.sensors);
+    inputs.samples_ready = all_sampled(&inputs.raw);
+    /* Both active low (issue 20): the opto pulls the monitor low while the
+       loop is closed, the button pulls its pin low while pressed. */
+    inputs.sdc_closed = HAL_GPIO_ReadPin(SDC_MON_N_GPIO_Port, SDC_MON_N_Pin) == GPIO_PIN_RESET;
+    inputs.start_pressed =
+        HAL_GPIO_ReadPin(START_BTN_N_GPIO_Port, START_BTN_N_Pin) == GPIO_PIN_RESET;
 }
 
 static void phase_input(control_step_ctx_t *ctx)
@@ -48,6 +94,8 @@ static void phase_input(control_step_ctx_t *ctx)
     /* The bus-off latch clears only with every mailbox VALID (spec,
        reaction table): judged on the last step's mailboxes. */
     control_bus_update(ctx->now_ms, control_bus_all_valid());
+
+    read_inputs();
 }
 
 static void phase_logic(control_step_ctx_t *ctx)
@@ -103,6 +151,18 @@ const char *vcu_step_save_refusal(void)
     return NULL;
 }
 
+bool vcu_step_read_inputs(vcu_inputs_t *out)
+{
+    control_snapshot_t snap;
+
+    control_step_read(&snap);
+    if (!snap.running) {
+        return false;
+    }
+    memcpy(out, snap.image_data.bytes, sizeof(*out));
+    return true;
+}
+
 static const control_phase_t vcuPhases[] = {
     { "input",  phase_input },
     { "logic",  phase_logic },
@@ -115,4 +175,6 @@ const control_step_def_t vcu_step_def = {
     .phases = vcuPhases,
     .phase_count = sizeof(vcuPhases) / sizeof(vcuPhases[0]),
     .state_name = vcu_state_name,
+    .image_data = &inputs,
+    .image_data_size = sizeof(inputs),
 };

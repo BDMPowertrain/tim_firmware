@@ -55,12 +55,21 @@ typedef struct {
     void (*run)(control_step_ctx_t *ctx);
 } control_phase_t;
 
+/* Room in the published snapshot for the image's own data, such as the
+   VCU's sensor readings. */
+#define CONTROL_IMAGE_DATA_MAX 64u
+
 typedef struct {
     const char            *image;  /* "VCU" or "BMS", for the shell */
     uint32_t               period_ms;
     const control_phase_t *phases; /* in order; at most STEP_PHASE_MAX */
     size_t                 phase_count;
     const char          *(*state_name)(uint8_t state);
+    /* The image's own data, written by its phases and published with the
+       step (at most CONTROL_IMAGE_DATA_MAX bytes; more is cut). The image
+       reads it back out of control_snapshot_t.image_data. NULL for none. */
+    const void            *image_data;
+    size_t                 image_data_size;
 } control_step_def_t;
 
 /* The argument of control_step_task(). Must outlive the task. */
@@ -83,6 +92,10 @@ typedef struct {
     uint32_t     events_dropped;  /* Overrun Events that found the queue full */
     step_stats_t stats;      /* last and worst since power-on, in us */
     control_bus_report_t bus; /* the Control bus as this step left it */
+    union {
+        uint8_t  bytes[CONTROL_IMAGE_DATA_MAX];
+        uint32_t align;
+    } image_data;             /* def->image_data as this step left it */
 } control_snapshot_t;
 
 /* Creates the Overrun Event queue. Call from tasks_init() before the task

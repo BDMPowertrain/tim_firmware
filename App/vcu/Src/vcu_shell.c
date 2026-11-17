@@ -1,6 +1,6 @@
-/* vcu_shell.c — the shell commands only the VCU image has: the IMU, and
-   the practice logger, CAN and VBAT modules the BMS image does not link
-   yet. shell.c is common code and knows none of them; they reach it
+/* vcu_shell.c — the shell commands only the VCU image has: the IMU, the
+   pedal and brake inputs, and the practice logger, CAN and VBAT modules
+   the BMS image does not link yet. shell.c is common code and knows none of them; they reach it
    through shell_register_commands() (ADR 0001). */
 
 #include "vcu_shell.h"
@@ -13,11 +13,14 @@
 
 #include "can_if.h"
 #include "control_bus.h"
+#include "adc_window.h"
 #include "imu.h"
 #include "logger.h"
 #include "print.h"
 #include "shell.h"
 #include "vbat.h"
+#include "vcu_sensors.h"
+#include "vcu_step.h"
 
 /* mg/mdps conversion done in integer math, not float: this project
    links --specs=nano.specs without -u _printf_float (cmake/gcc-arm-none
@@ -410,12 +413,90 @@ static int cmd_vbat(int argc, char **argv)
     return 0;
 }
 
+/* Sensor-side millivolts for a count through the 0.6 divider
+   (vcu_sensors.h), for reading against a meter. */
+static unsigned long sensor_mv(uint16_t counts)
+{
+    return ((unsigned long)counts * 5u * 3300u) / (3u * 4095u);
+}
+
+static void print_raw(const char *name, uint16_t counts)
+{
+    if (counts == ADC_WINDOW_EMPTY) {
+        shell_printf("%-12s raw    -", name);
+    } else {
+        shell_printf("%-12s raw %4u  %4lu mV", name, (unsigned)counts, sensor_mv(counts));
+    }
+}
+
+static void print_inputs(const vcu_inputs_t *in)
+{
+    static const char *const appsName[VCU_APPS_COUNT] = { "APPS1", "APPS2" };
+    static const char *const brakeName[VCU_BRAKE_COUNT] = { "brake front", "brake rear" };
+    static const char *const supplyName[2] = { "supply 1", "supply 2" };
+
+    for (unsigned i = 0; i < VCU_APPS_COUNT; i++) {
+        const vcu_apps_reading_t *r = &in->sensors.apps[i];
+
+        print_raw(appsName[i], in->raw.apps[i]);
+        shell_printf("  travel %3u.%u%%  %s\r\n", (unsigned)(r->travel / 10u),
+                     (unsigned)(r->travel % 10u), vcu_sensor_status_name(r->status));
+    }
+    for (unsigned i = 0; i < VCU_BRAKE_COUNT; i++) {
+        const vcu_brake_reading_t *r = &in->sensors.brake[i];
+
+        print_raw(brakeName[i], in->raw.brake[i]);
+        shell_printf("  pressure %4u  %s\r\n", (unsigned)r->pressure,
+                     vcu_sensor_status_name(r->status));
+    }
+    for (unsigned i = 0; i < 2u; i++) {
+        print_raw(supplyName[i], in->raw.supply[i]);
+        shell_printf("  %s\r\n", in->sensors.supply_ok[i] ? "ok" : "FAULT");
+    }
+    shell_printf("shutdown circuit %s, start button %s, samples %s\r\n",
+                 in->sdc_closed ? "closed" : "open",
+                 in->start_pressed ? "pressed" : "released",
+                 in->samples_ready ? "ready" : "NOT ready");
+}
+
+#define CMD_INPUTS_USAGE "usage: inputs [stream]\r\n"
+
+/* What the control step read on its last step: averaged counts with the
+   millivolts at the sensor connector, Pedal travel and brake pressure
+   from the calibration, and each sensor's status. `stream` repeats every
+   500 ms until a key, for turning pots on a bare TIM. */
+static int cmd_inputs(int argc, char **argv)
+{
+    const bool stream = argc == 2 && strcmp(argv[1], "stream") == 0;
+
+    if (argc > 2 || (argc == 2 && !stream)) {
+        shell_printf(CMD_INPUTS_USAGE);
+        return 0;
+    }
+    if (stream) {
+        shell_printf("streaming - press any key to stop\r\n");
+    }
+
+    do {
+        vcu_inputs_t in;
+
+        if (!vcu_step_read_inputs(&in)) {
+            shell_printf("inputs: control step not running\r\n");
+            return 0;
+        }
+        print_inputs(&in);
+    } while (stream && !shell_wait_key(500));
+
+    return 0;
+}
+
 static const shell_cmd_t vcuCommands[] = {
     { "imu",       cmd_imu,       "latest accel/gyro sample" },
     { "imustream", cmd_imustream, "live accel/gyro stream, any key to stop" },
     { "log",       cmd_log,       "log start|stop|status|list|dump <file>" },
     { "can",       cmd_can,       "can status[1|2]|stby2|term2 on|off|send2 <id> <hex> [fd] [brs]|stream2" },
     { "vbat",      cmd_vbat,      "battery voltage" },
+    { "inputs",    cmd_inputs,    "pedal, brake and supply readings [stream]" },
 };
 
 void vcu_shell_register(void)

@@ -4,21 +4,17 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-/* Calibrates ADC1 once. Must run before the first vbat_sample() — see
-   tasks_init(). False if the calibration failed. */
-bool vbat_init(void);
-
-/* Takes one reading of VBAT_ADC (PC3/ADC1_IN9). Housekeeping calls it every
-   100 ms as the VCU's poll (issue 47); a failed conversion keeps the last
-   reading. */
-void vbat_sample(void);
+/* Records a VBAT_ADC (PC3/ADC1_IN9) count. The image's ADC driver hands
+   it over: on the VCU, Housekeeping's 100 ms poll averages the newest
+   VBAT samples from the timer-triggered ADC1 scan (vcu_adc.h). */
+void vbat_record(uint16_t raw);
 
 /* Latest VBAT reading — raw 12-bit ADC count and millivolts (scaled
    through the board's confirmed 1/13 divider, R21=120k/R22=10k,
    verified against a schematic design note). Returns false (leaving
-   both out-params untouched) until the first conversion completes.
+   both out-params untouched) until the first count is recorded.
    raw and *out_mv are read as two independent scalars, not atomically
-   together — Housekeeping could in principle sample between the two
+   together — Housekeeping could in principle record between the two
    reads, momentarily pairing one sample's raw count with the next
    sample's millivolts. Deliberately not worth a mutex for this: worst
    case is a one-sample (100 ms) skew on a value that doesn't change
