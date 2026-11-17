@@ -23,9 +23,10 @@
 
 /* Calibrates both ADCs, starts their DMA and then TIM3, waits for the
    first scan and discards it (spec, issue 36: the first conversion after
-   enabling is not used). Call once from tasks_init(); it blocks about
-   2 ms. False if anything did not start: every reading then stays "no
-   sample", which the sensors report as failed. */
+   enabling is not used). Call once from tasks_init(); it blocks 1-2 ms,
+   at most 5. False if anything did not start or the first scan never
+   came: the image then stays in STARTUP. A reading with no sample is
+   ADC_WINDOW_EMPTY, which the sensors report as failed. */
 bool vcu_adc_start(void);
 
 /* The newest averaged pedal, brake and supply counts. A channel with no

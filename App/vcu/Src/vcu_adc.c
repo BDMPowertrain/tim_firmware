@@ -45,16 +45,21 @@ static bool start_dma(ADC_HandleTypeDef *hadc, volatile uint16_t *buf, uint32_t 
     return true;
 }
 
+/* Transfers the DMA has made into buf since it started (before it wraps). */
+static uint32_t transfers_made(ADC_HandleTypeDef *hadc, uint32_t channels)
+{
+    return SCANS * channels - __HAL_DMA_GET_COUNTER(hadc->DMA_Handle);
+}
+
 /* Sets the first scan back to the empty marker once the DMA has moved
-   past it. False if the DMA has not (the ADC or the timer is not
-   running), or has already come round (impossible 2 ms in). */
+   past it. False if it has not (the ADC or the timer is not running), or
+   has already come round (impossible a few ms in). */
 static bool discard_first_scan(ADC_HandleTypeDef *hadc, volatile uint16_t *buf,
                                uint32_t channels)
 {
-    const uint32_t total = SCANS * channels;
-    const uint32_t written = total - __HAL_DMA_GET_COUNTER(hadc->DMA_Handle);
+    const uint32_t written = transfers_made(hadc, channels);
 
-    if (written < channels || written >= total - channels) {
+    if (written < channels || written >= (SCANS - 1u) * channels) {
         return false;
     }
     for (uint32_t c = 0; c < channels; c++) {
@@ -62,6 +67,11 @@ static bool discard_first_scan(ADC_HandleTypeDef *hadc, volatile uint16_t *buf,
     }
     return true;
 }
+
+/* Ticks to wait for the first scan: the first trigger is 1 ms after the
+   timer starts and its scan takes about 35 us, but a 1 ms delay can
+   wake up to a tick early, so it polls. */
+#define FIRST_SCAN_WAIT_TICKS 5u
 
 bool vcu_adc_start(void)
 {
@@ -72,9 +82,13 @@ bool vcu_adc_start(void)
         return false;
     }
 
-    /* The first trigger is 1 ms after the timer starts; its scan takes
-       about 35 us. */
-    (void)osDelay(2u);
+    for (uint32_t t = 0u; t < FIRST_SCAN_WAIT_TICKS; t++) {
+        if (transfers_made(&hadc1, ADC1_CHANNELS) >= ADC1_CHANNELS
+            && transfers_made(&hadc2, ADC2_CHANNELS) >= ADC2_CHANNELS) {
+            break;
+        }
+        (void)osDelay(1u);
+    }
 
     ok = discard_first_scan(&hadc1, adc1Buf, ADC1_CHANNELS);
     ok = discard_first_scan(&hadc2, adc2Buf, ADC2_CHANNELS) && ok;

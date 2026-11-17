@@ -2,6 +2,8 @@
 
 #include "vcu_sensors.h"
 
+#include <stddef.h>
+
 #include "adc_window.h"
 
 /* Issue 20: APPS1 rises with the pedal, APPS2 falls. */
@@ -65,18 +67,18 @@ void vcu_sensors_compute(const vcu_sensor_raw_t *raw, const vcu_sensor_cal_t *ca
 {
     /* Issue 20: supply i feeds APPS i and brake sensor i. No sample on
        the supply fails it too (ADC_WINDOW_EMPTY is above the window). */
-    for (unsigned i = 0; i < 2u; i++) {
+    for (size_t i = 0u; i < 2u; i++) {
         out->supply_ok[i] = raw->supply[i] >= VCU_SUPPLY_MIN_COUNTS
                             && raw->supply[i] <= VCU_SUPPLY_MAX_COUNTS;
     }
-    for (unsigned i = 0; i < VCU_APPS_COUNT; i++) {
+    for (size_t i = 0u; i < VCU_APPS_COUNT; i++) {
         out->apps[i] = apps_reading(raw->apps[i], cal->apps_min[i], cal->apps_max[i],
                                     appsFalls[i]);
         if (!out->supply_ok[i] && out->apps[i].status != VCU_SENSOR_NO_SAMPLE) {
             out->apps[i] = (vcu_apps_reading_t){ 0u, VCU_SENSOR_SUPPLY_FAULT };
         }
     }
-    for (unsigned i = 0; i < VCU_BRAKE_COUNT; i++) {
+    for (size_t i = 0u; i < VCU_BRAKE_COUNT; i++) {
         out->brake[i] = brake_reading(raw->brake[i], cal->brake_zero[i]);
         if (!out->supply_ok[i] && out->brake[i].status != VCU_SENSOR_NO_SAMPLE) {
             out->brake[i] = (vcu_brake_reading_t){ 0u, VCU_SENSOR_SUPPLY_FAULT };

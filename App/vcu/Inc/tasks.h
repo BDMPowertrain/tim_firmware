@@ -70,8 +70,8 @@
 /* Housekeeping (issue 47): the one Low task, every 100 ms — heartbeat LED,
    VBAT, and once a second the task statistics (whose array is static in
    stats.c, not on this stack). The stack holds a copy of the step's
-   snapshot and VBAT's ADC window average. Measured on the bench TIM (Debug, 13
-   minutes): 656 B free of 1024. */
+   snapshot and VBAT's ADC window average. Measured on the bench TIM
+   (Debug, 20 s, issue 55): 608 B free of 1024. */
 #define HOUSEKEEPING_TASK_PRIORITY   osPriorityLow
 #define HOUSEKEEPING_TASK_STACK_SIZE 1024u
 
@@ -121,8 +121,10 @@
 
 /* The Control step (ADR 0010): the one Realtime task, every 10 ms. It
    takes no mutex and blocks only on its own period. The stack holds the
-   status frame build and the step's own locals; mailboxes and their
-   snapshot are static in control_bus.c. Measure with `tasks`. */
+   status frame build, the published snapshot it builds, the ADC window
+   averages and the step's own locals; mailboxes and their snapshot are
+   static in control_bus.c. Measured on the bench TIM (Debug, 20 s, issue
+   55): 432 B free of 1024. */
 #define CONTROL_STEP_TASK_PRIORITY   osPriorityRealtime
 #define CONTROL_STEP_TASK_STACK_SIZE 1024u
 
