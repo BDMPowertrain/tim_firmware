@@ -331,6 +331,12 @@ void vcu_control_init(vcu_control_t *vc, const vcu_control_config_t *config);
 void vcu_control_step(vcu_control_t *vc, const vcu_control_in_t *in,
                       vcu_control_out_t *out);
 
+/* The VCU's condition for clearing the bus-off latch (bus_recovery.h,
+   latch_may_clear): every mailbox VALID except the Energy Meter's two,
+   which are logged only and must not keep the car from restarting.
+   mailboxes: VCU_RX_COUNT, in vcu_rx_t order. */
+bool vcu_control_latch_may_clear(const mailbox_t *mailboxes);
+
 /* "STARTUP", "GLV_ON", ... "?" for a value that is not a state. */
 const char *vcu_control_state_name(uint8_t state);
 

@@ -2070,6 +2070,39 @@ static void test_a_device_fault_keeps_the_fault_led_solid_in_glv_on(void)
     TEST_ASSERT_FALSE(out.fault_led);
 }
 
+/* The bus-off latch may clear only with every mailbox VALID except the
+   Energy Meter's: the meter is logged only, so a silent one must not keep
+   the car from restarting. */
+static void test_the_latch_may_clear_without_the_energy_meter(void)
+{
+    to_ts_active();
+    TEST_ASSERT_TRUE(vcu_control_latch_may_clear(mb));
+
+    playing[VCU_RX_EM_MEASUREMENT] = false;
+    playing[VCU_RX_EM_STATUS] = false;
+    run_ms(2000u);
+    TEST_ASSERT_NOT_EQUAL(MAILBOX_VALID, mb[VCU_RX_EM_MEASUREMENT].state);
+    TEST_ASSERT_NOT_EQUAL(MAILBOX_VALID, mb[VCU_RX_EM_STATUS].state);
+    TEST_ASSERT_TRUE(vcu_control_latch_may_clear(mb));
+}
+
+/* Every other mailbox, the IMD's included, must be VALID. */
+static void test_the_latch_may_not_clear_with_any_other_mailbox_silent(void)
+{
+    const vcu_rx_t rows[] = { VCU_RX_BMS_STATUS, VCU_RX_BMS_LIMITS, VCU_RX_BMS_POWER,
+                              VCU_RX_INV_MOTOR_POSITION, VCU_RX_INV_VOLTAGE,
+                              VCU_RX_INV_INTERNAL_STATES, VCU_RX_INV_FAULT_CODES,
+                              VCU_RX_INV_TORQUE_CAPABILITY, VCU_RX_IMD_INFO_GENERAL };
+
+    for (size_t i = 0; i < sizeof(rows) / sizeof(rows[0]); i++) {
+        setUp();
+        to_ts_active();
+        playing[rows[i]] = false;
+        run_ms(2000u);
+        TEST_ASSERT_FALSE(vcu_control_latch_may_clear(mb));
+    }
+}
+
 /* The Shutdown Circuit input is trusted only in the safe direction: open
    takes torque away at once, but closed alone grants nothing. */
 static void test_the_shutdown_circuit_closed_alone_grants_nothing(void)
@@ -2341,6 +2374,8 @@ int main(void)
     RUN_TEST(test_the_fault_led_is_solid_while_a_leave_condition_is_present);
     RUN_TEST(test_the_reaction_row_bus_off_latch_needs_the_start_procedure);
     RUN_TEST(test_a_device_fault_keeps_the_fault_led_solid_in_glv_on);
+    RUN_TEST(test_the_latch_may_clear_without_the_energy_meter);
+    RUN_TEST(test_the_latch_may_not_clear_with_any_other_mailbox_silent);
     RUN_TEST(test_the_shutdown_circuit_closed_alone_grants_nothing);
     RUN_TEST(test_the_fault_led_is_on_in_startup);
     RUN_TEST(test_the_fault_led_is_held_3_s_after_reset);
