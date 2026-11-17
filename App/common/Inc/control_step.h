@@ -8,9 +8,9 @@
    other tasks copy with interrupts masked.
 
    An Overrun is counted and the next step starts on the next period
-   boundary, with no catch-up (step_timing.h). Each Overrun puts one
-   Event's worth of data (overrun_watch.h) on a 16-deep queue with zero
-   timeout; a full queue drops it and counts. Three Overruns within one
+   boundary, with no catch-up (step_timing.h). Each Overrun posts an
+   overrun Event (overrun_watch.h, event_codes.h) to the 16-deep Event
+   queue with zero timeout (events.h); a full queue drops it and counts. Three Overruns within one
    second set timing_fault for the next step's phases.
 
    Where the step is goes to the Breadcrumb in the backup registers
@@ -93,7 +93,7 @@ typedef struct {
     uint32_t     overruns;   /* since power-on */
     uint32_t     timing_faults;   /* times three Overruns fell in one second */
     uint32_t     kicks_withheld;  /* steps that found the previous one incomplete */
-    uint32_t     events_dropped;  /* Overrun Events that found the queue full */
+    uint32_t     events_dropped;  /* overrun Events that found the Event queue full */
     step_stats_t stats;      /* last and worst since power-on, in us */
     control_bus_report_t bus; /* the Control bus as this step left it */
     union {
@@ -101,10 +101,6 @@ typedef struct {
         uint32_t align;
     } image_data;             /* def->image_data as this step left it */
 } control_snapshot_t;
-
-/* Creates the Overrun Event queue. Call from tasks_init() before the task
-   is created. False if it could not be created. */
-bool control_step_init(void);
 
 /* The task entry point. argument is a control_step_args_t *. The first
    step starts one period after the task does. */

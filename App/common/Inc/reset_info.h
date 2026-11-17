@@ -36,6 +36,10 @@ void reset_info_breadcrumb(const breadcrumb_t *breadcrumb);
    interrupts off; touches nothing but registers. */
 void reset_info_crash(const crash_record_t *crash);
 
+/* What reset_info_capture() found: the last reset's cause, Breadcrumb,
+   Crash record and count. Written once before the scheduler starts. */
+const reset_report_t *reset_info_report(void);
+
 /* The shell's `lastreset`: cause, Breadcrumb, Crash record and count. */
 void reset_info_print(void);
 

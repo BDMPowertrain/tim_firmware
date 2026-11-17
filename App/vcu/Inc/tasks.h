@@ -119,6 +119,14 @@
 #define DAQ_TASK_PRIORITY         osPriorityNormal
 #define DAQ_TASK_STACK_SIZE       1024u
 
+/* The Event writer (issue 51): BelowNormal, as the Event log only records.
+   It opens the log (scanning 32 pages, repairing any torn one through the
+   log's static page buffer, not this stack), then takes the Event queue.
+   The stack holds one queued Event, the flood guard and the flash calls;
+   unmeasured. Measure with `tasks` and adjust. */
+#define EVENT_TASK_PRIORITY       osPriorityBelowNormal
+#define EVENT_TASK_STACK_SIZE     1024u
+
 /* The Control step (ADR 0010): the one Realtime task, every 10 ms. It
    takes no mutex and blocks only on its own period. The stack holds the
    status frame build, the published snapshot it builds, the ADC window

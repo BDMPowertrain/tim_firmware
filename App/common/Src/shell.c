@@ -15,6 +15,7 @@
 #include "control_bus.h"
 #include "control_step.h"
 #include "crash.h"
+#include "events.h"
 
 #include "main.h"
 #include "parameters.h"
@@ -98,6 +99,7 @@ static const shell_cmd_t commandTable[] = {
     { "step",      cmd_step,      "control step: state, overruns, last and worst times" },
     { "bus",       cmd_bus,       "Control bus (CAN1): bus-off, error-passive, skipped, overflows, error counts" },
     { "param",     parameters_cmd, "param [dump] | set <name> <value> | save" },
+    { "events",    events_cmd,    "events [n]: the Event log's state and its newest n Events" },
     { "lastreset", cmd_lastreset, "last reset: cause, Breadcrumb, Crash record, resets not power-on" },
     { "hang",      cmd_hang,      "hang " BENCH_CONFIRM_WORD ": hang the control step, for a watchdog reset" },
     { "crash",     cmd_crash,     "crash " BENCH_CONFIRM_WORD ": call the crash routine, for a crash reset" },

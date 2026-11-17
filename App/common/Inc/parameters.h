@@ -22,8 +22,10 @@
 typedef const char *(*parameters_save_hook_t)(void);
 
 /* Loads the values in force, printing nothing (it runs on initTask's
-   small stack). save_hook may be NULL (saves always allowed). Call once
-   from tasks_init(), before the shell or the control step runs. False if
+   small stack), and posts what it found as Events (events.h).
+   save_hook may be NULL (saves always allowed). Call once from
+   tasks_init(), after events_init() and before the shell or the control
+   step runs. False if
    the table is unusable: every value is then 0 and nothing is saved. */
 bool parameters_init(const param_table_t *table, parameters_save_hook_t save_hook);
 

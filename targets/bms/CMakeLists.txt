@@ -57,6 +57,7 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     ../../App/common/Src/control_bus.c
     ../../App/common/Src/control_step.c
     ../../App/common/Src/crash.c
+    ../../App/common/Src/events.c
     ../../App/common/Src/cycle_counter.c
     ../../App/common/Src/fdcan_irq.c
     ../../App/common/Src/flash_bank2.c
@@ -95,6 +96,10 @@ target_link_libraries(${CMAKE_PROJECT_NAME}
     logic_common
     logic_bms
 )
+
+# The build ID header for the boot Event (spec #36)
+include(../../cmake/build_id.cmake)
+tim_build_id(${CMAKE_PROJECT_NAME})
 
 # Fail the link when the image outgrows its 224 KB of bank 1 (ADR 0014)
 set(IMAGE_LIMIT_SCRIPT ${CMAKE_CURRENT_SOURCE_DIR}/../../cmake/image_limit.ld)

@@ -1,8 +1,10 @@
 /* flash_bank2.c — the flash interface on bank 2, see flash_bank2.h.
 
-   Only one task touches stored data at a time: Parameter saves run in the
-   shell task, and loads run before it exists. The Event log writer will
-   have to share this with them.
+   Three tasks touch stored data: the shell (Parameter saves, the Event
+   log read-out) and the Event writer. Each read, erase and program holds
+   flashMutex, so the HAL's flash calls and the ECC flag never see two
+   tasks at once. Before flash_bank2_init() (none of the three exists yet)
+   there is no mutex and none is needed.
 
    Erase and program go through the HAL only (ADR 0014). The NMI check
    reads FLASH->ECCR itself: the HAL has no call that returns the failing
@@ -12,12 +14,40 @@
 
 #include <string.h>
 
+#include "cmsis_os2.h"
 #include "main.h"
 
 #define BANK2_BASE 0x08040000u
 
 /* Set by flash_bank2_nmi() during a read. */
 static volatile bool eccFault;
+
+static osMutexId_t flashMutex;
+
+bool flash_bank2_init(void)
+{
+    static const osMutexAttr_t attr = {
+        .name = "flashMutex",
+        .attr_bits = osMutexPrioInherit,
+    };
+
+    flashMutex = osMutexNew(&attr);
+    return flashMutex != NULL;
+}
+
+static void lock(void)
+{
+    if (flashMutex != NULL) {
+        (void)osMutexAcquire(flashMutex, osWaitForever);
+    }
+}
+
+static void unlock(void)
+{
+    if (flashMutex != NULL) {
+        (void)osMutexRelease(flashMutex);
+    }
+}
 
 static bool in_data_region(uint32_t addr, uint32_t len)
 {
@@ -35,11 +65,14 @@ static bool bank2_read(void *ctx, uint32_t addr, void *out, uint32_t len)
     /* ADDR_ECC and BK_ECC hold the first error until both flags are
        cleared, so an old corrected error must not name the address of this
        read's. */
+    lock();
     __HAL_FLASH_CLEAR_FLAG(FLASH_FLAG_ECCC | FLASH_FLAG_ECCD);
     eccFault = false;
     memcpy(out, (const void *)addr, len);
     __DSB();
-    return !eccFault;
+    const bool ok = !eccFault;
+    unlock();
+    return ok;
 }
 
 static bool bank2_erase(void *ctx, uint32_t addr)
@@ -56,14 +89,15 @@ static bool bank2_erase(void *ctx, uint32_t addr)
         .NbPages = 1u,
     };
     uint32_t pageError = 0u;
-    HAL_StatusTypeDef status;
+    HAL_StatusTypeDef status = HAL_ERROR;
 
-    if (HAL_FLASH_Unlock() != HAL_OK) {
-        return false;
+    lock();
+    if (HAL_FLASH_Unlock() == HAL_OK) {
+        __HAL_FLASH_CLEAR_FLAG(FLASH_FLAG_SR_ERRORS);
+        status = HAL_FLASHEx_Erase(&erase, &pageError);
+        (void)HAL_FLASH_Lock();
     }
-    __HAL_FLASH_CLEAR_FLAG(FLASH_FLAG_SR_ERRORS);
-    status = HAL_FLASHEx_Erase(&erase, &pageError);
-    (void)HAL_FLASH_Lock();
+    unlock();
     return status == HAL_OK;
 }
 
@@ -75,15 +109,16 @@ static bool bank2_write(void *ctx, uint32_t addr, const uint8_t data[FLASH_IF_WO
     }
 
     uint64_t word;
-    HAL_StatusTypeDef status;
+    HAL_StatusTypeDef status = HAL_ERROR;
 
     memcpy(&word, data, sizeof word);
-    if (HAL_FLASH_Unlock() != HAL_OK) {
-        return false;
+    lock();
+    if (HAL_FLASH_Unlock() == HAL_OK) {
+        __HAL_FLASH_CLEAR_FLAG(FLASH_FLAG_SR_ERRORS);
+        status = HAL_FLASH_Program(FLASH_TYPEPROGRAM_DOUBLEWORD, addr, word);
+        (void)HAL_FLASH_Lock();
     }
-    __HAL_FLASH_CLEAR_FLAG(FLASH_FLAG_SR_ERRORS);
-    status = HAL_FLASH_Program(FLASH_TYPEPROGRAM_DOUBLEWORD, addr, word);
-    (void)HAL_FLASH_Lock();
+    unlock();
     return status == HAL_OK;
 }
 

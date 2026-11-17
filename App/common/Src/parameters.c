@@ -11,6 +11,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "event_codes.h"
+#include "events.h"
 #include "flash_bank2.h"
 #include "print.h"
 
@@ -65,6 +67,25 @@ static void print_source(void)
     }
 }
 
+/* Before the writer runs, into the queue: a table with more values out of
+   range than the queue has room for loses the rest, counted as dropped. */
+static void post_load_events(void)
+{
+    uint8_t data[EVENT_DATA_SIZE];
+
+    if (params_defaulted(&store)) {
+        event_data_params_defaulted(data, &store);
+        (void)events_post(EVENT_PARAMS_DEFAULTED, data);
+    }
+    for (size_t i = 0; i < store.table->count; i++) {
+        if (slots[i].origin == PARAM_DEFAULT_OUT_OF_RANGE) {
+            event_data_param_out_of_range(data, store.table->defs[i].id, slots[i].rejected,
+                                          slots[i].value);
+            (void)events_post(EVENT_PARAM_OUT_OF_RANGE, data);
+        }
+    }
+}
+
 bool parameters_init(const param_table_t *table, parameters_save_hook_t save_hook)
 {
     /* No printing here: this runs on initTask's 512-byte stack, which
@@ -77,6 +98,7 @@ bool parameters_init(const param_table_t *table, parameters_save_hook_t save_hoo
     saveHook = save_hook;
     params_load(&store, table, flash_bank2_get(), slots);
     ready = true;
+    post_load_events();
     return true;
 }
 
@@ -167,7 +189,14 @@ static void param_save(void)
         return;
     }
 
-    switch (params_save(&store)) {
+    const params_save_result_t result = params_save(&store);
+    uint8_t data[EVENT_DATA_SIZE];
+
+    event_data_param_save(data, (uint8_t)result,
+                          result == PARAMS_SAVE_OK ? store.last_save_counter : 0u);
+    (void)events_post(EVENT_PARAM_SAVE, data);
+
+    switch (result) {
     case PARAMS_SAVE_OK:
         shell_printf("param: saved (save %lu), in force after a reset\r\n",
                      (unsigned long)store.last_save_counter);

@@ -7,11 +7,15 @@ add_logic_library(logic_common
         Src/adc_window.c
         Src/bus_recovery.c
         Src/control_rx.c
+        Src/crc16.c
         Src/crc32.c
         Src/cpu_share.c
         Src/daq_retry.c
         Src/daq_status.c
         Src/e2e_p11.c
+        Src/event_codes.c
+        Src/event_flood.c
+        Src/event_log.c
         Src/frame_queue.c
         Src/heartbeat.c
         Src/kick_gate.c

@@ -11,6 +11,8 @@
 #include "can_daq.h"
 #include "can_if.h"
 #include "control_step.h"
+#include "events.h"
+#include "flash_bank2.h"
 #include "housekeeping.h"
 #include "imu.h"
 #include "logger.h"
@@ -54,6 +56,11 @@ static bool create_task(osThreadFunc_t func, void *argument, const char *name,
 /* Read by the control step for as long as it runs. */
 static control_step_args_t controlStepArgs;
 
+/* Read by the Event writer for as long as it runs. */
+static const events_task_args_t eventTaskArgs = {
+    .image = PARAMS_IMAGE_VCU,
+};
+
 /* The VCU's own Housekeeping work: VBAT, from the ADC1 scan. */
 static const housekeeping_def_t housekeepingDef = {
     .poll = vcu_adc_poll_vbat,
@@ -78,6 +85,10 @@ void tasks_init(void)
        interrupt, so it must run before that interrupt can fire; creating
        shellTask afterward is what actually drains what it collects. */
     bool ok = print_init();
+    /* The Event queue before anything posts, and the flash lock before
+       anything shares bank 2. */
+    ok = events_init() && ok;
+    ok = flash_bank2_init() && ok;
     /* Parameters before anything that reads them, read once (ADR 0015). */
     ok = parameters_init(&vcu_param_table, vcu_step_save_refusal) && ok;
     ok = shell_init() && ok;
@@ -90,7 +101,6 @@ void tasks_init(void)
     ok = vcu_adc_start() && ok;
     ok = housekeeping_init() && ok;
     ok = vcu_step_init() && ok;
-    ok = control_step_init() && ok;
     /* Started in main(); a configuration that did not take is a start-up
        failure, so the image stays in STARTUP. */
     ok = watchdog_started() && ok;
@@ -109,6 +119,8 @@ void tasks_init(void)
                      (osPriority_t)CAN_RX_TASK_PRIORITY, CAN_RX_TASK_STACK_SIZE) && ok;
     ok = create_task(daqTask, NULL, "daqTask",
                      (osPriority_t)DAQ_TASK_PRIORITY, DAQ_TASK_STACK_SIZE) && ok;
+    ok = create_task(eventTask, (void *)&eventTaskArgs, "eventTask",
+                     (osPriority_t)EVENT_TASK_PRIORITY, EVENT_TASK_STACK_SIZE) && ok;
 
     /* The control step last, so it starts with everything else in place.
        Start-up Kick 2 of 2 (watchdog.h): from here the control step is the

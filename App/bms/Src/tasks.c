@@ -18,6 +18,8 @@
 #include "can_daq.h"
 #include "can_if.h"
 #include "control_step.h"
+#include "events.h"
+#include "flash_bank2.h"
 #include "housekeeping.h"
 #include "main.h"
 #include "parameters.h"
@@ -42,6 +44,11 @@ static bool create_task(osThreadFunc_t func, void *argument, const char *name,
 
 /* Read by the control step for as long as it runs. */
 static control_step_args_t controlStepArgs;
+
+/* Read by the Event writer for as long as it runs. */
+static const events_task_args_t eventTaskArgs = {
+    .image = PARAMS_IMAGE_BMS,
+};
 
 /* The BMS has no slow reading of its own yet: ADC1 (board temperature,
    VBAT) is not configured in its CubeMX project. */
@@ -68,6 +75,10 @@ void tasks_init(void)
        yet, so it never calls shell_register_commands(), and it never
        refuses `hang` or `crash`, so it registers no refusal hook. */
     bool ok = print_init();
+    /* The Event queue before anything posts, and the flash lock before
+       anything shares bank 2. */
+    ok = events_init() && ok;
+    ok = flash_bank2_init() && ok;
     /* Parameters before anything that reads them, read once (ADR 0015).
        The BMS accepts a save at any time, so it has no save hook. */
     ok = parameters_init(&bms_param_table, NULL) && ok;
@@ -75,7 +86,6 @@ void tasks_init(void)
     ok = can_if_init(&daqPublisher) && ok;
     ok = housekeeping_init() && ok;
     ok = bms_step_init() && ok;
-    ok = control_step_init() && ok;
     /* Started in main(); a configuration that did not take is a start-up
        failure, so the BMS stays in STARTUP. */
     ok = watchdog_started() && ok;
@@ -90,6 +100,8 @@ void tasks_init(void)
                      (osPriority_t)CAN_RX_TASK_PRIORITY, CAN_RX_TASK_STACK_SIZE) && ok;
     ok = create_task(daqTask, NULL, "daqTask",
                      (osPriority_t)DAQ_TASK_PRIORITY, DAQ_TASK_STACK_SIZE) && ok;
+    ok = create_task(eventTask, (void *)&eventTaskArgs, "eventTask",
+                     (osPriority_t)EVENT_TASK_PRIORITY, EVENT_TASK_STACK_SIZE) && ok;
 
     /* The control step last, so it starts with everything else in place.
        Start-up Kick 2 of 2 (watchdog.h): from here the control step is the

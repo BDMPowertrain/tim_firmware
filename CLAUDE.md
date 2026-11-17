@@ -150,8 +150,8 @@ undo provisioning.
 - The BMS project is minimal for now: clock, FreeRTOS, USART1, FDCAN1 (the
   Control bus), FDCAN2 (the DAQ bus), the heartbeat LED and the IMU chip
   select held high. Its image links print, shell, stats, the crash routine,
-  reset_info, the control step with its Control bus driver and the DAQ bus
-  driver from App/common/; the
+  reset_info, the Event log (events), the control step with its Control
+  bus driver and the DAQ bus driver from App/common/; the
   other common modules join when their peripherals are configured.
 - The DAQ bus (CAN2) is sent on only through can_send()
   (App/common/Src/can_if.c): a drop-oldest queue that never waits, drained

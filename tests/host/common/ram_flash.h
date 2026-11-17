@@ -16,9 +16,10 @@
 
 #include "flash_if.h"
 
-/* Covers the two Parameter copies. */
+/* Covers the bank 2 data regions: the two Parameter copies and the Event
+   log (ADR 0014). */
 #define RAM_FLASH_BASE 0x08040000u
-#define RAM_FLASH_SIZE 0x2000u
+#define RAM_FLASH_SIZE 0x12000u
 
 /* Erases everything and powers on with no cut armed. */
 void ram_flash_reset(void);

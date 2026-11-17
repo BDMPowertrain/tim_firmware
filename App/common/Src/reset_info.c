@@ -68,6 +68,11 @@ void reset_info_capture(void)
     SET_BIT(RCC->CSR, RCC_CSR_RMVF);
 }
 
+const reset_report_t *reset_info_report(void)
+{
+    return &report;
+}
+
 bool reset_info_debugger(void)
 {
     return debuggerFound;

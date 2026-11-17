@@ -7,6 +7,8 @@
 #include "cmsis_os2.h"
 
 #include "control_step.h"
+#include "event_codes.h"
+#include "events.h"
 #include "fdcan_irq.h"
 #include "main.h"
 #include "masked_copy.h"
@@ -187,8 +189,29 @@ static void read_rx_overflow(void)
     }
 }
 
+/* One Control bus Event, with the counters and error counts now. From the
+   step: events_post() never waits. */
+static void post_bus_event(uint16_t code)
+{
+    const uint32_t ecr = hfdcan1.Instance->ECR;
+    const event_bus_t bus = {
+        .bus_offs = recovery.counters.bus_offs,
+        .error_passives = recovery.counters.error_passives,
+        .tec = (uint8_t)((ecr & FDCAN_ECR_TEC) >> FDCAN_ECR_TEC_Pos),
+        .rec = (uint8_t)((ecr & FDCAN_ECR_REC) >> FDCAN_ECR_REC_Pos),
+        .latched = recovery.latched,
+    };
+    uint8_t data[EVENT_DATA_SIZE];
+
+    event_data_bus(data, &bus);
+    (void)events_post(code, data);
+}
+
 static void run_recovery(uint32_t now_ms, bool latch_may_clear)
 {
+    const bool wasLatched = recovery.latched;
+    const uint32_t errorPassives = recovery.counters.error_passives;
+
     const bus_recovery_input_t in = {
         .bus_off_count = busOffEvents,
         .controller_off = controllerOff,
@@ -202,6 +225,13 @@ static void run_recovery(uint32_t now_ms, bool latch_may_clear)
            the bus-off goes out after the restart. */
         mailbox_force_all_invalid(mailboxes, rxRowCount);
         (void)HAL_FDCAN_AbortTxRequest(&hfdcan1, TX_ALL_SLOTS);
+        post_bus_event(EVENT_BUS_OFF); /* every bus-off is recorded (ADR 0005) */
+    }
+    if (recovery.counters.error_passives != errorPassives) {
+        post_bus_event(EVENT_ERROR_PASSIVE);
+    }
+    if (recovery.latched != wasLatched) {
+        post_bus_event(recovery.latched ? EVENT_BUS_OFF_LATCHED : EVENT_BUS_OFF_UNLATCHED);
     }
     if (action.restart) {
         /* Clearing INIT is the whole restart: the controller rejoins after
@@ -216,8 +246,17 @@ void control_bus_update(uint32_t now_ms, bool latch_may_clear)
     masked_copy(rxSnapshot, rxLatest, rxRowCount * sizeof(rxLatest[0]));
 
     for (size_t i = 0; i < rxRowCount; i++) {
-        (void)mailbox_update(&mailboxes[i], &control_rx_config[rxFrameOf[i]],
-                             &rxSnapshot[i], now_ms);
+        const mailbox_config_t *config = &control_rx_config[rxFrameOf[i]];
+        const uint32_t timeouts = mailboxes[i].counters.timeouts;
+
+        (void)mailbox_update(&mailboxes[i], config, &rxSnapshot[i], now_ms);
+        if (mailboxes[i].counters.timeouts != timeouts) {
+            uint8_t data[EVENT_DATA_SIZE];
+
+            event_data_mailbox_timeout(data, config->frame_id, mailboxes[i].counters.timeouts,
+                                       (uint8_t)i);
+            (void)events_post(EVENT_MAILBOX_TIMEOUT, data);
+        }
     }
 
     if (started) {

@@ -20,7 +20,9 @@
    only counts. The step that sees the count move forces every mailbox
    INVALID and cancels the pending sends, and nothing is sent until the
    restart, 10 ms later or 1 s later while latched. Error-passive is read
-   from the error counters each step and only reported. Receive FIFO
+   from the error counters each step and only reported. Each bus-off,
+   each entry into error-passive, the latch set and the latch cleared is
+   an Event, and so is each mailbox timeout (events.h). Receive FIFO
    overflows are read and cleared each step and counted.
 
    CAN1 is classic CAN at 500 kbit/s; its filters, frame format and send

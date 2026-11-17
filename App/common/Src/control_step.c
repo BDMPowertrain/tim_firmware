@@ -7,6 +7,8 @@
 #include "cmsis_os2.h"
 
 #include "cycle_counter.h"
+#include "event_codes.h"
+#include "events.h"
 #include "housekeeping.h"
 #include "kick_gate.h"
 #include "main.h"
@@ -25,22 +27,8 @@ static const control_step_def_t *runningDef;
 
 static control_snapshot_t published;
 
-/* Overrun Events the queue holds until the Event writer takes them. */
-#define EVENT_QUEUE_DEPTH 16u
-
-/* Overrun Events, for the Event writer (the Event log lands later; until
-   then the queue fills and the rest are dropped and counted). */
-static osMessageQueueId_t eventQueue;
-
 /* Set by the shell, read by the step. */
 static volatile bool hangRequested;
-
-bool control_step_init(void)
-{
-    eventQueue = osMessageQueueNew(EVENT_QUEUE_DEPTH,
-                                   sizeof(overrun_event_t), NULL);
-    return eventQueue != NULL;
-}
 
 void control_step_request_hang(void)
 {
@@ -137,9 +125,11 @@ void control_step_task(void *argument)
 
         timingFault = false;
         if (sched.last_overran) {
-            const overrun_event_t event = overrun_event_make(stepUs, phaseUs, phaseCount);
+            const overrun_event_t overrun = overrun_event_make(stepUs, phaseUs, phaseCount);
+            uint8_t data[EVENT_DATA_SIZE];
 
-            if (osMessageQueuePut(eventQueue, &event, 0u, 0u) != osOK) {
+            event_data_overrun(data, &overrun);
+            if (!events_post(EVENT_OVERRUN, data)) {
                 eventsDropped++;
             }
             timingFault = overrun_watch_record(&overrunWatch, endMs);
@@ -201,9 +191,8 @@ void control_step_print(void)
     shell_printf("overruns %lu, timing faults %lu, kicks withheld %lu\r\n",
                  (unsigned long)s.overruns, (unsigned long)s.timing_faults,
                  (unsigned long)s.kicks_withheld);
-    shell_printf("overrun events queued %lu, dropped %lu\r\n",
-                 (unsigned long)osMessageQueueGetCount(eventQueue),
-                 (unsigned long)s.events_dropped);
+    shell_printf("events queued %lu; overrun events dropped %lu\r\n",
+                 (unsigned long)events_queued(), (unsigned long)s.events_dropped);
     shell_printf("fault %s, background %s\r\n",
                  s.fault_active ? "ACTIVE" : "none",
                  s.background_stalled ? "STALLED" : "ok");
