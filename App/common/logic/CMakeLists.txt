@@ -29,6 +29,7 @@ add_logic_library(logic_common
         Src/record_ring.c
         Src/reset_cause.c
         Src/reset_record.c
+        Src/sd_proto.c
         Src/stall_watch.c
         Src/step_timing.c
         can_db/can_control.c

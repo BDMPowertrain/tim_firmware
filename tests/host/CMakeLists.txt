@@ -79,6 +79,7 @@ add_host_test(test_record_ring logic_common common/test_record_ring.c)
 add_host_test(test_data_log_record logic_common common/test_data_log_record.c)
 add_host_test(test_log_batch logic_common common/test_log_batch.c)
 add_host_test(test_data_log_card logic_common common/test_data_log_card.c)
+add_host_test(test_sd_proto logic_common common/test_sd_proto.c)
 
 # The Python decoder against the sample file test_data_log_record writes
 # (issue 53). Python 3.10 or later, standard library only. Required in CI

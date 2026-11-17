@@ -148,11 +148,18 @@ undo provisioning.
 - targets/<image>/tim.ioc is the source of truth for that image's pin and
   peripheral config. Both projects must name the same firmware package.
 - The BMS project is minimal for now: clock, FreeRTOS, USART1, FDCAN1 (the
-  Control bus), FDCAN2 (the DAQ bus), the heartbeat LED and the IMU chip
-  select held high. Its image links print, shell, stats, the crash routine,
-  reset_info, the Event log (events), the control step with its Control
-  bus driver and the DAQ bus driver from App/common/; the
-  other common modules join when their peripherals are configured.
+  Control bus), FDCAN2 (the DAQ bus), SPI2 with DMA and FatFs (the SD
+  card), the heartbeat LED and the IMU chip select held high. Its image
+  links print, shell, stats, the crash routine, reset_info, the Event log
+  (events), the control step with its Control bus driver, the DAQ bus
+  driver and the SD driver from App/common/; the other common modules join
+  when their peripherals are configured.
+- The SD card (SPI2) is driven by App/common/Src/sd_spi.c in both images;
+  each image's FATFS/Target/user_diskio.c only calls it from its USER CODE
+  blocks. The card is identified below 400 kHz by clocking the pins by
+  hand (SPI2 cannot go that slow), then used at 10.625 MHz with each
+  512-byte block by DMA. The SPI2 DMA channels and interrupts are at
+  priority 9.
 - The DAQ bus (CAN2) is sent on only through can_send()
   (App/common/Src/can_if.c): a drop-oldest queue that never waits, drained
   by daqTask, which also runs the 100 ms DAQ publisher. The control step
