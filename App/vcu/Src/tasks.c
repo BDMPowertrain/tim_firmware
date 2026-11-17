@@ -24,6 +24,7 @@
 #include "vcu_params.h"
 #include "vcu_shell.h"
 #include "vcu_step.h"
+#include "watchdog.h"
 
 /* initTask (the one CubeMX-generated task, see Core/Src/main.c) has a
    fixed 512-byte stack that isn't one of tasks.h's tunable *_STACK_SIZE
@@ -87,6 +88,10 @@ void tasks_init(void)
     ok = vbat_init() && ok;
     ok = housekeeping_init() && ok;
     ok = vcu_step_init() && ok;
+    ok = control_step_init() && ok;
+    /* Started in main(); a configuration that did not take is a start-up
+       failure, so the image stays in STARTUP. */
+    ok = watchdog_started() && ok;
 
     ok = create_task(printTask, NULL, "printTask",
                      (osPriority_t)PRINT_TASK_PRIORITY, PRINT_TASK_STACK_SIZE) && ok;
@@ -103,9 +108,12 @@ void tasks_init(void)
     ok = create_task(daqTask, NULL, "daqTask",
                      (osPriority_t)DAQ_TASK_PRIORITY, DAQ_TASK_STACK_SIZE) && ok;
 
-    /* The control step last, so it starts with everything else in place. */
+    /* The control step last, so it starts with everything else in place.
+       Start-up Kick 2 of 2 (watchdog.h): from here the control step is the
+       only Kicker, its first step one period away. */
     controlStepArgs.def = &vcu_step_def;
     controlStepArgs.startup_ok = ok;
+    watchdog_kick();
     (void)create_task(control_step_task, &controlStepArgs, "controlStep",
                       (osPriority_t)CONTROL_STEP_TASK_PRIORITY, CONTROL_STEP_TASK_STACK_SIZE);
 }

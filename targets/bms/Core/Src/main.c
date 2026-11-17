@@ -23,6 +23,7 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include "tasks.h"
+#include "watchdog.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -107,7 +108,8 @@ int main(void)
   MX_FDCAN2_Init();
   MX_USART1_UART_Init();
   /* USER CODE BEGIN 2 */
-
+  /* Start-up Kick 1 of 2, after the peripheral init (watchdog.h). */
+  watchdog_kick();
   /* USER CODE END 2 */
 
   /* Init scheduler */
@@ -402,7 +404,9 @@ static void MX_GPIO_Init(void)
   HAL_GPIO_Init(FDCAN2_STB_GPIO_Port, &GPIO_InitStruct);
 
   /* USER CODE BEGIN MX_GPIO_Init_2 */
-
+  /* Straight after GPIO init, with every pin at its safe level (ADR 0013,
+     watchdog.h). */
+  watchdog_start();
   /* USER CODE END MX_GPIO_Init_2 */
 }
 

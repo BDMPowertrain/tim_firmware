@@ -72,11 +72,16 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 
 #define SHELL_MAX_ARGS 8u
 
+/* The word `hang` needs after it, so a stray "hang" does not reset the
+   board. */
+#define HANG_CONFIRM_WORD "confirm"
+
 static int cmd_help(int argc, char **argv);
 static int cmd_tasks(int argc, char **argv);
 static int cmd_reset(int argc, char **argv);
 static int cmd_step(int argc, char **argv);
 static int cmd_bus(int argc, char **argv);
+static int cmd_hang(int argc, char **argv);
 
 /* The commands every image has. Adding one is one row here plus one
    handler function — nothing else in shell.c changes. A command only one
@@ -89,6 +94,7 @@ static const shell_cmd_t commandTable[] = {
     { "step",      cmd_step,      "control step: state, overruns, last and worst times" },
     { "bus",       cmd_bus,       "Control bus (CAN1): bus-off, error-passive, skipped, overflows, error counts" },
     { "param",     parameters_cmd, "param [dump] | set <name> <value> | save" },
+    { "hang",      cmd_hang,      "hang " HANG_CONFIRM_WORD ": hang the control step, for a watchdog reset" },
 };
 
 #define COMMAND_TABLE_COUNT (sizeof(commandTable) / sizeof(commandTable[0]))
@@ -152,6 +158,24 @@ static int cmd_bus(int argc, char **argv)
     (void)argv;
 
     control_bus_print_status();
+
+    return 0;
+}
+
+/* The bench's hang (issue 48): the control step spins inside its next
+   step and the watchdog resets the MCU about 60 ms after that step's
+   Kick. The osDelay() gives printTask time to send the message first:
+   once the step spins, nothing below Realtime runs again. */
+static int cmd_hang(int argc, char **argv)
+{
+    if (argc != 2 || strcmp(argv[1], HANG_CONFIRM_WORD) != 0) {
+        shell_printf("usage: hang " HANG_CONFIRM_WORD "  (the watchdog resets the board)\r\n");
+        return 0;
+    }
+
+    shell_printf("hanging the control step...\r\n");
+    osDelay(50);
+    control_step_request_hang();
 
     return 0;
 }

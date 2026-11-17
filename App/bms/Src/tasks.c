@@ -23,6 +23,7 @@
 #include "parameters.h"
 #include "print.h"
 #include "shell.h"
+#include "watchdog.h"
 
 /* tasks_init() runs on initTask's fixed 512-byte stack. Building each
    osThreadAttr_t inside its own call frees it before the next one is
@@ -73,6 +74,10 @@ void tasks_init(void)
     ok = can_if_init(&daqPublisher) && ok;
     ok = housekeeping_init() && ok;
     ok = bms_step_init() && ok;
+    ok = control_step_init() && ok;
+    /* Started in main(); a configuration that did not take is a start-up
+       failure, so the BMS stays in STARTUP. */
+    ok = watchdog_started() && ok;
 
     ok = create_task(printTask, NULL, "printTask",
                      (osPriority_t)PRINT_TASK_PRIORITY, PRINT_TASK_STACK_SIZE) && ok;
@@ -85,9 +90,12 @@ void tasks_init(void)
     ok = create_task(daqTask, NULL, "daqTask",
                      (osPriority_t)DAQ_TASK_PRIORITY, DAQ_TASK_STACK_SIZE) && ok;
 
-    /* The control step last, so it starts with everything else in place. */
+    /* The control step last, so it starts with everything else in place.
+       Start-up Kick 2 of 2 (watchdog.h): from here the control step is the
+       only Kicker, its first step one period away. */
     controlStepArgs.def = &bms_step_def;
     controlStepArgs.startup_ok = ok;
+    watchdog_kick();
     (void)create_task(control_step_task, &controlStepArgs, "controlStep",
                       (osPriority_t)CONTROL_STEP_TASK_PRIORITY, CONTROL_STEP_TASK_STACK_SIZE);
 }

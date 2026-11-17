@@ -13,7 +13,9 @@ add_logic_library(logic_common
         Src/e2e_p11.c
         Src/frame_queue.c
         Src/heartbeat.c
+        Src/kick_gate.c
         Src/mailbox.c
+        Src/overrun_watch.c
         Src/params.c
         Src/stall_watch.c
         Src/step_timing.c

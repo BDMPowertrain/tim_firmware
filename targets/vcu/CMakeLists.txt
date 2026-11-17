@@ -70,6 +70,7 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     ../../App/vcu/Src/vcu_shell.c
     ../../App/vcu/Src/vcu_step.c
     ../../App/common/Src/vbat.c
+    ../../App/common/Src/watchdog.c
 )
 
 # Add include paths
