@@ -90,11 +90,10 @@ typedef struct {
    not fit the slots tim.ioc gives or the controller refuses them. */
 bool control_bus_init(const control_bus_rx_t *rows, size_t row_count, bool terminate);
 
-/* Starts CAN1. Called by the first Control step. False if the controller
-   refuses, or if termination has not settled by now_ms
-   (termination_settled()), which a step period longer than
-   BUS_TERM_SETTLE_MS rules out. */
-bool control_bus_start(uint32_t now_ms);
+/* Starts CAN1. Called by the first Control step, one step period after
+   control_bus_init() wrote termination: longer than BUS_TERM_SETTLE_MS
+   (bus_term.h), which each image's step file asserts. */
+bool control_bus_start(void);
 
 /* The start of each step: snapshot every mailbox and update it against
    now_ms, then run the bus-off policy. latch_may_clear is the image's own

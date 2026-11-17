@@ -43,7 +43,7 @@ static void phase_input(control_step_ctx_t *ctx)
        failure is visible as zero frames sent in the shell's `step`, on the
        bench tool and as a 5 Hz heartbeat. */
     if (ctx->step_count == 0u) {
-        canStarted = control_bus_start(ctx->now_ms);
+        canStarted = control_bus_start();
     }
     /* Bus-off never stops this step or touches BMS_OK (ADR 0005): sends
        are skipped until the restart and the Sweep carries on. The latch

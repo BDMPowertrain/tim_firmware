@@ -96,7 +96,7 @@ static void phase_input(control_step_ctx_t *ctx)
     /* CAN1 starts on the first step, a full period after the transceiver
        left standby and termination was written in vcu_step_init(). */
     if (ctx->step_count == 0u) {
-        canStarted = control_bus_start(ctx->now_ms);
+        canStarted = control_bus_start();
     }
     /* The bus-off latch clears only with every mailbox VALID (spec,
        reaction table): judged on the last step's mailboxes. */

@@ -163,12 +163,9 @@ bool control_bus_init(const control_bus_rx_t *rows, size_t row_count, bool termi
     return true;
 }
 
-bool control_bus_start(uint32_t now_ms)
+bool control_bus_start(void)
 {
-    /* Never reached unsettled: each image's step period is longer than
-       the settle time (a _Static_assert beside it). */
-    started = termination_settled(TERMINATION_CONTROL_BUS, now_ms)
-              && (HAL_FDCAN_Start(&hfdcan1) == HAL_OK);
+    started = (HAL_FDCAN_Start(&hfdcan1) == HAL_OK);
     return started;
 }
 

@@ -4,8 +4,6 @@
 
 #include <string.h>
 
-#include "cmsis_os2.h"
-
 #include "bus_term.h"
 #include "main.h"
 #include "print.h"
@@ -24,9 +22,9 @@ static const relay_pin_t relayPin[TERMINATION_BUS_COUNT] = {
     [TERMINATION_DAQ_BUS]     = { Can_Term_2_GPIO_Port, Can_Term_2_Pin, "CAN2 DAQ bus" },
 };
 
-/* stored, written and written_ms are set once by initTask before any
-   other task runs; relay is changed by the shell's override after that.
-   Each is one aligned word or byte. */
+/* stored and written are set once by initTask before any other task
+   runs; relay is changed by the shell's override after that. Each is one
+   byte. */
 static bus_term_t term[TERMINATION_BUS_COUNT];
 
 static void drive(termination_bus_t bus)
@@ -40,15 +38,8 @@ void termination_write_stored(termination_bus_t bus, bool stored)
     if (bus >= TERMINATION_BUS_COUNT) {
         return;
     }
-    term[bus].relay = stored;
+    bus_term_write_stored(&term[bus], stored);
     drive(bus);
-    /* Stamped after the pin moves, so the settle time is never short. */
-    bus_term_write_stored(&term[bus], stored, osKernelGetTickCount());
-}
-
-bool termination_settled(termination_bus_t bus, uint32_t now_ms)
-{
-    return bus < TERMINATION_BUS_COUNT && bus_term_settled(&term[bus], now_ms);
 }
 
 void termination_override(termination_bus_t bus, bool on)
