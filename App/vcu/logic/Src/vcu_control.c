@@ -34,15 +34,16 @@ void vcu_control_init(vcu_control_t *vc, const vcu_control_config_t *config)
     vc->config = *config;
     vc->state = VCU_STATE_STARTUP;
 
-    const vcu_cal_values_t cal = {
+    /* Kept in vc, not on the stack: this runs on initTask's 512 bytes. */
+    vc->cal_values = (vcu_cal_values_t){
         .apps_min = { config->cal.apps_min[0], config->cal.apps_min[1] },
         .apps_max = { config->cal.apps_max[0], config->cal.apps_max[1] },
         .brake_zero = { config->cal.brake_zero[0], config->cal.brake_zero[1] },
         .brake_engaged = config->brake_engaged,
         .revision = config->cal_revision,
     };
-    vc->calibration = vcu_cal_check(&cal, config->cal_present);
-    vc->cal_fingerprint = vcu_cal_fingerprint(&cal);
+    vc->calibration = vcu_cal_check(&vc->cal_values, config->cal_present);
+    vc->cal_fingerprint = vcu_cal_fingerprint(&vc->cal_values);
     vcu_pedal_check_reset(&vc->pedal_check);
 }
 

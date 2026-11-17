@@ -310,6 +310,7 @@ typedef struct {
     uint8_t      rolling_counter;  /* the next 0x0C0's */
     bool         enable_sent;      /* the last 0x0C0 carried Enable = 1 */
     e2e_p11_tx_t status_tx;
+    vcu_cal_values_t  cal_values;     /* the config's, as the rule takes them */
     vcu_cal_result_t  calibration;    /* judged at init */
     uint32_t          cal_fingerprint; /* vcu_cal_fingerprint() of the config's */
     vcu_pedal_check_t pedal_check;
