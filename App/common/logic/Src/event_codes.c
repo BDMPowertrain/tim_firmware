@@ -207,12 +207,13 @@ void event_data_data_log_card(uint8_t data[EVENT_DATA_SIZE], const event_data_lo
 }
 
 void event_data_pedal_check(uint8_t data[EVENT_DATA_SIZE], uint32_t build_id,
-                            uint32_t save_counter, bool dirty)
+                            uint32_t save_counter, uint32_t calibration, bool dirty)
 {
     memset(data, 0, EVENT_DATA_SIZE);
     put_u32(&data[0], build_id);
     put_u32(&data[4], save_counter);
     data[8] = dirty ? PEDAL_CHECK_DIRTY : 0u;
+    put_u32(&data[12], calibration);
 }
 
 bool event_pedal_check_matches(const event_t *ev, const void *key)
@@ -223,7 +224,7 @@ bool event_pedal_check_matches(const event_t *ev, const void *key)
         return false;
     }
     return get_u32(&ev->data[0]) == k->build_id && get_u32(&ev->data[4]) == k->save_counter &&
-           (ev->data[8] & PEDAL_CHECK_DIRTY) == 0u;
+           get_u32(&ev->data[12]) == k->calibration && (ev->data[8] & PEDAL_CHECK_DIRTY) == 0u;
 }
 
 void event_data_pedal_check_failed(uint8_t data[EVENT_DATA_SIZE], uint8_t reason, uint8_t phase,

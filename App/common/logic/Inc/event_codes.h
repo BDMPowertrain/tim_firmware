@@ -152,14 +152,17 @@ typedef struct {
 void event_data_torque_cut(uint8_t data[EVENT_DATA_SIZE], const event_torque_cut_t *cut);
 
 /* 0 build ID (u32), 4 parameter save counter (u32), 8 flags (u8): bit 0,
-   a dirty build. */
+   a dirty build; 12 the calibration's fingerprint (u32,
+   vcu_cal_fingerprint()). */
 void event_data_pedal_check(uint8_t data[EVENT_DATA_SIZE], uint32_t build_id,
-                            uint32_t save_counter, bool dirty);
+                            uint32_t save_counter, uint32_t calibration, bool dirty);
 
 /* The running image and the loaded Parameters, for a Pedal check search. */
 typedef struct {
     uint32_t build_id;
     uint32_t save_counter; /* the loaded copy's */
+    uint32_t calibration;  /* the loaded calibration's fingerprint: the save
+                              counter starts again at 1 when no copy is good */
     bool     dirty;        /* the running image is a dirty build */
 } event_pedal_check_key_t;
 

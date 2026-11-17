@@ -102,6 +102,11 @@ typedef struct {
    valid stored copy. */
 vcu_cal_result_t vcu_cal_check(const vcu_cal_values_t *v, bool present);
 
+/* A CRC-32 of every calibration value, little-endian in vcu_cal_values_t
+   order: a Pedal check pass names the numbers it proved (ADR 0016), as
+   the save counter alone starts again at 1 when no stored copy is good. */
+uint32_t vcu_cal_fingerprint(const vcu_cal_values_t *v);
+
 /* One held position: every sample's sum, lowest and highest, by sensor
    (APPS1, APPS2, front brake, rear brake). */
 #define VCU_CAL_CHANNELS 4u

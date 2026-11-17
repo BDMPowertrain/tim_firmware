@@ -1833,6 +1833,14 @@ static void test_a_pedal_check_pass_writes_its_event_and_allows_the_start(void)
     TEST_ASSERT_EQUAL_UINT32(BUILD_ID, get_u32(&ev->data[0]));
     TEST_ASSERT_EQUAL_UINT32(SAVE_COUNTER, get_u32(&ev->data[4]));
     TEST_ASSERT_EQUAL_UINT8(0u, ev->data[8]); /* not a dirty build */
+    const vcu_cal_values_t cal = {
+        .apps_min = { APPS_MIN, APPS_MIN },
+        .apps_max = { APPS_MAX, APPS_MAX },
+        .brake_zero = { BRAKE_ZERO, BRAKE_ZERO },
+        .brake_engaged = BRAKE_THRESH,
+        .revision = VCU_CALIBRATION_REVISION,
+    };
+    TEST_ASSERT_EQUAL_UINT32(vcu_cal_fingerprint(&cal), get_u32(&ev->data[12]));
     TEST_ASSERT_FALSE(out.pedal_check_due);
 
     step();

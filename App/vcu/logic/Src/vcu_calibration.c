@@ -6,6 +6,7 @@
 #include <string.h>
 
 #include "adc_window.h"
+#include "crc32.h"
 #include "vcu_params.h"
 
 static vcu_cal_result_t result(vcu_cal_reason_t reason, vcu_cal_sensor_t sensor)
@@ -58,6 +59,24 @@ vcu_cal_result_t vcu_cal_check(const vcu_cal_values_t *v, bool present)
         return result(VCU_CAL_BRAKE_THRESHOLD, VCU_CAL_SENSOR_NONE);
     }
     return result(VCU_CAL_OK, VCU_CAL_SENSOR_NONE);
+}
+
+uint32_t vcu_cal_fingerprint(const vcu_cal_values_t *v)
+{
+    const int32_t values[] = {
+        v->apps_min[0],   v->apps_min[1],   v->apps_max[0],  v->apps_max[1],
+        v->brake_zero[0], v->brake_zero[1], v->brake_engaged, v->revision,
+    };
+    uint8_t bytes[sizeof(values)];
+
+    for (size_t i = 0; i < sizeof(values) / sizeof(values[0]); i++) {
+        const uint32_t u = (uint32_t)values[i];
+        bytes[4u * i] = (uint8_t)u;
+        bytes[4u * i + 1u] = (uint8_t)(u >> 8);
+        bytes[4u * i + 2u] = (uint8_t)(u >> 16);
+        bytes[4u * i + 3u] = (uint8_t)(u >> 24);
+    }
+    return crc32_update(0u, bytes, sizeof(bytes));
 }
 
 void vcu_cal_capture_init(vcu_cal_capture_t *c)

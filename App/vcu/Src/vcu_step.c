@@ -60,15 +60,12 @@ bool vcu_step_init(void)
        once. The tick counts from 0 at reset release, near enough for the
        3 s lamp check. */
     static vcu_control_config_t config;
-    static const size_t calibration[] = {
-        VCU_PARAM_APPS1_MIN,  VCU_PARAM_APPS1_MAX,   VCU_PARAM_APPS2_MIN,
-        VCU_PARAM_APPS2_MAX,  VCU_PARAM_BRAKE1_ZERO, VCU_PARAM_BRAKE2_ZERO,
-        VCU_PARAM_BRAKE_ENGAGED, VCU_PARAM_CAL_REVISION,
-    };
     bool calPresent = true;
 
-    for (size_t i = 0; i < sizeof(calibration) / sizeof(calibration[0]); i++) {
-        calPresent = calPresent && parameters_from_copy(calibration[i]);
+    for (size_t i = 0; i < VCU_PARAM_COUNT; i++) {
+        if (vcu_param_table.defs[i].calibration) {
+            calPresent = calPresent && parameters_from_copy(i);
+        }
     }
 
     config = (vcu_control_config_t){
@@ -192,6 +189,7 @@ void vcu_step_find_pedal_check(void)
     const event_pedal_check_key_t key = {
         .build_id = BUILD_ID,
         .save_counter = parameters_save_counter(),
+        .calibration = control.cal_fingerprint, /* set by vcu_step_init(), never after */
         .dirty = BUILD_DIRTY != 0,
     };
     event_t ev;

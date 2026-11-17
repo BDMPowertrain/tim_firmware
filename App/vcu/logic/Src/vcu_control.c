@@ -42,6 +42,7 @@ void vcu_control_init(vcu_control_t *vc, const vcu_control_config_t *config)
         .revision = config->cal_revision,
     };
     vc->calibration = vcu_cal_check(&cal, config->cal_present);
+    vc->cal_fingerprint = vcu_cal_fingerprint(&cal);
     vcu_pedal_check_reset(&vc->pedal_check);
 }
 
@@ -485,7 +486,7 @@ static void run_pedal_check(vcu_control_t *vc, const vcu_control_in_t *in,
         if (r == VCU_PEDAL_CHECK_PASS) {
             vc->pedal_check_passed = true;
             event_data_pedal_check(data, vc->config.build_id, vc->config.param_save_counter,
-                                   vc->config.build_dirty);
+                                   vc->cal_fingerprint, vc->config.build_dirty);
             post_event(out, EVENT_PEDAL_CHECK, data);
         } else if (r != VCU_PEDAL_CHECK_NONE) {
             const uint16_t travel[2] = { out->sensors.apps[0].travel,
@@ -494,8 +495,7 @@ static void run_pedal_check(vcu_control_t *vc, const vcu_control_in_t *in,
             post_event(out, EVENT_PEDAL_CHECK_FAILED, data);
         }
     }
-    out->pedal_check_due = !vc->pedal_check_passed &&
-                           in->pedal_check_record != VCU_PEDAL_CHECK_FOUND;
+    out->pedal_check_due = due && !vc->pedal_check_passed;
     out->pedal_check = vc->pedal_check;
 }
 

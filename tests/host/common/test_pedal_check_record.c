@@ -8,6 +8,11 @@
  * matches the running image and the loaded parameters. If the Event log
  * has lost it, the check is asked for again. cmake/build_id_write.cmake: a
  * dirty build must be treated as never matching.
+ *
+ * The save counter starts again at 1 when no stored copy is good
+ * (params.h), so the pass also carries a fingerprint of the calibration it
+ * proved: a new calibration under a counter an old pass used must not
+ * match it.
  */
 #include <string.h>
 
@@ -18,6 +23,7 @@
 
 #define BUILD   0x1234ABCDu
 #define COUNTER 7u
+#define CAL     0xC0FFEE01u /* the loaded calibration's fingerprint */
 
 static event_log_t log_;
 
@@ -40,12 +46,17 @@ static void append(uint16_t code, const uint8_t data[EVENT_DATA_SIZE])
     TEST_ASSERT_EQUAL(EVENT_APPEND_OK, event_log_append(&log_, code, 1000u, data));
 }
 
-static void append_pass(uint32_t build, uint32_t counter, bool dirty)
+static void append_pass_of(uint32_t build, uint32_t counter, uint32_t cal, bool dirty)
 {
     uint8_t data[EVENT_DATA_SIZE];
 
-    event_data_pedal_check(data, build, counter, dirty);
+    event_data_pedal_check(data, build, counter, cal, dirty);
     append(EVENT_PEDAL_CHECK, data);
+}
+
+static void append_pass(uint32_t build, uint32_t counter, bool dirty)
+{
+    append_pass_of(build, counter, CAL, dirty);
 }
 
 static void append_other(uint32_t n)
@@ -60,7 +71,7 @@ static void append_other(uint32_t n)
 /* The search the VCU makes at start-up. */
 static bool found(uint32_t build, uint32_t counter, bool dirty)
 {
-    const event_pedal_check_key_t key = { build, counter, dirty };
+    const event_pedal_check_key_t key = { build, counter, CAL, dirty };
     event_t ev;
 
     return event_log_find(&log_, event_pedal_check_matches, &key, &ev);
@@ -77,7 +88,7 @@ static void test_a_pass_for_this_image_and_these_parameters_is_found_after_a_res
 
 static void test_the_search_gives_the_event_it_found(void)
 {
-    const event_pedal_check_key_t key = { BUILD, COUNTER, false };
+    const event_pedal_check_key_t key = { BUILD, COUNTER, CAL, false };
     event_t ev;
 
     append_other(3u);
@@ -99,6 +110,18 @@ static void test_a_pass_for_another_save_counter_is_not_found(void)
 {
     append_pass(BUILD, COUNTER, false);
     TEST_ASSERT_FALSE(found(BUILD, COUNTER + 1u, false));
+}
+
+/* Both copies lost, then a new calibration saved: its counter starts at 1
+   again, and an old pass at 1 for other end points must not match. */
+static void test_a_pass_for_another_calibration_is_not_found(void)
+{
+    append_pass_of(BUILD, 1u, CAL + 1u, false);
+    {
+        const event_pedal_check_key_t key = { BUILD, 1u, CAL, false };
+        event_t ev;
+        TEST_ASSERT_FALSE(event_log_find(&log_, event_pedal_check_matches, &key, &ev));
+    }
 }
 
 /* An older pass for these values still counts. */
@@ -134,7 +157,7 @@ static void test_only_a_pedal_check_event_matches(void)
 {
     uint8_t data[EVENT_DATA_SIZE];
 
-    event_data_pedal_check(data, BUILD, COUNTER, false);
+    event_data_pedal_check(data, BUILD, COUNTER, CAL, false);
     append(EVENT_PEDAL_CHECK_FAILED, data);
     TEST_ASSERT_FALSE(found(BUILD, COUNTER, false));
 }
@@ -185,6 +208,7 @@ int main(void)
     RUN_TEST(test_the_search_gives_the_event_it_found);
     RUN_TEST(test_a_pass_for_another_build_is_not_found);
     RUN_TEST(test_a_pass_for_another_save_counter_is_not_found);
+    RUN_TEST(test_a_pass_for_another_calibration_is_not_found);
     RUN_TEST(test_an_older_matching_pass_is_found_behind_newer_ones);
     RUN_TEST(test_a_dirty_build_never_matches);
     RUN_TEST(test_a_pass_a_dirty_build_wrote_never_matches);

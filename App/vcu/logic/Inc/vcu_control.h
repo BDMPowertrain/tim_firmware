@@ -105,8 +105,9 @@
  * (VCU_START_PEDAL_CHECK_DUE) and sets PedalCheckDue. The sequence runs
  * only while due, in GLV_ON (the Tractive System off), Calibrated and with
  * the Parameters loaded; anything else starts it over. A pass is an
- * EVENT_PEDAL_CHECK Event with the build ID and the Parameters' save
- * counter; a fail under way is an EVENT_PEDAL_CHECK_FAILED Event.
+ * EVENT_PEDAL_CHECK Event with the build ID, the Parameters' save counter
+ * and the calibration's fingerprint; a fail under way is an
+ * EVENT_PEDAL_CHECK_FAILED Event.
  *
  * Time is a 32-bit millisecond count compared only by subtraction.
  *
@@ -310,6 +311,7 @@ typedef struct {
     bool         enable_sent;      /* the last 0x0C0 carried Enable = 1 */
     e2e_p11_tx_t status_tx;
     vcu_cal_result_t  calibration;    /* judged at init */
+    uint32_t          cal_fingerprint; /* vcu_cal_fingerprint() of the config's */
     vcu_pedal_check_t pedal_check;
     bool         pedal_check_passed; /* since reset */
 } vcu_control_t;

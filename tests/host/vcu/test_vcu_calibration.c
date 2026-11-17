@@ -124,6 +124,37 @@ static void test_brake_threshold_below_its_minimum_is_not_calibrated(void)
     assert_result(VCU_CAL_OK, VCU_CAL_SENSOR_NONE, vcu_cal_check(&v, true));
 }
 
+/* ---- the fingerprint (a Pedal check pass is for these numbers) ------- */
+
+static void test_the_fingerprint_is_the_same_for_the_same_calibration(void)
+{
+    const vcu_cal_values_t a = good();
+    const vcu_cal_values_t b = good();
+    TEST_ASSERT_EQUAL_UINT32(vcu_cal_fingerprint(&a), vcu_cal_fingerprint(&b));
+}
+
+static void test_the_fingerprint_changes_with_every_calibration_value(void)
+{
+    const vcu_cal_values_t base = good();
+    const uint32_t f = vcu_cal_fingerprint(&base);
+    int32_t *fields[8];
+    vcu_cal_values_t v;
+
+    for (unsigned i = 0; i < 8u; i++) {
+        v = good();
+        fields[0] = &v.apps_min[0];
+        fields[1] = &v.apps_min[1];
+        fields[2] = &v.apps_max[0];
+        fields[3] = &v.apps_max[1];
+        fields[4] = &v.brake_zero[0];
+        fields[5] = &v.brake_zero[1];
+        fields[6] = &v.brake_engaged;
+        fields[7] = &v.revision;
+        *fields[i] += 1;
+        TEST_ASSERT_NOT_EQUAL_UINT32(f, vcu_cal_fingerprint(&v));
+    }
+}
+
 /* ---- the guided capture ---------------------------------------------- */
 
 static vcu_cal_capture_t released;
@@ -275,6 +306,8 @@ int main(void)
     RUN_TEST(test_apps_end_point_outside_the_window_is_not_calibrated);
     RUN_TEST(test_brake_zero_outside_the_window_is_not_calibrated);
     RUN_TEST(test_brake_threshold_below_its_minimum_is_not_calibrated);
+    RUN_TEST(test_the_fingerprint_is_the_same_for_the_same_calibration);
+    RUN_TEST(test_the_fingerprint_changes_with_every_calibration_value);
     RUN_TEST(test_capture_gives_the_end_points_and_a_quarter_of_the_smaller_brake_rise);
     RUN_TEST(test_capture_averages_each_position);
     RUN_TEST(test_capture_with_a_missing_sample_is_refused);
