@@ -33,6 +33,15 @@
  *   higher travel above 25%, is a Torque cut: Enable=1, zero torque, until
  *   the cause is gone and the higher travel is below 5%.
  * - Three Overruns within a second are a Torque cut ("timing fault").
+ *
+ * CAN and device faults (issue 58; spec #36, reaction table):
+ * - A BMS or inverter mailbox not VALID is a Torque cut with Enable=0,
+ *   recovering when VALID and below 5%; no Torque cut ever leaves Ready to
+ *   Drive because it lasts long.
+ * - An inverter fault clear (0x0C1) goes only on a start button press with
+ *   the inverter disabled and the pedal below 5%, once per press.
+ * - Discharge slow, the Energy Meter, the fault LED, and the Events:
+ *   inverter fault with its 64 bits, fault-clear attempt and result.
  */
 #include <string.h>
 
@@ -76,6 +85,8 @@ static struct can_control_bms_limits_t bmsLimits;
 static struct can_control_bms_power_t bmsPower;
 static struct can_control_inv_voltage_t invVoltage;
 static struct can_control_inv_fault_codes_t invFaults;
+static struct can_control_inv_internal_states_t invStates;
+static struct can_control_em_status_t emStatus;
 
 /* ------------------------------------------------------------------ */
 /* The bench                                                          */
@@ -136,6 +147,12 @@ static void pack_frame(size_t row, uint8_t *frame)
         break;
     case VCU_RX_INV_FAULT_CODES:
         (void)can_control_inv_fault_codes_pack(frame, &invFaults, 8u);
+        break;
+    case VCU_RX_INV_INTERNAL_STATES:
+        (void)can_control_inv_internal_states_pack(frame, &invStates, 8u);
+        break;
+    case VCU_RX_EM_STATUS:
+        (void)can_control_em_status_pack(frame, &emStatus, 8u);
         break;
     default:
         /* Every other frame is all zeros: 0 rpm, VSM start, and so on. */
@@ -198,6 +215,23 @@ static const vcu_event_t *state_event(void)
         }
     }
     return NULL;
+}
+
+/* This step's first Event with code, or NULL. */
+static const vcu_event_t *find_event(uint16_t code)
+{
+    for (size_t i = 0; i < out.event_count; i++) {
+        if (out.events[i].code == code) {
+            return &out.events[i];
+        }
+    }
+    return NULL;
+}
+
+static uint32_t event_u32(const vcu_event_t *ev, size_t at)
+{
+    return (uint32_t)ev->data[at] | ((uint32_t)ev->data[at + 1u] << 8) |
+           ((uint32_t)ev->data[at + 2u] << 16) | ((uint32_t)ev->data[at + 3u] << 24);
 }
 
 static void assert_transition(uint8_t from, uint8_t to, vcu_cause_t cause)
@@ -293,6 +327,8 @@ void setUp(void)
     bmsPower = (struct can_control_bms_power_t){ .pack_voltage = PACK_DV };
     invVoltage = (struct can_control_inv_voltage_t){ .dc_bus_voltage = (int16_t)PACK_DV };
     invFaults = (struct can_control_inv_fault_codes_t){ 0 };
+    invStates = (struct can_control_inv_internal_states_t){ 0 };
+    emStatus = (struct can_control_em_status_t){ 0 };
 }
 
 void tearDown(void) {}
@@ -865,6 +901,421 @@ static void test_a_silent_inverter_does_not_leave_ready_to_drive(void)
     run_ms(1000u);
     TEST_ASSERT_EQUAL_UINT8(VCU_STATE_READY_TO_DRIVE, out.state);
     TEST_ASSERT_EQUAL_UINT8(1u, status_frame().inverter_timeout);
+}
+
+/* Reaction table, issue 58: each of the BMS and inverter mailboxes not
+   VALID is a Torque cut with Enable=0, still in Ready to Drive. */
+static void test_each_bms_or_inverter_mailbox_not_valid_cuts_with_enable_0(void)
+{
+    const vcu_rx_t rows[] = { VCU_RX_BMS_STATUS, VCU_RX_BMS_LIMITS, VCU_RX_BMS_POWER,
+                              VCU_RX_INV_MOTOR_POSITION, VCU_RX_INV_VOLTAGE,
+                              VCU_RX_INV_INTERNAL_STATES, VCU_RX_INV_FAULT_CODES };
+
+    for (size_t i = 0; i < sizeof(rows) / sizeof(rows[0]); i++) {
+        setUp();
+        to_ready_to_drive();
+        set_pedal(300u);
+        brake_off();
+        step();
+        TEST_ASSERT_NOT_EQUAL_INT16(0, command_frame().torque_command);
+
+        playing[rows[i]] = false;
+        run_ms(1000u);
+        TEST_ASSERT_EQUAL_UINT8(VCU_STATE_READY_TO_DRIVE, out.state);
+        TEST_ASSERT_BITS_HIGH(1u << VCU_CUT_MAILBOX, out.cuts);
+        TEST_ASSERT_EQUAL_INT16(0, command_frame().torque_command);
+        TEST_ASSERT_EQUAL_UINT8(0u, command_frame().inverter_enable);
+        TEST_ASSERT_EQUAL_UINT8(0u, status_frame().enable_sent);
+    }
+}
+
+/* It ends once every mailbox is VALID again and the higher travel is
+   below 5%: not while the pedal is still pressed. */
+static void test_a_mailbox_cut_recovers_when_valid_and_below_5_percent(void)
+{
+    to_ready_to_drive();
+    brake_off();
+    set_pedal(300u);
+    playing[VCU_RX_BMS_POWER] = false;
+    run_ms(1000u);
+    TEST_ASSERT_BITS_HIGH(1u << VCU_CUT_MAILBOX, out.cuts);
+
+    playing[VCU_RX_BMS_POWER] = true;
+    run_ms(1000u);
+    TEST_ASSERT_BITS_HIGH(1u << VCU_CUT_MAILBOX, out.cuts);
+    TEST_ASSERT_EQUAL_UINT8(0u, command_frame().inverter_enable);
+
+    set_pedal(49u);
+    step();
+    TEST_ASSERT_EQUAL_UINT16(0u, out.cuts);
+    TEST_ASSERT_EQUAL_UINT8(1u, command_frame().inverter_enable);
+    TEST_ASSERT_EQUAL_INT16(0, command_frame().torque_command);
+    TEST_ASSERT_EQUAL_UINT8(VCU_STATE_READY_TO_DRIVE, out.state);
+
+    set_pedal(300u);
+    step();
+    TEST_ASSERT_NOT_EQUAL_INT16(0, command_frame().torque_command);
+}
+
+/* Its start and end are EVENT_TORQUE_CUT Events with its cause. */
+static void test_a_mailbox_cut_starts_and_ends_with_an_event(void)
+{
+    to_ready_to_drive();
+    brake_off();
+    step();
+    playing[VCU_RX_INV_MOTOR_POSITION] = false;
+    const vcu_event_t *ev = NULL;
+    for (int i = 0; i < 100 && ev == NULL; i++) {
+        step();
+        ev = find_event(EVENT_TORQUE_CUT);
+    }
+    TEST_ASSERT_NOT_NULL(ev);
+    TEST_ASSERT_EQUAL_UINT8(VCU_CUT_MAILBOX, ev->data[0]);
+    TEST_ASSERT_EQUAL_UINT8(1u, ev->data[1]);
+
+    playing[VCU_RX_INV_MOTOR_POSITION] = true;
+    ev = NULL;
+    for (int i = 0; i < 100 && ev == NULL; i++) {
+        step();
+        ev = find_event(EVENT_TORQUE_CUT);
+    }
+    TEST_ASSERT_NOT_NULL(ev);
+    TEST_ASSERT_EQUAL_UINT8(VCU_CUT_MAILBOX, ev->data[0]);
+    TEST_ASSERT_EQUAL_UINT8(0u, ev->data[1]);
+}
+
+/* ADR 0006: a Torque cut never escalates to Leaving Ready to Drive however
+   long it lasts. */
+static void test_a_long_mailbox_cut_never_leaves_ready_to_drive(void)
+{
+    to_ready_to_drive();
+    play_all(false);
+    run_ms(60000u);
+    TEST_ASSERT_EQUAL_UINT8(VCU_STATE_READY_TO_DRIVE, out.state);
+    TEST_ASSERT_BITS_HIGH(1u << VCU_CUT_MAILBOX, out.cuts);
+    TEST_ASSERT_EQUAL_UINT8(0u, command_frame().inverter_enable);
+}
+
+/* A silent device is expected in GLV_ON: no Torque cut there. */
+static void test_a_silent_device_in_glv_on_is_no_torque_cut(void)
+{
+    in.now_ms = 10000u;
+    to_glv_on();
+    run_ms(1000u);
+    TEST_ASSERT_EQUAL_UINT8(VCU_STATE_GLV_ON, out.state);
+    TEST_ASSERT_EQUAL_UINT16(0u, out.cuts);
+    TEST_ASSERT_FALSE(out.fault_led);
+}
+
+/* Spec #36 Events: an inverter fault with its 64 bits, once per new set
+   of bits, not every step it lasts. */
+static void test_an_inverter_fault_is_an_event_with_its_64_bits(void)
+{
+    to_ready_to_drive();
+    invFaults.post_faults = 0x00010002u;
+    invFaults.run_faults = 0x80000000u;
+    step();
+    const vcu_event_t *ev = find_event(EVENT_INVERTER_FAULT);
+    TEST_ASSERT_NOT_NULL(ev);
+    TEST_ASSERT_EQUAL_HEX32(0x00010002u, event_u32(ev, 0u));
+    TEST_ASSERT_EQUAL_HEX32(0x80000000u, event_u32(ev, 4u));
+
+    run_ms(500u);
+    TEST_ASSERT_NULL(find_event(EVENT_INVERTER_FAULT));
+
+    invFaults.run_faults = 0x80000001u; /* one more fault */
+    step();
+    ev = find_event(EVENT_INVERTER_FAULT);
+    TEST_ASSERT_NOT_NULL(ev);
+    TEST_ASSERT_EQUAL_HEX32(0x80000001u, event_u32(ev, 4u));
+}
+
+/* A silent inverter's Substitute is no fault to record. */
+static void test_a_silent_inverter_writes_no_inverter_fault_event(void)
+{
+    to_ts_active();
+    playing[VCU_RX_INV_FAULT_CODES] = false;
+    for (int i = 0; i < 100; i++) {
+        step();
+        TEST_ASSERT_NULL(find_event(EVENT_INVERTER_FAULT));
+    }
+}
+
+/* ------------------------------------------------------------------ */
+/* The inverter fault clear (0x0C1)                                   */
+/* ------------------------------------------------------------------ */
+
+static struct can_control_inv_parameter_command_t fault_clear_frame(void)
+{
+    struct can_control_inv_parameter_command_t c;
+    TEST_ASSERT_TRUE(out.send_fault_clear);
+    TEST_ASSERT_EQUAL_INT(0, can_control_inv_parameter_command_unpack(&c, out.fault_clear,
+                                                                       sizeof(out.fault_clear)));
+    return c;
+}
+
+/* In TS_ACTIVE with the inverter reporting a fault. */
+static void to_inverter_fault(void)
+{
+    to_ts_active();
+    invFaults.run_faults = 0x00000400u;
+    run_ms(100u);
+    TEST_ASSERT_BITS_HIGH(VCU_START_INVERTER_FAULT, out.start_blockers);
+}
+
+/* Spec #36: a press with the inverter disabled and the pedal released
+   sends one fault clear, address 20, write, data 0, and records it. */
+static void test_a_press_with_an_inverter_fault_sends_one_fault_clear(void)
+{
+    to_inverter_fault();
+    brake_on();
+    press_start();
+    struct can_control_inv_parameter_command_t c = fault_clear_frame();
+    TEST_ASSERT_EQUAL_UINT16(20u, c.parameter_address);
+    TEST_ASSERT_EQUAL_UINT8(1u, c.write);
+    TEST_ASSERT_EQUAL_UINT16(0u, c.data);
+    TEST_ASSERT_EQUAL_UINT8(VCU_STATE_TS_ACTIVE, out.state);
+    const vcu_event_t *ev = find_event(EVENT_INVERTER_FAULT_CLEAR);
+    TEST_ASSERT_NOT_NULL(ev);
+    TEST_ASSERT_EQUAL_UINT8(EVENT_FAULT_CLEAR_SENT, ev->data[0]);
+    TEST_ASSERT_EQUAL_HEX32(0x00000400u, event_u32(ev, 8u));
+
+    /* Once per press: holding the button sends nothing more. */
+    for (int i = 0; i < 50; i++) {
+        step();
+        TEST_ASSERT_FALSE(out.send_fault_clear);
+    }
+}
+
+/* The fault goes: the result is an Event, and the next press starts. */
+static void test_after_a_fault_clear_a_second_press_runs_the_start_procedure(void)
+{
+    to_inverter_fault();
+    brake_on();
+    press_start();
+    TEST_ASSERT_TRUE(out.send_fault_clear);
+
+    invFaults.run_faults = 0u;
+    bool cleared = false;
+    for (int i = 0; i < 10 && !cleared; i++) {
+        step();
+        const vcu_event_t *ev = find_event(EVENT_INVERTER_FAULT_CLEAR);
+        if (ev != NULL) {
+            TEST_ASSERT_EQUAL_UINT8(EVENT_FAULT_CLEAR_CLEARED, ev->data[0]);
+            cleared = true;
+        }
+    }
+    TEST_ASSERT_TRUE(cleared);
+    TEST_ASSERT_EQUAL_UINT8(VCU_STATE_TS_ACTIVE, out.state);
+
+    press_start();
+    TEST_ASSERT_FALSE(out.send_fault_clear);
+    TEST_ASSERT_EQUAL_UINT8(VCU_STATE_READY_TO_DRIVE, out.state);
+}
+
+/* A fault that stays is a failed result once the wait is over. */
+static void test_a_fault_clear_that_does_not_clear_is_recorded_as_failed(void)
+{
+    to_inverter_fault();
+    press_start();
+    TEST_ASSERT_TRUE(out.send_fault_clear);
+
+    const vcu_event_t *ev = NULL;
+    uint32_t waited = 0u;
+    while (ev == NULL && waited <= VCU_FAULT_CLEAR_WAIT_MS) {
+        step();
+        waited += STEP_MS;
+        ev = find_event(EVENT_INVERTER_FAULT_CLEAR);
+    }
+    TEST_ASSERT_NOT_NULL(ev);
+    TEST_ASSERT_EQUAL_UINT8(EVENT_FAULT_CLEAR_FAILED, ev->data[0]);
+    TEST_ASSERT_EQUAL_UINT32(VCU_FAULT_CLEAR_WAIT_MS, waited);
+    TEST_ASSERT_EQUAL_HEX32(0x00000400u, event_u32(ev, 8u));
+    TEST_ASSERT_EQUAL_UINT32(VCU_FAULT_CLEAR_WAIT_MS, event_u32(ev, 12u));
+
+    /* A new press tries again. */
+    press_start();
+    TEST_ASSERT_TRUE(out.send_fault_clear);
+}
+
+static void test_no_fault_clear_with_the_pedal_at_5_percent(void)
+{
+    to_inverter_fault();
+    set_pedal(VCU_TRAVEL_RELEASED);
+    press_start();
+    TEST_ASSERT_FALSE(out.send_fault_clear);
+    TEST_ASSERT_NULL(find_event(EVENT_INVERTER_FAULT_CLEAR));
+}
+
+static void test_no_fault_clear_while_the_inverter_reads_enabled(void)
+{
+    to_inverter_fault();
+    invStates.enable_state = 1u;
+    run_ms(100u);
+    press_start();
+    TEST_ASSERT_FALSE(out.send_fault_clear);
+}
+
+static void test_no_fault_clear_without_a_press(void)
+{
+    in.start_pressed = true; /* held since reset: never a press */
+    to_inverter_fault();
+    for (int i = 0; i < 100; i++) {
+        step();
+        TEST_ASSERT_FALSE(out.send_fault_clear);
+    }
+}
+
+/* Without an inverter fault a press is the Start procedure, never a
+   fault clear. */
+static void test_a_press_without_an_inverter_fault_sends_no_fault_clear(void)
+{
+    to_ts_active();
+    brake_on();
+    press_start();
+    TEST_ASSERT_EQUAL_UINT8(VCU_STATE_READY_TO_DRIVE, out.state);
+    TEST_ASSERT_FALSE(out.send_fault_clear);
+}
+
+/* Leaving Ready to Drive for an inverter fault: the step that disables
+   the inverter sends no fault clear, though the button is held. */
+static void test_the_reaction_row_inverter_fault_then_clear_then_start(void)
+{
+    to_ready_to_drive();
+    invFaults.post_faults = 0x2u;
+    step();
+    assert_transition(VCU_STATE_READY_TO_DRIVE, VCU_STATE_TS_ACTIVE, VCU_CAUSE_INVERTER_FAULT);
+    TEST_ASSERT_FALSE(out.send_fault_clear);
+
+    press_start();
+    TEST_ASSERT_TRUE(out.send_fault_clear);
+    TEST_ASSERT_EQUAL_UINT8(VCU_STATE_TS_ACTIVE, out.state);
+    invFaults.post_faults = 0u;
+    run_ms(100u);
+    press_start();
+    TEST_ASSERT_EQUAL_UINT8(VCU_STATE_READY_TO_DRIVE, out.state);
+}
+
+/* ------------------------------------------------------------------ */
+/* Discharge slow                                                     */
+/* ------------------------------------------------------------------ */
+
+/* Spec #36: a bus above 60 V 5 s after the Shutdown Circuit input opened
+   sets "discharge slow" and writes one Event; the inverter's discharge bit
+   is never set, whatever happens. */
+static void test_a_bus_above_60_v_5_s_after_the_opening_is_discharge_slow(void)
+{
+    to_ready_to_drive();
+    in.sdc_closed = false;
+    step(); /* the first step to read it open */
+    const uint32_t opened = in.now_ms - STEP_MS;
+    set_bus_dv(601);
+    while (in.now_ms - opened < VCU_DISCHARGE_SLOW_MS) {
+        step();
+        TEST_ASSERT_NULL(find_event(EVENT_DISCHARGE_SLOW));
+        TEST_ASSERT_EQUAL_UINT8(0u, command_frame().inverter_discharge);
+    }
+    step(); /* exactly 5 s after */
+    const vcu_event_t *ev = find_event(EVENT_DISCHARGE_SLOW);
+    TEST_ASSERT_NOT_NULL(ev);
+    TEST_ASSERT_EQUAL_UINT16(601u, (uint16_t)(ev->data[0] | (ev->data[1] << 8)));
+    TEST_ASSERT_EQUAL_UINT32(VCU_DISCHARGE_SLOW_MS, event_u32(ev, 4u));
+    step();
+    TEST_ASSERT_EQUAL_UINT8(1u, status_frame().discharge_slow);
+    TEST_ASSERT_EQUAL_UINT8(0u, command_frame().inverter_discharge);
+
+    /* One Event per opening, the flag held while it stays open. */
+    for (int i = 0; i < 300; i++) {
+        step();
+        TEST_ASSERT_NULL(find_event(EVENT_DISCHARGE_SLOW));
+    }
+    TEST_ASSERT_EQUAL_UINT8(1u, status_frame().discharge_slow);
+
+    /* Closed again: the flag clears. */
+    in.sdc_closed = true;
+    run_ms(2u * STEP_MS);
+    TEST_ASSERT_EQUAL_UINT8(0u, status_frame().discharge_slow);
+}
+
+static void test_a_bus_at_60_v_5_s_after_the_opening_is_not_slow(void)
+{
+    to_ts_active();
+    in.sdc_closed = false;
+    set_bus_dv(600);
+    run_ms(10000u);
+    TEST_ASSERT_EQUAL_UINT8(0u, status_frame().discharge_slow);
+}
+
+/* The bus voltage is judged only from a VALID INV_Voltage: a silent
+   inverter is no news either way, until it speaks again. */
+static void test_discharge_slow_waits_for_a_valid_inv_voltage(void)
+{
+    to_ts_active();
+    in.sdc_closed = false;
+    playing[VCU_RX_INV_VOLTAGE] = false;
+    run_ms(VCU_DISCHARGE_SLOW_MS + 1000u);
+    TEST_ASSERT_EQUAL_UINT8(0u, status_frame().discharge_slow);
+
+    playing[VCU_RX_INV_VOLTAGE] = true;
+    bool seen = false;
+    for (int i = 0; i < 10; i++) {
+        step();
+        seen = seen || find_event(EVENT_DISCHARGE_SLOW) != NULL;
+    }
+    TEST_ASSERT_TRUE(seen);
+    TEST_ASSERT_EQUAL_UINT8(1u, status_frame().discharge_slow);
+}
+
+/* ------------------------------------------------------------------ */
+/* The Energy Meter                                                   */
+/* ------------------------------------------------------------------ */
+
+/* Spec #36: an Energy Meter timeout is reported and cuts nothing. */
+static void test_an_energy_meter_timeout_is_reported_and_cuts_nothing(void)
+{
+    to_ready_to_drive();
+    brake_off();
+    set_pedal(500u);
+    playing[VCU_RX_EM_MEASUREMENT] = false;
+    playing[VCU_RX_EM_STATUS] = false;
+    run_ms(2000u);
+    TEST_ASSERT_EQUAL_UINT8(1u, status_frame().energy_meter_timeout);
+    TEST_ASSERT_EQUAL_UINT8(VCU_STATE_READY_TO_DRIVE, out.state);
+    TEST_ASSERT_EQUAL_UINT16(0u, out.cuts);
+    TEST_ASSERT_EQUAL_UINT8(1u, command_frame().inverter_enable);
+    TEST_ASSERT_NOT_EQUAL_INT16(0, command_frame().torque_command);
+}
+
+/* Its Violation bit writes an Event, once each time it sets, and cuts
+   nothing either. */
+static void test_the_energy_meter_violation_bit_writes_an_event(void)
+{
+    to_ready_to_drive();
+    brake_off();
+    set_pedal(500u);
+    emStatus.violation = 1u;
+    int events = 0;
+    for (int i = 0; i < 50; i++) {
+        step();
+        const vcu_event_t *ev = find_event(EVENT_EM_VIOLATION);
+        if (ev != NULL) {
+            TEST_ASSERT_EQUAL_UINT8(VCU_STATE_READY_TO_DRIVE, ev->data[0]);
+            events++;
+        }
+    }
+    TEST_ASSERT_EQUAL_INT(1, events);
+    TEST_ASSERT_EQUAL_UINT16(0u, out.cuts);
+    TEST_ASSERT_NOT_EQUAL_INT16(0, command_frame().torque_command);
+
+    emStatus.violation = 0u;
+    run_ms(500u);
+    emStatus.violation = 1u;
+    events = 0;
+    for (int i = 0; i < 50; i++) {
+        step();
+        events += find_event(EVENT_EM_VIOLATION) != NULL;
+    }
+    TEST_ASSERT_EQUAL_INT(1, events);
 }
 
 /* Back in TS_ACTIVE, Ready to Drive needs the Start procedure again. */
@@ -1502,6 +1953,105 @@ static void test_the_restart_light_goes_out_in_glv_on(void)
     TEST_ASSERT_FALSE(out.fault_active);
 }
 
+/* Issue 58: solid while the bus-off latch is set, in any state. */
+static void test_the_fault_led_is_solid_while_the_bus_off_latch_is_set(void)
+{
+    in.now_ms = 10000u;
+    to_glv_on();
+    run_ms(100u);
+    TEST_ASSERT_FALSE(out.fault_led);
+    in.bus_off_latched = true;
+    for (int i = 0; i < 100; i++) {
+        step();
+        TEST_ASSERT_TRUE(out.fault_led);
+        TEST_ASSERT_TRUE(out.fault_active);
+        TEST_ASSERT_TRUE(out.test_point);
+    }
+    in.bus_off_latched = false;
+    step();
+    TEST_ASSERT_FALSE(out.fault_led);
+    TEST_ASSERT_FALSE(out.fault_active);
+}
+
+/* Issue 58: in TS_ACTIVE, solid while a condition that would leave Ready
+   to Drive is present, though Ready to Drive was never entered. */
+static void test_the_fault_led_is_solid_while_a_leave_condition_is_present(void)
+{
+    in.now_ms = 10000u;
+    to_ts_active();
+    TEST_ASSERT_FALSE(out.fault_led);
+    bmsStatus.over_temp_active = 1u;
+    for (int i = 0; i < 100; i++) {
+        step();
+        TEST_ASSERT_TRUE(out.fault_led);
+        TEST_ASSERT_TRUE(out.fault_active);
+    }
+    bmsStatus.over_temp_active = 0u;
+    step();
+    TEST_ASSERT_FALSE(out.fault_led);
+    TEST_ASSERT_FALSE(out.fault_active);
+}
+
+/* Reaction table: the bus-off latch leaves Ready to Drive; once it clears
+   (control_bus: 5 s clean with every mailbox VALID) the VCU stays in
+   TS_ACTIVE with the restart light on until the Start procedure. */
+static void test_the_reaction_row_bus_off_latch_needs_the_start_procedure(void)
+{
+    in.now_ms = 10000u;
+    driving();
+    in.bus_off_latched = true;
+    step();
+    assert_transition(VCU_STATE_READY_TO_DRIVE, VCU_STATE_TS_ACTIVE, VCU_CAUSE_BUS_OFF_LATCHED);
+    run_ms(5000u);
+    in.bus_off_latched = false;
+    set_pedal(0u);
+    run_ms(1000u);
+    TEST_ASSERT_EQUAL_UINT8(VCU_STATE_TS_ACTIVE, out.state);
+    TEST_ASSERT_TRUE(out.fault_led);
+    TEST_ASSERT_EQUAL_UINT8(0u, command_frame().inverter_enable);
+
+    brake_on();
+    press_start();
+    TEST_ASSERT_EQUAL_UINT8(VCU_STATE_READY_TO_DRIVE, out.state);
+    TEST_ASSERT_FALSE(out.fault_led);
+}
+
+/* The Shutdown Circuit input is trusted only in the safe direction: open
+   takes torque away at once, but closed alone grants nothing. */
+static void test_the_shutdown_circuit_closed_alone_grants_nothing(void)
+{
+    to_glv_on();
+    play_all(true);
+    set_bus_dv(0); /* no Tractive System, though the input reads closed */
+    run_ms(1000u);
+    TEST_ASSERT_EQUAL_UINT8(VCU_STATE_GLV_ON, out.state);
+    TEST_ASSERT_EQUAL_UINT8(0u, command_frame().inverter_enable);
+
+    set_bus_dv((int16_t)PACK_DV);
+    step();
+    TEST_ASSERT_EQUAL_UINT8(VCU_STATE_TS_ACTIVE, out.state);
+    in.start_pressed = false;
+    run_ms(1000u); /* closed, TS up, but no Start procedure */
+    TEST_ASSERT_EQUAL_UINT8(VCU_STATE_TS_ACTIVE, out.state);
+    TEST_ASSERT_EQUAL_UINT8(0u, command_frame().inverter_enable);
+}
+
+/* Reaction table: a sensor supply out of its window fails that supply's
+   sensors (APPS2 and the rear brake on supply 2), so the APPS and brake
+   sensor cuts follow after 80 ms, with Enable=1. */
+static void test_a_supply_out_of_window_fails_its_sensors_and_cuts(void)
+{
+    driving();
+    in.raw.supply[1] = 0u;
+    run_ms(VCU_CUT_PERSIST_MS); /* 0 to 70 ms after the supply left its window */
+    TEST_ASSERT_EQUAL_UINT16(0u, out.cuts);
+    step();
+    TEST_ASSERT_BITS_HIGH((1u << VCU_CUT_APPS) | (1u << VCU_CUT_BRAKE_SENSOR), out.cuts);
+    TEST_ASSERT_EQUAL_INT16(0, command_frame().torque_command);
+    TEST_ASSERT_EQUAL_UINT8(1u, command_frame().inverter_enable);
+    TEST_ASSERT_EQUAL_UINT8(VCU_STATE_READY_TO_DRIVE, out.state);
+}
+
 /* A restart needed wins over a Torque cut's blink. */
 static void test_the_restart_light_is_solid_through_a_torque_cut(void)
 {
@@ -1672,6 +2222,26 @@ int main(void)
     RUN_TEST(test_leaving_ready_to_drive_records_every_cause_that_applied);
     RUN_TEST(test_a_silent_bms_does_not_leave_ready_to_drive);
     RUN_TEST(test_a_silent_inverter_does_not_leave_ready_to_drive);
+    RUN_TEST(test_each_bms_or_inverter_mailbox_not_valid_cuts_with_enable_0);
+    RUN_TEST(test_a_mailbox_cut_recovers_when_valid_and_below_5_percent);
+    RUN_TEST(test_a_mailbox_cut_starts_and_ends_with_an_event);
+    RUN_TEST(test_a_long_mailbox_cut_never_leaves_ready_to_drive);
+    RUN_TEST(test_a_silent_device_in_glv_on_is_no_torque_cut);
+    RUN_TEST(test_an_inverter_fault_is_an_event_with_its_64_bits);
+    RUN_TEST(test_a_silent_inverter_writes_no_inverter_fault_event);
+    RUN_TEST(test_a_press_with_an_inverter_fault_sends_one_fault_clear);
+    RUN_TEST(test_after_a_fault_clear_a_second_press_runs_the_start_procedure);
+    RUN_TEST(test_a_fault_clear_that_does_not_clear_is_recorded_as_failed);
+    RUN_TEST(test_no_fault_clear_with_the_pedal_at_5_percent);
+    RUN_TEST(test_no_fault_clear_while_the_inverter_reads_enabled);
+    RUN_TEST(test_no_fault_clear_without_a_press);
+    RUN_TEST(test_a_press_without_an_inverter_fault_sends_no_fault_clear);
+    RUN_TEST(test_the_reaction_row_inverter_fault_then_clear_then_start);
+    RUN_TEST(test_a_bus_above_60_v_5_s_after_the_opening_is_discharge_slow);
+    RUN_TEST(test_a_bus_at_60_v_5_s_after_the_opening_is_not_slow);
+    RUN_TEST(test_discharge_slow_waits_for_a_valid_inv_voltage);
+    RUN_TEST(test_an_energy_meter_timeout_is_reported_and_cuts_nothing);
+    RUN_TEST(test_the_energy_meter_violation_bit_writes_an_event);
     RUN_TEST(test_after_leaving_the_start_procedure_is_needed_again);
     RUN_TEST(test_the_sound_runs_2_s_from_entry);
     RUN_TEST(test_the_sound_stops_at_once_when_ready_to_drive_is_left);
@@ -1710,6 +2280,11 @@ int main(void)
     RUN_TEST(test_leaving_ready_to_drive_lights_the_fault_led_solid);
     RUN_TEST(test_the_restart_light_goes_out_in_glv_on);
     RUN_TEST(test_the_restart_light_is_solid_through_a_torque_cut);
+    RUN_TEST(test_a_supply_out_of_window_fails_its_sensors_and_cuts);
+    RUN_TEST(test_the_fault_led_is_solid_while_the_bus_off_latch_is_set);
+    RUN_TEST(test_the_fault_led_is_solid_while_a_leave_condition_is_present);
+    RUN_TEST(test_the_reaction_row_bus_off_latch_needs_the_start_procedure);
+    RUN_TEST(test_the_shutdown_circuit_closed_alone_grants_nothing);
     RUN_TEST(test_the_fault_led_is_on_in_startup);
     RUN_TEST(test_the_fault_led_is_held_3_s_after_reset);
     RUN_TEST(test_the_fault_led_lamp_check_ends_across_the_clock_wrap);

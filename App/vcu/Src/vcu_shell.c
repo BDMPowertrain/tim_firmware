@@ -411,6 +411,7 @@ static void print_torque(const vcu_inputs_t *in)
         [VCU_CUT_BRAKE_SENSOR] = "brake sensor",
         [VCU_CUT_BRAKE_PEDAL]  = "brake and pedal",
         [VCU_CUT_TIMING]       = "timing fault",
+        [VCU_CUT_MAILBOX]      = "mailbox not VALID",
     };
     const int req = in->torque_request;
     const int sent = in->torque;
