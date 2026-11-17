@@ -18,6 +18,8 @@ add_logic_library(logic_common
         Src/mailbox.c
         Src/overrun_watch.c
         Src/params.c
+        Src/reset_cause.c
+        Src/reset_record.c
         Src/stall_watch.c
         Src/step_timing.c
         can_db/can_control.c
