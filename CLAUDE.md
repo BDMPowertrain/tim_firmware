@@ -75,6 +75,12 @@ Use build/Debug/bms/tim.elf for a TIM in the BMS role.
     openocd -f interface/stlink-dap.cfg -f target/stm32g4x.cfg
     arm-none-eabi-gdb build/Debug/vcu/tim.elf     # .gdbinit connects automatically
 
+Every failure the image detects itself (faults, stack overflow, a failed
+assert, Error_Handler) goes to one crash routine (App/common/Inc/crash.h):
+it writes the Crash record and resets, or, with a debugger attached, stops
+at a BKPT in it first. The shell's `lastreset` shows the last reset's
+cause, Breadcrumb and Crash record.
+
 ## Provisioning — REQUIRED, once per board
 Provisioning (ADR 0011, 0012) sets the option bytes before any image is
 flashed: nSWBOOT0=0 and nBOOT0=1 (boot from flash whatever the PB8 pull-up
@@ -140,8 +146,9 @@ undo provisioning.
   peripheral config. Both projects must name the same firmware package.
 - The BMS project is minimal for now: clock, FreeRTOS, USART1, FDCAN1 (the
   Control bus), FDCAN2 (the DAQ bus), the heartbeat LED and the IMU chip
-  select held high. Its image links print, shell, stats, the control step
-  with its Control bus driver and the DAQ bus driver from App/common/; the
+  select held high. Its image links print, shell, stats, the crash routine,
+  reset_info, the control step with its Control bus driver and the DAQ bus
+  driver from App/common/; the
   other common modules join when their peripherals are configured.
 - The DAQ bus (CAN2) is sent on only through can_send()
   (App/common/Src/can_if.c): a drop-oldest queue that never waits, drained
@@ -168,11 +175,11 @@ Commit before regenerating in CubeMX. Review `git diff` and commit the
 regeneration separately from your own changes.
 
 The generated Reset_Handler (targets/<image>/startup_stm32g474xx.s, a weak
-symbol) is to be replaced by our hand-written one in App/common/, which does
-the RAM errata reads first (#49, not yet written). Once it exists, after
-every regeneration diff the generated Reset_Handler against ours
-(`git diff -- targets/*/startup_stm32g474xx.s`, then read ours) and carry any
-change CubeMX made, such as a new init call, into ours in its own commit.
+symbol) is replaced at link time by our hand-written one,
+App/common/Src/reset_handler.s, which does the SRAM errata reads first
+(ES0430 2.2.6). After every regeneration diff the generated Reset_Handler
+(`git diff -- targets/*/startup_stm32g474xx.s`), then read ours, and carry
+any change CubeMX made, such as a new init call, into ours in its own commit.
 
 ## Agent skills
 

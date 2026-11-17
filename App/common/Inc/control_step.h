@@ -13,6 +13,10 @@
    timeout; a full queue drops it and counts. Three Overruns within one
    second set timing_fault for the next step's phases.
 
+   Where the step is goes to the Breadcrumb in the backup registers
+   (reset_info.h) at the start of each step and of each phase, so a
+   watchdog reset can say what the step was doing (ADR 0013).
+
    The step is the only Kicker of the watchdog once it runs (ADR 0013):
    one call, at the start of each step, made only if the previous step ran
    every phase in order (kick_gate.h). The first step Kicks
@@ -111,6 +115,10 @@ void control_step_task(void *argument);
    that Kick. Any task; the shell's `hang` asks for a confirmation word
    first. Exists in every build: the image measured is the image raced. */
 void control_step_request_hang(void);
+
+/* The name of the image's phase at index, for the Breadcrumb's readout.
+   NULL before the task runs, or past the last phase. Any task. */
+const char *control_step_phase_name(size_t index);
 
 /* Copies the latest published snapshot, with interrupts masked. Any task. */
 void control_step_read(control_snapshot_t *out);

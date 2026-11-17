@@ -151,6 +151,17 @@ const char *vcu_step_save_refusal(void)
     return NULL;
 }
 
+const char *vcu_step_bench_refusal(void)
+{
+    control_snapshot_t snap;
+
+    control_step_read(&snap);
+    if (snap.running && snap.state == CAN_CONTROL_VCU_STATUS_STATE_READY_TO_DRIVE_CHOICE) {
+        return "the VCU is in READY_TO_DRIVE";
+    }
+    return NULL;
+}
+
 bool vcu_step_read_inputs(vcu_inputs_t *out)
 {
     control_snapshot_t snap;

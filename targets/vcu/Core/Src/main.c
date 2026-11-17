@@ -25,6 +25,8 @@
 /* USER CODE BEGIN Includes */
 #include "tasks.h"
 #include "watchdog.h"
+#include "crash.h"
+#include "reset_info.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -103,7 +105,9 @@ int main(void)
 {
 
   /* USER CODE BEGIN 1 */
-
+  /* Before anything else: read, keep and clear the reset cause, and keep
+     the Breadcrumb and Crash record found (reset_info.h, ADR 0011). */
+  reset_info_capture();
   /* USER CODE END 1 */
 
   /* MCU Configuration--------------------------------------------------------*/
@@ -898,11 +902,8 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 void Error_Handler(void)
 {
   /* USER CODE BEGIN Error_Handler_Debug */
-  /* User can add his own implementation to report the HAL error return state */
-  __disable_irq();
-  while (1)
-  {
-  }
+  /* The crash routine (crash.h), recording who called this. */
+  crash_now(CRASH_ERROR_HANDLER, (uint32_t)(uintptr_t)__builtin_return_address(0));
   /* USER CODE END Error_Handler_Debug */
 }
 #ifdef USE_FULL_ASSERT
@@ -916,8 +917,10 @@ void Error_Handler(void)
 void assert_failed(uint8_t *file, uint32_t line)
 {
   /* USER CODE BEGIN 6 */
-  /* User can add his own implementation to report the file name and line number,
-     ex: printf("Wrong parameters value: file %s on line %d\r\n", file, line) */
+  /* The crash routine (crash.h), as for configASSERT. */
+  (void)file;
+  (void)line;
+  crash_now(CRASH_ASSERT, (uint32_t)(uintptr_t)__builtin_return_address(0));
   /* USER CODE END 6 */
 }
 #endif /* USE_FULL_ASSERT */

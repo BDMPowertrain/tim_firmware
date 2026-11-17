@@ -119,23 +119,3 @@ void tasks_init(void)
     (void)create_task(control_step_task, &controlStepArgs, "controlStep",
                       (osPriority_t)CONTROL_STEP_TASK_PRIORITY, CONTROL_STEP_TASK_STACK_SIZE);
 }
-
-/* Called by FreeRTOS the instant it detects a task has overrun its
-   stack (configCHECK_FOR_STACK_OVERFLOW, FreeRTOSConfig.h). By this
-   point pcTaskName and surrounding memory may already be corrupted, and
-   the offending task's own stack is not trustworthy — so this does
-   nothing but latch HBLED on solid and halt, deliberately not using
-   shell_printf()/osDelay()/anything that assumes RTOS state is sane.
-   Solid-on is visibly different from Housekeeping's normal 1 Hz blink,
-   which stops the instant this fires. Attach a debugger to read xTask
-   and pcTaskName from here to find out which task overran. */
-void vApplicationStackOverflowHook(TaskHandle_t xTask, char *pcTaskName)
-{
-    (void)xTask;
-    (void)pcTaskName;
-
-    __disable_irq();
-    HAL_GPIO_WritePin(GPIO_HBLED_GPIO_Port, GPIO_HBLED_Pin, GPIO_PIN_RESET);
-    for (;;) {
-    }
-}

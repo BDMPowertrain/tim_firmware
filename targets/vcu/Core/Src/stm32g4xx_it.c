@@ -22,6 +22,7 @@
 #include "stm32g4xx_it.h"
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
+#include "crash.h"
 #include "flash_bank2.h"
 /* USER CODE END Includes */
 
@@ -74,13 +75,17 @@ extern TIM_HandleTypeDef htim6;
 void NMI_Handler(void)
 {
   /* USER CODE BEGIN NonMaskableInt_IRQn 0 */
+  /* LR and SP first, while LR still holds EXC_RETURN (crash.h). */
+  uint32_t nmiLr;
+  uint32_t nmiSp;
+  CRASH_CAPTURE(nmiLr, nmiSp);
   /* A double ECC error from a cut write in the bank 2 data regions is
-     recorded and returned from (ADR 0014). Anything else halts below,
-     until the crash routine exists. */
+     recorded and returned from (ADR 0014). Anything else is a crash. */
   if (flash_bank2_nmi())
   {
     return;
   }
+  crash_fault(CRASH_NMI, nmiLr, nmiSp);
   /* USER CODE END NonMaskableInt_IRQn 0 */
   /* USER CODE BEGIN NonMaskableInt_IRQn 1 */
    while (1)
@@ -95,7 +100,7 @@ void NMI_Handler(void)
 void HardFault_Handler(void)
 {
   /* USER CODE BEGIN HardFault_IRQn 0 */
-
+  CRASH_FROM_FAULT(CRASH_HARD_FAULT);
   /* USER CODE END HardFault_IRQn 0 */
   while (1)
   {
@@ -110,7 +115,7 @@ void HardFault_Handler(void)
 void MemManage_Handler(void)
 {
   /* USER CODE BEGIN MemoryManagement_IRQn 0 */
-
+  CRASH_FROM_FAULT(CRASH_MEM_MANAGE);
   /* USER CODE END MemoryManagement_IRQn 0 */
   while (1)
   {
@@ -125,7 +130,7 @@ void MemManage_Handler(void)
 void BusFault_Handler(void)
 {
   /* USER CODE BEGIN BusFault_IRQn 0 */
-
+  CRASH_FROM_FAULT(CRASH_BUS_FAULT);
   /* USER CODE END BusFault_IRQn 0 */
   while (1)
   {
@@ -140,7 +145,7 @@ void BusFault_Handler(void)
 void UsageFault_Handler(void)
 {
   /* USER CODE BEGIN UsageFault_IRQn 0 */
-
+  CRASH_FROM_FAULT(CRASH_USAGE_FAULT);
   /* USER CODE END UsageFault_IRQn 0 */
   while (1)
   {

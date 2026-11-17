@@ -154,7 +154,11 @@ See http://www.FreeRTOS.org/RTOS-Cortex-M3-M4.html. */
 /* Normal assert() semantics without relying on the provision of an assert.h
 header file. */
 /* USER CODE BEGIN 1 */
-#define configASSERT( x ) if ((x) == 0) {taskDISABLE_INTERRUPTS(); for( ;; );}
+/* A failed assert goes to the crash routine (App/common/Inc/crash.h). */
+#ifndef __ASSEMBLER__
+__attribute__((noreturn)) void crash_assert(void);
+#endif
+#define configASSERT( x ) if ((x) == 0) { crash_assert(); }
 /* USER CODE END 1 */
 
 /* Definitions that map the FreeRTOS port interrupt handlers to their CMSIS
@@ -171,9 +175,13 @@ standard names. */
 
 /* 2 = check both the exact watermark and the pattern fill at task-switch
    time. Catches a task running off the end of its stack and calls
-   vApplicationStackOverflowHook() (App/bms/Src/tasks.c) instead of
+   vApplicationStackOverflowHook() (App/common/Src/crash.c) instead of
    leaving the corruption to surface later as an unrelated hard fault. */
 #define configCHECK_FOR_STACK_OVERFLOW 2
+
+/* A failed FreeRTOS allocation calls vApplicationMallocFailedHook()
+   (App/common/Src/crash.c), which sets an error bit and returns. */
+#define configUSE_MALLOC_FAILED_HOOK 1
 
 /* Each task's CPU time, counted in the DWT cycle counter
    (App/common/Inc/cycle_counter.h); Housekeeping turns it into a CPU share

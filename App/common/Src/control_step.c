@@ -12,8 +12,13 @@
 #include "main.h"
 #include "masked_copy.h"
 #include "print.h"
+#include "reset_info.h"
 #include "stall_watch.h"
 #include "watchdog.h"
+
+/* A phase index is kept in the Breadcrumb beside its own markers. */
+_Static_assert(STEP_PHASE_MAX <= BREADCRUMB_PHASE_END,
+               "every phase index fits below the Breadcrumb's markers");
 
 /* Written once by the task before its first step, read by the shell. */
 static const control_step_def_t *runningDef;
@@ -84,6 +89,16 @@ void control_step_task(void *argument)
             kicksWithheld++;
         }
 
+        /* The Breadcrumb (ADR 0013): no code runs before a watchdog reset,
+           so where the step was is written as it goes, at the start of the
+           step and of each phase. */
+        breadcrumb_t crumb = {
+            .step_count = ctx.step_count,
+            .phase = BREADCRUMB_PHASE_START,
+            .overruns = sched.overruns,
+        };
+        reset_info_breadcrumb(&crumb);
+
         if (hangRequested) {
             /* The bench's hang: nothing below Realtime runs again and the
                watchdog resets the MCU one timeout after the Kick above. */
@@ -101,12 +116,17 @@ void control_step_task(void *argument)
                                                     ctx.now_ms);
 
         for (size_t i = 0; i < phaseCount; i++) {
+            crumb.phase = (uint8_t)i;
+            reset_info_breadcrumb(&crumb);
             def->phases[i].run(&ctx);
             kick_gate_phase_done(&gate, i);
             const uint32_t phaseEnd = cycle_counter_read();
             phaseUs[i] = (phaseEnd - phaseStart) / cyclesPerUs;
             phaseStart = phaseEnd;
         }
+
+        crumb.phase = BREADCRUMB_PHASE_END;
+        reset_info_breadcrumb(&crumb);
 
         const uint32_t stepUs = (phaseStart - stepStart) / cyclesPerUs;
         const uint32_t endMs = osKernelGetTickCount();
@@ -147,6 +167,16 @@ void control_step_task(void *argument)
         }
         masked_copy(&published, &snapshot, sizeof(published));
     }
+}
+
+const char *control_step_phase_name(size_t index)
+{
+    const control_step_def_t *def = runningDef;
+
+    if (def == NULL || index >= def->phase_count || index >= STEP_PHASE_MAX) {
+        return NULL;
+    }
+    return def->phases[index].name;
 }
 
 void control_step_read(control_snapshot_t *out)

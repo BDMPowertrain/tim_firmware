@@ -14,10 +14,12 @@
 
 #include "control_bus.h"
 #include "control_step.h"
+#include "crash.h"
 
 #include "main.h"
 #include "parameters.h"
 #include "print.h"
+#include "reset_info.h"
 #include "stats.h"
 #include "stream_buffer.h"
 
@@ -72,9 +74,9 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 
 #define SHELL_MAX_ARGS 8u
 
-/* The word `hang` needs after it, so a stray "hang" does not reset the
-   board. */
-#define HANG_CONFIRM_WORD "confirm"
+/* The word `hang` and `crash` need after them, so a stray word does not
+   reset the board (ADR 0002 amendment). */
+#define BENCH_CONFIRM_WORD "confirm"
 
 static int cmd_help(int argc, char **argv);
 static int cmd_tasks(int argc, char **argv);
@@ -82,6 +84,8 @@ static int cmd_reset(int argc, char **argv);
 static int cmd_step(int argc, char **argv);
 static int cmd_bus(int argc, char **argv);
 static int cmd_hang(int argc, char **argv);
+static int cmd_crash(int argc, char **argv);
+static int cmd_lastreset(int argc, char **argv);
 
 /* The commands every image has. Adding one is one row here plus one
    handler function — nothing else in shell.c changes. A command only one
@@ -94,7 +98,9 @@ static const shell_cmd_t commandTable[] = {
     { "step",      cmd_step,      "control step: state, overruns, last and worst times" },
     { "bus",       cmd_bus,       "Control bus (CAN1): bus-off, error-passive, skipped, overflows, error counts" },
     { "param",     parameters_cmd, "param [dump] | set <name> <value> | save" },
-    { "hang",      cmd_hang,      "hang " HANG_CONFIRM_WORD ": hang the control step, for a watchdog reset" },
+    { "lastreset", cmd_lastreset, "last reset: cause, Breadcrumb, Crash record, resets not power-on" },
+    { "hang",      cmd_hang,      "hang " BENCH_CONFIRM_WORD ": hang the control step, for a watchdog reset" },
+    { "crash",     cmd_crash,     "crash " BENCH_CONFIRM_WORD ": call the crash routine, for a crash reset" },
 };
 
 #define COMMAND_TABLE_COUNT (sizeof(commandTable) / sizeof(commandTable[0]))
@@ -108,6 +114,33 @@ void shell_register_commands(const shell_cmd_t *commands, size_t count)
 {
     imageCommands = commands;
     imageCommandCount = count;
+}
+
+/* The image's refusal hook for `hang` and `crash`, or none. Written once
+   from tasks_init() before shellTask exists, only read after that. */
+static shell_refusal_hook_t benchRefusal;
+
+void shell_register_bench_refusal(shell_refusal_hook_t hook)
+{
+    benchRefusal = hook;
+}
+
+/* The checks `hang` and `crash` share: the confirmation word, then the
+   image's refusal hook. True if the command may go ahead. */
+static bool bench_command_allowed(int argc, char **argv)
+{
+    if (argc != 2 || strcmp(argv[1], BENCH_CONFIRM_WORD) != 0) {
+        shell_printf("usage: %s " BENCH_CONFIRM_WORD "  (resets the board)\r\n", argv[0]);
+        return false;
+    }
+
+    const char *refusal = benchRefusal != NULL ? benchRefusal() : NULL;
+
+    if (refusal != NULL) {
+        shell_printf("%s: refused: %s\r\n", argv[0], refusal);
+        return false;
+    }
+    return true;
 }
 
 bool shell_wait_key(uint32_t timeout_ms)
@@ -168,14 +201,38 @@ static int cmd_bus(int argc, char **argv)
    once the step spins, nothing below Realtime runs again. */
 static int cmd_hang(int argc, char **argv)
 {
-    if (argc != 2 || strcmp(argv[1], HANG_CONFIRM_WORD) != 0) {
-        shell_printf("usage: hang " HANG_CONFIRM_WORD "  (the watchdog resets the board)\r\n");
+    if (!bench_command_allowed(argc, argv)) {
         return 0;
     }
 
     shell_printf("hanging the control step...\r\n");
     osDelay(50);
     control_step_request_hang();
+
+    return 0;
+}
+
+/* The bench's crash (issue 49): the real crash routine, from the shell
+   task, so the Crash record names shellTask. With a debugger attached it
+   breaks instead of resetting. The osDelay() lets printTask send the
+   message: the crash routine turns interrupts off for good. */
+static int cmd_crash(int argc, char **argv)
+{
+    if (!bench_command_allowed(argc, argv)) {
+        return 0;
+    }
+
+    shell_printf("calling the crash routine...\r\n");
+    osDelay(50);
+    crash_now(CRASH_COMMAND, (uint32_t)(uintptr_t)cmd_crash);
+}
+
+static int cmd_lastreset(int argc, char **argv)
+{
+    (void)argc;
+    (void)argv;
+
+    reset_info_print();
 
     return 0;
 }

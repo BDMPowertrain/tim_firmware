@@ -65,7 +65,8 @@ void tasks_init(void)
        print_init() must run before any task that might print is created.
        shell_init() arms the USART1 RX interrupt, so it must run before
        that interrupt can fire. The BMS has no shell commands of its own
-       yet, so it never calls shell_register_commands(). */
+       yet, so it never calls shell_register_commands(), and it never
+       refuses `hang` or `crash`, so it registers no refusal hook. */
     bool ok = print_init();
     /* Parameters before anything that reads them, read once (ADR 0015).
        The BMS accepts a save at any time, so it has no save hook. */
@@ -98,20 +99,4 @@ void tasks_init(void)
     watchdog_kick();
     (void)create_task(control_step_task, &controlStepArgs, "controlStep",
                       (osPriority_t)CONTROL_STEP_TASK_PRIORITY, CONTROL_STEP_TASK_STACK_SIZE);
-}
-
-/* Called by FreeRTOS the instant it detects a task has overrun its stack
-   (configCHECK_FOR_STACK_OVERFLOW, FreeRTOSConfig.h). RTOS state is not
-   trustworthy by now, so this only latches HBLED on solid and halts —
-   visibly different from the heartbeat blink. Attach a debugger to read
-   xTask and pcTaskName. */
-void vApplicationStackOverflowHook(TaskHandle_t xTask, char *pcTaskName)
-{
-    (void)xTask;
-    (void)pcTaskName;
-
-    __disable_irq();
-    HAL_GPIO_WritePin(GPIO_HBLED_GPIO_Port, GPIO_HBLED_Pin, GPIO_PIN_RESET);
-    for (;;) {
-    }
 }

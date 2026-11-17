@@ -502,4 +502,5 @@ static const shell_cmd_t vcuCommands[] = {
 void vcu_shell_register(void)
 {
     shell_register_commands(vcuCommands, sizeof(vcuCommands) / sizeof(vcuCommands[0]));
+    shell_register_bench_refusal(vcu_step_bench_refusal);
 }

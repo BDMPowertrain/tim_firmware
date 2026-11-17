@@ -14,6 +14,7 @@
 #include "cmsis_os2.h"
 
 #include "cpu_share.h"
+#include "crash.h"
 #include "cycle_counter.h"
 #include "print.h"
 
@@ -160,4 +161,7 @@ void stats_print_tasks(void)
     }
     shell_printf("scheduler suspended to gather: last %lu us, worst %lu us\r\n",
                  (unsigned long)lastSuspendUs, (unsigned long)worstSuspendUs);
+    shell_printf("heap: %lu B free, an allocation has %s\r\n",
+                 (unsigned long)xPortGetFreeHeapSize(),
+                 crash_alloc_failed() ? "FAILED since start-up" : "never failed");
 }
