@@ -37,6 +37,10 @@
 /* The argument of eventTask(). Must outlive the task. */
 typedef struct {
     uint8_t image; /* PARAMS_IMAGE_VCU or PARAMS_IMAGE_BMS, for the boot Event */
+    /* Run once on the writer's task, right after the log is opened and
+       before anything is written to it, for a search of what an earlier
+       start left (the VCU's Pedal check, ADR 0016). NULL for none. */
+    void (*after_open)(void);
 } events_task_args_t;
 
 /* Creates the Event queue and the log's lock. Call first in tasks_init(),
@@ -51,6 +55,13 @@ bool events_post(uint16_t code, const uint8_t data[EVENT_DATA_SIZE]);
 /* This start's boot number, once the writer has opened the log. False
    before then. Any task. */
 bool events_boot_number(uint16_t *boot);
+
+/* Searches the log from the newest Event to the oldest for one match()
+   accepts (event_log_find()), under the log's lock. False before the
+   writer has opened the log. Any task but the Control step, which takes
+   no lock (ADR 0010). */
+bool events_find(bool (*match)(const event_t *ev, const void *ctx), const void *ctx,
+                 event_t *out);
 
 /* Events waiting in the queue now. */
 uint32_t events_queued(void);

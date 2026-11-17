@@ -97,6 +97,15 @@ bool events_boot_number(uint16_t *boot)
     return ok;
 }
 
+bool events_find(bool (*match)(const event_t *ev, const void *ctx), const void *ctx,
+                 event_t *out)
+{
+    lock();
+    const bool found = opened && event_log_find(&log_, match, ctx, out);
+    unlock();
+    return found;
+}
+
 /* ---- the writer -------------------------------------------------------- */
 
 /* Appends one Event, then hands the Data log a copy of the same 32 bytes
@@ -163,6 +172,9 @@ void eventTask(void *argument)
     opened = true;
     unlock();
 
+    if (args->after_open != NULL) {
+        args->after_open();
+    }
     write_boot(args, now);
     for (uint32_t i = 0; i < log_.repair_count; i++) {
         event_data_repair(data, &log_.repair[i], log_.repairs);

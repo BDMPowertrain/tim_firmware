@@ -5,8 +5,10 @@
 #include <stddef.h>
 #include <string.h>
 
+#include "build_id.h"
 #include "bus_term.h"
 #include "control_bus.h"
+#include "event_codes.h"
 #include "events.h"
 #include "flash_bank2.h"
 #include "main.h"
@@ -33,6 +35,11 @@ static vcu_control_in_t in;
 static vcu_control_out_t out;
 static vcu_inputs_t inputs;
 
+/* VCU_PEDAL_CHECK_...: written once by the Event writer's task, read by
+   the step; one byte, loaded and stored whole, so the step takes no lock
+   (ADR 0010). */
+static uint8_t pedalCheckRecord = VCU_PEDAL_CHECK_UNKNOWN;
+
 _Static_assert(sizeof(vcu_inputs_t) <= CONTROL_IMAGE_DATA_MAX,
                "the VCU inputs must fit the published snapshot");
 
@@ -53,6 +60,16 @@ bool vcu_step_init(void)
        once. The tick counts from 0 at reset release, near enough for the
        3 s lamp check. */
     static vcu_control_config_t config;
+    static const size_t calibration[] = {
+        VCU_PARAM_APPS1_MIN,  VCU_PARAM_APPS1_MAX,   VCU_PARAM_APPS2_MIN,
+        VCU_PARAM_APPS2_MAX,  VCU_PARAM_BRAKE1_ZERO, VCU_PARAM_BRAKE2_ZERO,
+        VCU_PARAM_BRAKE_ENGAGED, VCU_PARAM_CAL_REVISION,
+    };
+    bool calPresent = true;
+
+    for (size_t i = 0; i < sizeof(calibration) / sizeof(calibration[0]); i++) {
+        calPresent = calPresent && parameters_from_copy(calibration[i]);
+    }
 
     config = (vcu_control_config_t){
         .cal = {
@@ -64,7 +81,12 @@ bool vcu_step_init(void)
                             parameters_value(VCU_PARAM_BRAKE2_ZERO) },
         },
         .brake_engaged = (uint16_t)parameters_value(VCU_PARAM_BRAKE_ENGAGED),
+        .cal_revision = (uint16_t)parameters_value(VCU_PARAM_CAL_REVISION),
+        .cal_present = calPresent,
         .max_torque = (uint16_t)parameters_value(VCU_PARAM_MAX_TORQUE),
+        .build_id = BUILD_ID,
+        .build_dirty = BUILD_DIRTY != 0,
+        .param_save_counter = parameters_save_counter(),
         .params_defaulted = parameters_defaulted(),
         .not_dual_bank = flash_bank2_get() == NULL,
         .last_reset_not_power_on = !reset_cause_is_power_on(reset_info_report()->cause),
@@ -102,6 +124,7 @@ static void phase_input(control_step_ctx_t *ctx)
     in.error_passive = bus.error_passive;
     in.rx_overflowed = bus.rx_overflowed;
     in.timing_fault = ctx->timing_fault;
+    in.pedal_check_record = __atomic_load_n(&pedalCheckRecord, __ATOMIC_RELAXED);
 }
 
 static void phase_logic(control_step_ctx_t *ctx)
@@ -121,6 +144,8 @@ static void phase_logic(control_step_ctx_t *ctx)
         .cuts = out.cuts,
         .torque_request = out.torque_request,
         .torque = out.torque,
+        .pedal_check_due = out.pedal_check_due,
+        .pedal_check = out.pedal_check,
     };
 }
 
@@ -155,6 +180,25 @@ static void phase_output(control_step_ctx_t *ctx)
     for (size_t i = 0; i < out.event_count; i++) {
         (void)events_post(out.events[i].code, out.events[i].data);
     }
+}
+
+vcu_cal_result_t vcu_step_calibration(void)
+{
+    return control.calibration; /* set by vcu_step_init(), never after */
+}
+
+void vcu_step_find_pedal_check(void)
+{
+    const event_pedal_check_key_t key = {
+        .build_id = BUILD_ID,
+        .save_counter = parameters_save_counter(),
+        .dirty = BUILD_DIRTY != 0,
+    };
+    event_t ev;
+    const bool found = events_find(event_pedal_check_matches, &key, &ev);
+
+    __atomic_store_n(&pedalCheckRecord, found ? VCU_PEDAL_CHECK_FOUND : VCU_PEDAL_CHECK_ABSENT,
+                     __ATOMIC_RELAXED);
 }
 
 const char *vcu_step_save_refusal(void)

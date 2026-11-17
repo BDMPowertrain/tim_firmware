@@ -62,6 +62,7 @@ static control_step_args_t controlStepArgs;
 /* Read by the Event writer for as long as it runs. */
 static const events_task_args_t eventTaskArgs = {
     .image = PARAMS_IMAGE_VCU,
+    .after_open = vcu_step_find_pedal_check, /* ADR 0016 */
 };
 
 /* The Data log's step ring (ADR 0021): 64 Records, 640 ms of steps. */

@@ -120,9 +120,48 @@ int32_t parameters_value(size_t index)
     return ready ? params_value(&store, index) : 0;
 }
 
+bool parameters_from_copy(size_t index)
+{
+    return ready && index < store.table->count && slots[index].origin == PARAM_FROM_COPY;
+}
+
+uint32_t parameters_save_counter(void)
+{
+    if (!ready || store.source != PARAMS_LOADED) {
+        return 0u;
+    }
+    return store.copy_counter[store.copy_loaded];
+}
+
 bool parameters_defaulted(void)
 {
     return !ready || params_defaulted(&store);
+}
+
+/* ADR 0016: the calibration is a record, captured and never typed, so
+   it is printed as one line, a default marked. */
+static void print_calibration(void)
+{
+    bool any = false;
+    bool pending = false;
+
+    for (size_t i = 0; i < store.table->count; i++) {
+        const param_def_t *d = &store.table->defs[i];
+
+        if (!d->calibration) {
+            continue;
+        }
+        if (!any) {
+            shell_printf("calibration (captured, never typed):");
+            any = true;
+        }
+        shell_printf(" %s=%ld%s", d->name, (long)slots[i].value,
+                     slots[i].origin == PARAM_FROM_COPY ? "" : "(default)");
+        pending = pending || slots[i].pending != slots[i].value;
+    }
+    if (any) {
+        shell_printf("%s\r\n", pending ? "; a new one after save and reset" : "");
+    }
 }
 
 static void param_dump(void)
@@ -137,6 +176,9 @@ static void param_dump(void)
         const param_def_t *d = &store.table->defs[i];
         const param_slot_t *s = &slots[i];
 
+        if (d->calibration) {
+            continue; /* in the record below */
+        }
         shell_printf("%-18s %8ld  [%ld..%ld] %s", d->name, (long)s->value, (long)d->min,
                      (long)d->max, origin_name(s->origin));
         if (s->origin == PARAM_DEFAULT_OUT_OF_RANGE) {
@@ -147,6 +189,7 @@ static void param_dump(void)
         }
         shell_printf("\r\n");
     }
+    print_calibration();
 }
 
 static void param_set(const char *name, const char *text)
@@ -159,6 +202,11 @@ static void param_set(const char *name, const char *text)
 
     if (i == store.table->count) {
         shell_printf("param: no parameter '%s'\r\n", name);
+        return;
+    }
+    if (store.table->defs[i].calibration) {
+        shell_printf("param: %s is a calibration: captured by the image's guided command, "
+                     "never typed\r\n", name);
         return;
     }
     if (*text == '\0' || *end != '\0' || errno == ERANGE) {
@@ -180,6 +228,27 @@ static void param_set(const char *name, const char *text)
     }
 }
 
+/* Writes every pending value and posts the save Event. NULL once saved,
+   otherwise why not. */
+static const char *save_pending(void)
+{
+    const params_save_result_t result = params_save(&store);
+    uint8_t data[EVENT_DATA_SIZE];
+
+    event_data_param_save(data, (uint8_t)result,
+                          result == PARAMS_SAVE_OK ? store.last_save_counter : 0u);
+    (void)events_post(EVENT_PARAM_SAVE, data);
+
+    switch (result) {
+    case PARAMS_SAVE_OK:            return NULL;
+    case PARAMS_SAVE_NO_FLASH:      return "refused: not dual-bank";
+    case PARAMS_SAVE_ERASE_FAILED:  return "failed: erase";
+    case PARAMS_SAVE_WRITE_FAILED:  return "failed: write";
+    case PARAMS_SAVE_VERIFY_FAILED: return "failed: read back differs";
+    default:                        return "failed";
+    }
+}
+
 static void param_save(void)
 {
     const char *refusal = saveHook != NULL ? saveHook() : NULL;
@@ -189,33 +258,37 @@ static void param_save(void)
         return;
     }
 
-    const params_save_result_t result = params_save(&store);
-    uint8_t data[EVENT_DATA_SIZE];
+    const char *failure = save_pending();
 
-    event_data_param_save(data, (uint8_t)result,
-                          result == PARAMS_SAVE_OK ? store.last_save_counter : 0u);
-    (void)events_post(EVENT_PARAM_SAVE, data);
-
-    switch (result) {
-    case PARAMS_SAVE_OK:
+    if (failure == NULL) {
         shell_printf("param: saved (save %lu), in force after a reset\r\n",
                      (unsigned long)store.last_save_counter);
-        break;
-    case PARAMS_SAVE_NO_FLASH:
-        shell_printf("param: save refused: not dual-bank\r\n");
-        break;
-    case PARAMS_SAVE_ERASE_FAILED:
-        shell_printf("param: save failed: erase\r\n");
-        break;
-    case PARAMS_SAVE_WRITE_FAILED:
-        shell_printf("param: save failed: write\r\n");
-        break;
-    case PARAMS_SAVE_VERIFY_FAILED:
-        shell_printf("param: save failed: read back differs\r\n");
-        break;
-    default:
-        break;
+    } else {
+        shell_printf("param: save %s\r\n", failure);
     }
+}
+
+const char *parameters_save_values(const size_t *index, const int32_t *value, size_t count)
+{
+    if (!ready) {
+        return "no table loaded";
+    }
+    const char *refusal = saveHook != NULL ? saveHook() : NULL;
+
+    if (refusal != NULL) {
+        return refusal;
+    }
+    /* All in bounds first, so a refusal leaves nothing half set. */
+    for (size_t i = 0; i < count; i++) {
+        if (index[i] >= store.table->count || value[i] < store.table->defs[index[i]].min ||
+            value[i] > store.table->defs[index[i]].max) {
+            return "a value is outside its bounds";
+        }
+    }
+    for (size_t i = 0; i < count; i++) {
+        (void)params_set(&store, index[i], value[i]);
+    }
+    return save_pending();
 }
 
 #define PARAM_USAGE "usage: param [dump] | set <name> <value> | save\r\n"
