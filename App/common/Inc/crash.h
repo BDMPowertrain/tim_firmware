@@ -9,9 +9,12 @@
    - turns interrupts off,
    - writes the Crash record (cause, task, address) to the backup
      registers (reset_info.h),
-   - with a debugger attached (DHCSR.C_DEBUGEN, read now) breaks there,
-     and resets if the debugger lets it run on;
-   - otherwise resets the MCU by software.
+   - resets the MCU by software, through crash_reset(), always.
+   It never stops on its own, even with a debugger attached: the debug
+   enable bit outlives the probe until a power cycle, and a halt with no one
+   there would freeze the board with its watchdog. A GDB session started
+   with tools/tim.gdb has a breakpoint on crash_reset(), so it stops there
+   with the record written.
    The next start reports it in `lastreset` and counts the reset as not
    power-on (on the BMS a Held fault, ADR 0011).
 
@@ -54,6 +57,10 @@ __attribute__((noreturn)) void crash_fault(crash_cause_t cause, uint32_t exc_ret
 /* configASSERT's action (FreeRTOSConfig.h). The address recorded is the
    assert's own. */
 __attribute__((noreturn, noinline)) void crash_assert(void);
+
+/* The crash routine's last step: a software reset. A function of its own
+   only so that tools/tim.gdb can put a breakpoint on it. */
+__attribute__((noreturn, noinline)) void crash_reset(void);
 
 /* A FreeRTOS allocation has failed since start-up (the failed-allocation
    hook). An error bit: nothing is reset for it. */

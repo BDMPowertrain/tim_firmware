@@ -74,13 +74,14 @@ static void name_task(char out[CRASH_TASK_CHARS + 1u], bool in_handler)
     out[CRASH_TASK_CHARS] = '\0';
 }
 
-__attribute__((noreturn)) static void reset_or_break(void)
+/* Always resets, never a BKPT. The debug enable bit stays set from the
+   first probe connection until a power cycle, so a BKPT under it would
+   halt an unattended board for good, the watchdog frozen with it (a BMS
+   with BMS_OK where it was). A GDB session stops here instead through its
+   own breakpoint (tools/tim.gdb), which exists only while GDB runs.
+   noinline so that the breakpoint has a function to sit on. */
+__attribute__((noreturn, noinline)) void crash_reset(void)
 {
-    if ((CoreDebug->DHCSR & CoreDebug_DHCSR_C_DEBUGEN_Msk) != 0u) {
-        /* "With a debugger attached it breaks instead." Only with the bit
-           set: without it a BKPT is itself a HardFault. */
-        __BKPT(0);
-    }
     NVIC_SystemReset();
 }
 
@@ -92,7 +93,7 @@ void crash_now(crash_cause_t cause, uint32_t address)
 
     name_task(record.task, __get_IPSR() != 0u);
     reset_info_crash(&record);
-    reset_or_break();
+    crash_reset();
 }
 
 void crash_assert(void)
@@ -153,7 +154,7 @@ void crash_fault(crash_cause_t cause, uint32_t exc_return, uint32_t sp)
         record.address = frame[FRAME_PC] & ~1u;
         reset_info_crash(&record);
     }
-    reset_or_break();
+    crash_reset();
 }
 
 bool crash_alloc_failed(void)
@@ -175,7 +176,7 @@ void vApplicationStackOverflowHook(TaskHandle_t xTask, char *pcTaskName)
     strncpy(record.task, pcTaskName != NULL ? pcTaskName : "?", CRASH_TASK_CHARS);
     record.task[CRASH_TASK_CHARS] = '\0';
     reset_info_crash(&record);
-    reset_or_break();
+    crash_reset();
 }
 
 /* configUSE_MALLOC_FAILED_HOOK (FreeRTOSConfig.h): an error bit, and the

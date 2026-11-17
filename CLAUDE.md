@@ -73,12 +73,15 @@ Use build/Debug/bms/tim.elf for a TIM in the BMS role.
 
 ## Debug
     openocd -f interface/stlink-dap.cfg -f target/stm32g4x.cfg
-    arm-none-eabi-gdb build/Debug/vcu/tim.elf     # .gdbinit connects automatically
+    arm-none-eabi-gdb -x tools/tim.gdb build/Debug/vcu/tim.elf
 
-Every failure the image detects itself (faults, stack overflow, a failed
-assert, Error_Handler) goes to one crash routine (App/common/Inc/crash.h):
-it writes the Crash record and resets, or, with a debugger attached, stops
-at a BKPT in it first. The shell's `lastreset` shows the last reset's
+tools/tim.gdb attaches without flashing or resetting. Every failure the
+image detects itself (faults, stack overflow, a failed assert,
+Error_Handler) goes to one crash routine (App/common/Inc/crash.h): it
+writes the Crash record and always resets, never halting on its own (the
+debug enable bit outlives the probe, so a halt could freeze an unattended
+board). A GDB session started with tools/tim.gdb stops at its breakpoint
+on crash_reset() instead. The shell's `lastreset` shows the last reset's
 cause, Breadcrumb and Crash record.
 
 ## Provisioning — REQUIRED, once per board
