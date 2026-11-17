@@ -4,7 +4,8 @@
  * handed straight to a hardware send slot; nothing is queued.
  *
  * Send table: VCU_Status every second step, from the first. The inverter
- * command (0x0C0, every step) joins it when the VCU leaves STARTUP.
+ * command (0x0C0, every step) joins it when the VCU leaves STARTUP
+ * (vcu_control.h).
  *
  * This is logic (ADR 0002): no HAL, no RTOS, no clock.
  */

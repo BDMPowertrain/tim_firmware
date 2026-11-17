@@ -130,9 +130,11 @@
 /* The Control step (ADR 0010): the one Realtime task, every 10 ms. It
    takes no mutex and blocks only on its own period. The stack holds the
    status frame build, the published snapshot it builds, the ADC window
-   averages and the step's own locals; mailboxes and their snapshot are
-   static in control_bus.c. Measured on the bench TIM (Debug, 20 s, issue
-   55): 432 B free of 1024. */
+   averages and the step's own locals, now with vcu_control_step()'s
+   unpacked frames (issue 56); its inputs and outputs are static in
+   vcu_step.c, the mailboxes and their snapshot static in control_bus.c.
+   Measured on the bench TIM (Debug, 20 s, issue 55): 432 B free of 1024;
+   re-measure with `tasks` after issue 56. */
 #define CONTROL_STEP_TASK_PRIORITY   osPriorityRealtime
 #define CONTROL_STEP_TASK_STACK_SIZE 1024u
 

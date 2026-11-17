@@ -81,8 +81,27 @@ static void test_the_crash_event(void)
     TEST_ASSERT_EQUAL_HEX8_ARRAY(want, data, EVENT_DATA_SIZE);
 }
 
+/* A VCU state transition: from, to, cause, the two voltages read, every
+   cause that applied. */
+static void test_the_vcu_state_event(void)
+{
+    const event_vcu_state_t state = {
+        .from = 3u, .to = 2u, .cause = 5u,
+        .bus_dv = -2, .pack_dv = 4000u, .causes = 0x0013u,
+    };
+    const uint8_t want[EVENT_DATA_SIZE] = {
+        3, 2, 5, 0, 0xFE, 0xFF, 0xA0, 0x0F, 0x13, 0x00, 0, 0, 0, 0, 0, 0,
+    };
+    uint8_t data[EVENT_DATA_SIZE];
+
+    memset(data, 0xAA, sizeof data);
+    event_data_vcu_state(data, &state);
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(want, data, EVENT_DATA_SIZE);
+}
+
 static void test_names(void)
 {
+    TEST_ASSERT_EQUAL_STRING("VCU state", event_code_name(EVENT_VCU_STATE));
     TEST_ASSERT_EQUAL_STRING("boot", event_code_name(EVENT_BOOT));
     TEST_ASSERT_EQUAL_STRING("bus-off", event_code_name(EVENT_BUS_OFF));
     TEST_ASSERT_EQUAL_STRING("?", event_code_name(0xBEEFu));
@@ -95,6 +114,7 @@ int main(void)
     RUN_TEST(test_a_power_on_boot_has_nothing_following);
     RUN_TEST(test_the_overrun_event);
     RUN_TEST(test_the_crash_event);
+    RUN_TEST(test_the_vcu_state_event);
     RUN_TEST(test_names);
     return UNITY_END();
 }

@@ -4,9 +4,9 @@
  * A code is never reused for another meaning once an image has written
  * it: a stored Event outlives the image that wrote it.
  *
- * Codes for Events whose source is not built yet (state transitions,
- * torque cut, BMS fault trip, charger, balancing, pedal check and the
- * rest of the spec's list) are added here when their source is.
+ * Codes for Events whose source is not built yet (torque cut, BMS fault
+ * trip, charger, balancing, pedal check and the rest of the spec's list)
+ * are added here when their source is.
  *
  * This is logic (ADR 0002): no HAL, no RTOS, no clock.
  */
@@ -44,6 +44,9 @@ typedef enum {
     EVENT_BUS_OFF_LATCHED   = 50, /* the third quick bus-off: retry once per second */
     EVENT_BUS_OFF_UNLATCHED = 51, /* clean long enough: the latch cleared */
     EVENT_MAILBOX_TIMEOUT   = 52, /* event_data_mailbox_timeout() */
+
+    /* The VCU's states (ADR 0006, vcu_control.h). */
+    EVENT_VCU_STATE = 64, /* event_data_vcu_state() */
 } event_code_t;
 
 /* "boot", "overrun" and so on, for the shell; "?" for a code not here. */
@@ -111,5 +114,18 @@ void event_data_bus(uint8_t data[EVENT_DATA_SIZE], const event_bus_t *bus);
 /* 0 frame ID (u32), 4 timeouts of this mailbox (u32), 8 row (u8). */
 void event_data_mailbox_timeout(uint8_t data[EVENT_DATA_SIZE], uint32_t frame_id,
                                 uint32_t timeouts, uint8_t row);
+
+typedef struct {
+    uint8_t  from;    /* VCU_Status State values */
+    uint8_t  to;
+    uint8_t  cause;   /* vcu_cause_t (vcu_control.h) */
+    int16_t  bus_dv;  /* inverter DC bus, 0.1 V, as the step read it */
+    uint16_t pack_dv; /* BMS_Limits pack voltage, 0.1 V, as the step read it */
+    uint16_t causes;  /* Leaving Ready to Drive: every cause that applied */
+} event_vcu_state_t;
+
+/* 0 from (u8), 1 to (u8), 2 cause (u8), 4 bus voltage (i16, 0.1 V),
+   6 pack voltage (u16, 0.1 V), 8 causes (u16). */
+void event_data_vcu_state(uint8_t data[EVENT_DATA_SIZE], const event_vcu_state_t *state);
 
 #endif /* EVENT_CODES_H */

@@ -851,6 +851,9 @@ static void MX_GPIO_Init(void)
   /* Straight after GPIO init, with every pin at its safe level (ADR 0013,
      watchdog.h). */
   watchdog_start();
+  /* The fault LED's lamp check, on within 200 ms of reset release (spec
+     #36); the control step holds it 3 s (vcu_control.h). */
+  HAL_GPIO_WritePin(FAULT_LED_GPIO_Port, FAULT_LED_Pin, GPIO_PIN_SET);
   /* USER CODE END MX_GPIO_Init_2 */
 }
 

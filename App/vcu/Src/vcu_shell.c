@@ -419,6 +419,41 @@ static void print_raw(const char *name, uint16_t counts)
     }
 }
 
+/* What refuses the Start procedure (vcu_control.h). Provisional (#28). */
+static void print_start_blockers(uint16_t blockers)
+{
+    static const struct {
+        uint16_t    bit;
+        const char *name;
+    } names[] = {
+        { VCU_START_NOT_TS_ACTIVE,    "not TS_ACTIVE" },
+        { VCU_START_BRAKE,            "brake not engaged" },
+        { VCU_START_PEDAL,            "pedal pressed" },
+        { VCU_START_PEDAL_SENSOR,     "pedal sensor" },
+        { VCU_START_BRAKE_SENSOR,     "brake sensor" },
+        { VCU_START_PARAMS_DEFAULTED, "parameters defaulted" },
+        { VCU_START_MAILBOX,          "mailbox not VALID" },
+        { VCU_START_BMS_FAULT,        "BMS fault" },
+        { VCU_START_INVERTER_FAULT,   "inverter fault" },
+        { VCU_START_SDC_OPEN,         "shutdown circuit open" },
+        { VCU_START_BUS_OFF,          "bus-off latched" },
+        { VCU_START_BUS_VOLTAGE,      "bus voltage" },
+        { VCU_START_TIMING_FAULT,     "timing fault" },
+    };
+
+    if (blockers == 0u) {
+        shell_printf("ready: a press starts\r\n");
+        return;
+    }
+    shell_printf("refused:");
+    for (size_t i = 0; i < sizeof(names) / sizeof(names[0]); i++) {
+        if ((blockers & names[i].bit) != 0u) {
+            shell_printf(" %s;", names[i].name);
+        }
+    }
+    shell_printf("\r\n");
+}
+
 static void print_inputs(const vcu_inputs_t *in)
 {
     static const char *const appsName[VCU_APPS_COUNT] = { "APPS1", "APPS2" };
@@ -447,6 +482,8 @@ static void print_inputs(const vcu_inputs_t *in)
                  in->sdc_closed ? "closed" : "open",
                  in->start_pressed ? "pressed" : "released",
                  in->samples_ready ? "ready" : "NOT ready");
+    shell_printf("brake %s; start procedure ", in->brake_engaged ? "engaged" : "released");
+    print_start_blockers(in->start_blockers);
 }
 
 #define CMD_INPUTS_USAGE "usage: inputs [stream]\r\n"

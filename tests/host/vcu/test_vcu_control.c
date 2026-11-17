@@ -1,0 +1,1171 @@
+/*
+ * Host tests for the VCU's Control step as one function
+ * (App/vcu/logic/Inc/vcu_control.h), issue 56.
+ *
+ * Seam 1 of spec #36: the test hands the step its inputs (ADC counts,
+ * digital inputs, mailboxes fed with frame bytes and arrival times, the
+ * Parameters, the time) and judges only what comes out: the state, the pin
+ * levels, the frames as bytes, the Events.
+ *
+ * The fixture plays the bench script's part: it packs BMS_Status,
+ * BMS_Limits and BMS_Power (with E2E Profile 11) and the inverter frames
+ * every 10 ms step, and runs them through the real mailbox logic, so a
+ * mailbox is VALID after three good frames exactly as on the car.
+ *
+ * Spec (issue 13, "States"; spec #36, "VCU image"):
+ * - STARTUP to GLV_ON once tasks exist, a full set of pedal samples is in,
+ *   CAN1 runs and parameters are loaded or defaulted.
+ * - GLV_ON to TS_ACTIVE: Shutdown Circuit input closed, bus voltage at least
+ *   90% of pack voltage, BMS_Status reporting no fault, the BMS and inverter
+ *   mailboxes VALID. TS_ACTIVE to GLV_ON: bus voltage below 60 V.
+ * - Start procedure: Brake engaged, higher Pedal travel below 5%, no fault
+ *   bit, no inverter fault, Shutdown Circuit closed, bus voltage at least
+ *   90%, then a rising edge on the start button while the brake is held. A
+ *   button already held does not count (EV.10.6).
+ * - Ready to Drive sound 2.0 s from entry (EV.10.7), stopped at once if
+ *   Ready to Drive is lost.
+ */
+#include <string.h>
+
+#include "adc_window.h"
+#include "can_control.h"
+#include "control_rx.h"
+#include "e2e_p11.h"
+#include "event_codes.h"
+#include "mailbox.h"
+#include "unity.h"
+#include "vcu_control.h"
+
+#define STEP_MS 10u
+
+/* Counts on the sensors (vcu_sensors.h): APPS calibrated over 1000-3000,
+   APPS1 rising and APPS2 falling; brakes at a 372-count zero; 5 V
+   supplies. */
+#define APPS_MIN     1000u
+#define APPS_MAX     3000u
+#define BRAKE_ZERO   372u
+#define BRAKE_THRESH 200u /* the brake_engaged Parameter, counts above zero */
+#define SUPPLY_OK    3722u
+
+#define PACK_DV 4000u /* 400.0 V */
+
+static vcu_control_t vc;
+static vcu_control_config_t config;
+static vcu_control_in_t in;
+static vcu_control_out_t out;
+
+/* The mailboxes, as control_bus.c keeps them, and what the bench sends. */
+static mailbox_t mb[VCU_RX_COUNT];
+static mailbox_rx_t rx[VCU_RX_COUNT];
+static bool playing[VCU_RX_COUNT];
+static e2e_p11_tx_t bmsTx[3];
+static uint8_t lastStatus[CAN_CONTROL_VCU_STATUS_LENGTH]; /* the last VCU_Status sent */
+static bool statusSent;
+
+static struct can_control_bms_status_t bmsStatus;
+static struct can_control_bms_limits_t bmsLimits;
+static struct can_control_bms_power_t bmsPower;
+static struct can_control_inv_voltage_t invVoltage;
+static struct can_control_inv_fault_codes_t invFaults;
+
+/* ------------------------------------------------------------------ */
+/* The bench                                                          */
+/* ------------------------------------------------------------------ */
+
+static void set_pedal(uint16_t travel_tenths)
+{
+    const uint32_t span = APPS_MAX - APPS_MIN;
+    in.raw.apps[0] = (uint16_t)(APPS_MIN + (span * travel_tenths) / 1000u);
+    in.raw.apps[1] = (uint16_t)(APPS_MAX - (span * travel_tenths) / 1000u);
+}
+
+/* Both brake sensors at this many counts above their zero. */
+static void set_brake(uint16_t counts)
+{
+    in.raw.brake[0] = (uint16_t)(BRAKE_ZERO + counts);
+    in.raw.brake[1] = (uint16_t)(BRAKE_ZERO + counts);
+}
+
+static void brake_on(void) { set_brake(BRAKE_THRESH + 100u); }
+static void brake_off(void) { set_brake(0u); }
+
+static void set_bus_dv(int16_t dv) { invVoltage.dc_bus_voltage = dv; }
+
+static void play_all(bool on)
+{
+    for (size_t i = 0; i < VCU_RX_COUNT; i++) {
+        playing[i] = on;
+    }
+}
+
+static void pack_frame(size_t row, uint8_t *frame)
+{
+    memset(frame, 0, MAILBOX_FRAME_MAX);
+    switch (row) {
+    case VCU_RX_BMS_STATUS:
+        (void)can_control_bms_status_pack(frame, &bmsStatus, 8u);
+        e2e_p11_protect(&bmsTx[0], 0x0080u, frame, 8u);
+        break;
+    case VCU_RX_BMS_LIMITS:
+        (void)can_control_bms_limits_pack(frame, &bmsLimits, 8u);
+        e2e_p11_protect(&bmsTx[1], 0x0081u, frame, 8u);
+        break;
+    case VCU_RX_BMS_POWER:
+        (void)can_control_bms_power_pack(frame, &bmsPower, 8u);
+        e2e_p11_protect(&bmsTx[2], 0x0082u, frame, 8u);
+        break;
+    case VCU_RX_INV_VOLTAGE:
+        (void)can_control_inv_voltage_pack(frame, &invVoltage, 8u);
+        break;
+    case VCU_RX_INV_FAULT_CODES:
+        (void)can_control_inv_fault_codes_pack(frame, &invFaults, 8u);
+        break;
+    default:
+        /* Every other frame is all zeros: 0 rpm, VSM start, and so on. */
+        break;
+    }
+}
+
+/* One 10 ms step: the bench's frames arrive, the mailboxes update, the
+   step runs. */
+static void step(void)
+{
+    for (size_t i = 0; i < VCU_RX_COUNT; i++) {
+        if (playing[i]) {
+            uint8_t frame[MAILBOX_FRAME_MAX];
+            pack_frame(i, frame);
+            mailbox_rx_store(&rx[i], frame, 8u, in.now_ms);
+        }
+        (void)mailbox_update(&mb[i], &control_rx_config[vcu_rx_frames[i]], &rx[i],
+                             in.now_ms);
+    }
+    vcu_control_step(&vc, &in, &out);
+    if (out.send_status) {
+        memcpy(lastStatus, out.status, sizeof(lastStatus));
+        statusSent = true;
+    }
+    in.now_ms += STEP_MS;
+    in.step_count++;
+}
+
+static void run_ms(uint32_t ms)
+{
+    for (uint32_t t = 0; t < ms; t += STEP_MS) {
+        step();
+    }
+}
+
+/* The last VCU_Status sent: it goes every second step. */
+static struct can_control_vcu_status_t status_frame(void)
+{
+    struct can_control_vcu_status_t s;
+    TEST_ASSERT_TRUE(statusSent);
+    TEST_ASSERT_EQUAL_INT(0, can_control_vcu_status_unpack(&s, lastStatus, sizeof(lastStatus)));
+    return s;
+}
+
+static struct can_control_inv_command_t command_frame(void)
+{
+    struct can_control_inv_command_t c;
+    TEST_ASSERT_TRUE(out.send_command);
+    TEST_ASSERT_EQUAL_INT(0, can_control_inv_command_unpack(&c, out.command, sizeof(out.command)));
+    return c;
+}
+
+/* The last EVENT_VCU_STATE Event of this step. */
+static const vcu_event_t *state_event(void)
+{
+    for (size_t i = out.event_count; i > 0u; i--) {
+        if (out.events[i - 1u].code == EVENT_VCU_STATE) {
+            return &out.events[i - 1u];
+        }
+    }
+    return NULL;
+}
+
+static void assert_transition(uint8_t from, uint8_t to, vcu_cause_t cause)
+{
+    const vcu_event_t *ev = state_event();
+    TEST_ASSERT_NOT_NULL_MESSAGE(ev, "no state Event this step");
+    TEST_ASSERT_EQUAL_UINT8(from, ev->data[0]);
+    TEST_ASSERT_EQUAL_UINT8(to, ev->data[1]);
+    TEST_ASSERT_EQUAL_UINT8((uint8_t)cause, ev->data[2]);
+    TEST_ASSERT_EQUAL_UINT8(to, out.state);
+}
+
+/* Brings the VCU to GLV_ON with no frames on the bus. */
+static void to_glv_on(void)
+{
+    step();
+    TEST_ASSERT_EQUAL_UINT8(VCU_STATE_GLV_ON, out.state);
+}
+
+/* Brings the VCU to TS_ACTIVE: every frame played, the bus charged. */
+static void to_ts_active(void)
+{
+    to_glv_on();
+    play_all(true);
+    run_ms(3u * STEP_MS); /* three good frames: every mailbox VALID */
+    TEST_ASSERT_EQUAL_UINT8(VCU_STATE_TS_ACTIVE, out.state);
+}
+
+/* The Start procedure: brake held, then a press of the start button. */
+static void to_ready_to_drive(void)
+{
+    to_ts_active();
+    brake_on();
+    run_ms(VCU_START_RELEASE_MS); /* the button has been released long enough */
+    in.start_pressed = true;
+    step();
+    TEST_ASSERT_EQUAL_UINT8(VCU_STATE_READY_TO_DRIVE, out.state);
+}
+
+/* A press of the start button after it has been released long enough. */
+static void press_start(void)
+{
+    in.start_pressed = false;
+    run_ms(VCU_START_RELEASE_MS);
+    in.start_pressed = true;
+    step();
+}
+
+/* In TS_ACTIVE with the brake held, a press is refused for blocker. */
+static void assert_start_refused(uint16_t blocker)
+{
+    press_start();
+    TEST_ASSERT_EQUAL_UINT8(VCU_STATE_TS_ACTIVE, out.state);
+    TEST_ASSERT_NULL(state_event());
+    TEST_ASSERT_BITS_HIGH(blocker, out.start_blockers);
+}
+
+void setUp(void)
+{
+    memset(&in, 0, sizeof(in));
+    memset(&out, 0, sizeof(out));
+    memset(mb, 0, sizeof(mb));
+    memset(rx, 0, sizeof(rx));
+    memset(bmsTx, 0, sizeof(bmsTx));
+    statusSent = false;
+    play_all(false);
+
+    config = (vcu_control_config_t){
+        .cal = {
+            .apps_min = { APPS_MIN, APPS_MIN },
+            .apps_max = { APPS_MAX, APPS_MAX },
+            .brake_zero = { BRAKE_ZERO, BRAKE_ZERO },
+        },
+        .brake_engaged = BRAKE_THRESH,
+        .max_torque = 1000u, /* 100.0 N.m */
+        .reset_ms = 0u,
+    };
+    vcu_control_init(&vc, &config);
+
+    in.now_ms = 20u; /* the first step, a little after reset release */
+    in.startup_ok = true;
+    in.can_running = true;
+    in.raw.supply[0] = SUPPLY_OK;
+    in.raw.supply[1] = SUPPLY_OK;
+    set_pedal(0u);
+    brake_off();
+    in.sdc_closed = true;
+    in.mailboxes = mb;
+
+    /* A healthy BMS and inverter, Tractive System up. */
+    bmsStatus = (struct can_control_bms_status_t){ .state = 1u, .bms_ok = 1u };
+    bmsLimits = (struct can_control_bms_limits_t){ .pack_voltage = PACK_DV };
+    bmsPower = (struct can_control_bms_power_t){ .pack_voltage = PACK_DV };
+    invVoltage = (struct can_control_inv_voltage_t){ .dc_bus_voltage = (int16_t)PACK_DV };
+    invFaults = (struct can_control_inv_fault_codes_t){ 0 };
+}
+
+void tearDown(void) {}
+
+/* ------------------------------------------------------------------ */
+/* STARTUP                                                            */
+/* ------------------------------------------------------------------ */
+
+static void test_startup_goes_to_glv_on_on_the_first_step_with_everything_ready(void)
+{
+    step();
+    assert_transition(VCU_STATE_STARTUP, VCU_STATE_GLV_ON, VCU_CAUSE_STARTUP_DONE);
+    TEST_ASSERT_EQUAL_UINT8(0u, status_frame().startup_blocked);
+}
+
+static void test_startup_stays_while_a_task_or_queue_is_missing(void)
+{
+    in.startup_ok = false;
+    run_ms(1000u);
+    TEST_ASSERT_EQUAL_UINT8(VCU_STATE_STARTUP, out.state);
+    TEST_ASSERT_NULL(state_event());
+    TEST_ASSERT_TRUE(out.startup_blocked);
+    TEST_ASSERT_TRUE(out.fault_active);
+}
+
+
+static void test_startup_waits_for_can1_and_a_full_set_of_samples(void)
+{
+    in.can_running = false;
+    in.raw.brake[1] = ADC_WINDOW_EMPTY;
+    run_ms(100u);
+    TEST_ASSERT_EQUAL_UINT8(VCU_STATE_STARTUP, out.state);
+    TEST_ASSERT_EQUAL_UINT8(1u, status_frame().startup_blocked);
+
+    in.can_running = true;
+    step();
+    TEST_ASSERT_EQUAL_UINT8(VCU_STATE_STARTUP, out.state);
+
+    brake_off();
+    step();
+    assert_transition(VCU_STATE_STARTUP, VCU_STATE_GLV_ON, VCU_CAUSE_STARTUP_DONE);
+}
+
+/* Spec #36: defaults never allow driving, but the VCU reaches GLV_ON. */
+static void test_startup_ends_with_parameters_defaulted(void)
+{
+    config.params_defaulted = true;
+    vcu_control_init(&vc, &config);
+    step();
+    TEST_ASSERT_EQUAL_UINT8(VCU_STATE_GLV_ON, out.state);
+}
+
+static void test_startup_sends_no_inverter_command(void)
+{
+    in.startup_ok = false;
+    run_ms(100u);
+    TEST_ASSERT_FALSE(out.send_command);
+}
+
+/* ------------------------------------------------------------------ */
+/* GLV_ON and TS_ACTIVE                                               */
+/* ------------------------------------------------------------------ */
+
+static void test_glv_on_goes_to_ts_active_once_every_mailbox_is_valid(void)
+{
+    to_glv_on();
+    play_all(true);
+    run_ms(2u * STEP_MS); /* two good frames: not VALID yet */
+    TEST_ASSERT_EQUAL_UINT8(VCU_STATE_GLV_ON, out.state);
+    step();
+    assert_transition(VCU_STATE_GLV_ON, VCU_STATE_TS_ACTIVE, VCU_CAUSE_TS_UP);
+}
+
+static void test_glv_on_stays_with_the_shutdown_circuit_open(void)
+{
+    to_glv_on();
+    in.sdc_closed = false;
+    play_all(true);
+    run_ms(500u);
+    TEST_ASSERT_EQUAL_UINT8(VCU_STATE_GLV_ON, out.state);
+    TEST_ASSERT_EQUAL_UINT8(1u, status_frame().shutdown_circuit_open);
+}
+
+static void test_glv_on_stays_while_the_bms_reports_a_fault(void)
+{
+    to_glv_on();
+    bmsStatus.bms_ok = 0u;
+    bmsStatus.state = 3u; /* FAULT */
+    play_all(true);
+    run_ms(500u);
+    TEST_ASSERT_EQUAL_UINT8(VCU_STATE_GLV_ON, out.state);
+    TEST_ASSERT_EQUAL_UINT8(1u, status_frame().bms_fault_reported);
+}
+
+static void test_glv_on_stays_while_a_bms_fault_bit_is_active(void)
+{
+    to_glv_on();
+    bmsStatus.over_temp_active = 1u;
+    play_all(true);
+    run_ms(500u);
+    TEST_ASSERT_EQUAL_UINT8(VCU_STATE_GLV_ON, out.state);
+}
+
+static void test_glv_on_stays_with_any_bms_or_inverter_mailbox_silent(void)
+{
+    static const vcu_rx_t needed[] = {
+        VCU_RX_BMS_STATUS, VCU_RX_BMS_LIMITS, VCU_RX_BMS_POWER,
+        VCU_RX_INV_MOTOR_POSITION, VCU_RX_INV_VOLTAGE,
+        VCU_RX_INV_INTERNAL_STATES, VCU_RX_INV_FAULT_CODES,
+    };
+
+    for (size_t n = 0; n < sizeof(needed) / sizeof(needed[0]); n++) {
+        setUp();
+        to_glv_on();
+        play_all(true);
+        playing[needed[n]] = false;
+        run_ms(500u);
+        TEST_ASSERT_EQUAL_UINT8_MESSAGE(VCU_STATE_GLV_ON, out.state, "a needed frame was silent");
+    }
+}
+
+static void test_glv_on_does_not_need_the_logged_only_frames(void)
+{
+    to_glv_on();
+    play_all(true);
+    playing[VCU_RX_INV_TORQUE_CAPABILITY] = false;
+    playing[VCU_RX_EM_MEASUREMENT] = false;
+    playing[VCU_RX_EM_STATUS] = false;
+    playing[VCU_RX_IMD_INFO_GENERAL] = false;
+    run_ms(3u * STEP_MS);
+    TEST_ASSERT_EQUAL_UINT8(VCU_STATE_TS_ACTIVE, out.state);
+    TEST_ASSERT_EQUAL_UINT8(1u, status_frame().energy_meter_timeout);
+}
+
+static void test_glv_on_needs_the_bus_at_90_percent_of_the_pack(void)
+{
+    to_glv_on();
+    play_all(true);
+    set_bus_dv(3599); /* 359.9 V of 400.0 V */
+    run_ms(500u);
+    TEST_ASSERT_EQUAL_UINT8(VCU_STATE_GLV_ON, out.state);
+
+    set_bus_dv(3600); /* exactly 90% */
+    step();
+    TEST_ASSERT_EQUAL_UINT8(VCU_STATE_TS_ACTIVE, out.state);
+}
+
+/* A BMS with no pack voltage must not make 0 V look like 90% of it. */
+static void test_glv_on_needs_the_bus_at_60_v_whatever_the_pack_says(void)
+{
+    to_glv_on();
+    bmsLimits.pack_voltage = 0u;
+    set_bus_dv(0);
+    play_all(true);
+    run_ms(500u);
+    TEST_ASSERT_EQUAL_UINT8(VCU_STATE_GLV_ON, out.state);
+}
+
+/* EV.5.4.5: below 60 V the Tractive System is discharged. */
+static void test_ts_active_returns_to_glv_on_below_60_v(void)
+{
+    to_ts_active();
+    set_bus_dv(600);
+    run_ms(500u);
+    TEST_ASSERT_EQUAL_UINT8(VCU_STATE_TS_ACTIVE, out.state);
+
+    set_bus_dv(599);
+    step();
+    assert_transition(VCU_STATE_TS_ACTIVE, VCU_STATE_GLV_ON, VCU_CAUSE_BUS_DISCHARGED);
+    TEST_ASSERT_EQUAL_INT16(599, (int16_t)(out.events[0].data[4] | (out.events[0].data[5] << 8)));
+}
+
+/* TS_ACTIVE covers a car that is discharging: the Shutdown Circuit opening
+   does not end it while the bus holds voltage. */
+static void test_ts_active_lasts_while_the_bus_discharges(void)
+{
+    to_ts_active();
+    in.sdc_closed = false;
+    set_bus_dv(1000);
+    run_ms(1000u);
+    TEST_ASSERT_EQUAL_UINT8(VCU_STATE_TS_ACTIVE, out.state);
+}
+
+/* The inverter going silent gives its Substitute, 0 V, which is no news
+   of a discharged bus: TS_ACTIVE stays, and the Start procedure is
+   refused for the mailbox. */
+static void test_a_silent_inverter_does_not_end_ts_active(void)
+{
+    to_ts_active();
+    playing[VCU_RX_INV_VOLTAGE] = false;
+    run_ms(1000u);
+    TEST_ASSERT_EQUAL_UINT8(VCU_STATE_TS_ACTIVE, out.state);
+    TEST_ASSERT_NULL(state_event());
+    TEST_ASSERT_BITS_HIGH(VCU_START_MAILBOX, out.start_blockers);
+
+    /* Back, and still discharged: GLV_ON once it is VALID again. */
+    set_bus_dv(0);
+    playing[VCU_RX_INV_VOLTAGE] = true;
+    run_ms(3u * STEP_MS);
+    assert_transition(VCU_STATE_TS_ACTIVE, VCU_STATE_GLV_ON, VCU_CAUSE_BUS_DISCHARGED);
+}
+
+/* ------------------------------------------------------------------ */
+/* Brake engaged and the brake light                                  */
+/* ------------------------------------------------------------------ */
+
+static void test_brake_engaged_is_above_the_threshold_not_at_it(void)
+{
+    to_glv_on();
+    set_brake(BRAKE_THRESH);
+    step();
+    TEST_ASSERT_FALSE(out.brake_engaged);
+    TEST_ASSERT_FALSE(out.brake_light);
+
+    set_brake(BRAKE_THRESH + 1u);
+    step();
+    TEST_ASSERT_TRUE(out.brake_engaged);
+    TEST_ASSERT_TRUE(out.brake_light);
+    TEST_ASSERT_EQUAL_UINT8(1u, status_frame().brake_engaged);
+}
+
+static void test_brake_engaged_releases_only_below_its_hysteresis(void)
+{
+    to_glv_on();
+    set_brake(BRAKE_THRESH + 1u);
+    step();
+    TEST_ASSERT_TRUE(out.brake_engaged);
+
+    set_brake(BRAKE_THRESH - VCU_BRAKE_HYSTERESIS + 1u);
+    step();
+    TEST_ASSERT_TRUE(out.brake_engaged);
+
+    set_brake(BRAKE_THRESH - VCU_BRAKE_HYSTERESIS);
+    step();
+    TEST_ASSERT_FALSE(out.brake_engaged);
+    TEST_ASSERT_FALSE(out.brake_light);
+}
+
+static void test_either_brake_sensor_alone_engages_the_brake(void)
+{
+    to_glv_on();
+    in.raw.brake[1] = (uint16_t)(BRAKE_ZERO + BRAKE_THRESH + 50u);
+    step();
+    TEST_ASSERT_TRUE(out.brake_engaged);
+
+    brake_off();
+    run_ms(20u);
+    in.raw.brake[0] = (uint16_t)(BRAKE_ZERO + BRAKE_THRESH + 50u);
+    step();
+    TEST_ASSERT_TRUE(out.brake_engaged);
+}
+
+/* A sensor shorted to its supply reads high but is not a pressed brake. */
+static void test_a_failed_brake_sensor_does_not_engage_the_brake(void)
+{
+    to_glv_on();
+    in.raw.brake[1] = 3800u; /* above the 4.75 V window */
+    step();
+    TEST_ASSERT_EQUAL(VCU_SENSOR_OUT_OF_RANGE, out.sensors.brake[1].status);
+    TEST_ASSERT_FALSE(out.brake_engaged);
+}
+
+/* Issue 13: the brake light is driven in every state, STARTUP included
+   once the ADC runs. */
+static void test_the_brake_light_follows_the_brake_in_startup(void)
+{
+    in.startup_ok = false;
+    brake_on();
+    step();
+    TEST_ASSERT_EQUAL_UINT8(VCU_STATE_STARTUP, out.state);
+    TEST_ASSERT_TRUE(out.brake_light);
+}
+
+static void test_the_brake_light_follows_the_brake_in_ts_active(void)
+{
+    to_ts_active();
+    brake_on();
+    step();
+    TEST_ASSERT_TRUE(out.brake_light);
+    brake_off();
+    step();
+    TEST_ASSERT_FALSE(out.brake_light);
+}
+
+/* ------------------------------------------------------------------ */
+/* The Start procedure (EV.10.6)                                      */
+/* ------------------------------------------------------------------ */
+
+/* EV.10.6: Ready to Drive needs the brake held and a press of the start
+   button. */
+static void test_the_start_procedure_enters_ready_to_drive(void)
+{
+    to_ts_active();
+    brake_on();
+    run_ms(VCU_START_RELEASE_MS);
+    TEST_ASSERT_EQUAL_UINT16(0u, out.start_blockers);
+    in.start_pressed = true;
+    step();
+    assert_transition(VCU_STATE_TS_ACTIVE, VCU_STATE_READY_TO_DRIVE, VCU_CAUSE_START_PROCEDURE);
+}
+
+/* EV.10.6: a start button already held when the brake goes down does not
+   count, however long both are held. */
+static void test_a_button_held_before_the_brake_does_not_start(void)
+{
+    to_ts_active();
+    press_start(); /* no brake: refused */
+    brake_on();
+    run_ms(2000u);
+    TEST_ASSERT_EQUAL_UINT8(VCU_STATE_TS_ACTIVE, out.state);
+
+    /* Let go and press again with the brake still held: that counts. */
+    press_start();
+    TEST_ASSERT_EQUAL_UINT8(VCU_STATE_READY_TO_DRIVE, out.state);
+}
+
+static void test_the_brake_and_the_button_in_the_same_step_do_not_start(void)
+{
+    to_ts_active();
+    run_ms(VCU_START_RELEASE_MS);
+    brake_on();
+    in.start_pressed = true;
+    step();
+    TEST_ASSERT_EQUAL_UINT8(VCU_STATE_TS_ACTIVE, out.state);
+    run_ms(500u);
+    TEST_ASSERT_EQUAL_UINT8(VCU_STATE_TS_ACTIVE, out.state);
+}
+
+/* A held button that bounces as it is let go is not a new press. */
+static void test_a_bounce_shorter_than_the_debounce_is_not_a_press(void)
+{
+    to_ts_active();
+    in.start_pressed = true;
+    step();
+    brake_on();
+    run_ms(100u);
+    in.start_pressed = false;
+    run_ms(VCU_START_RELEASE_MS - STEP_MS);
+    in.start_pressed = true;
+    step();
+    TEST_ASSERT_EQUAL_UINT8(VCU_STATE_TS_ACTIVE, out.state);
+}
+
+/* A button held since reset (stuck, or held through a reset) never counts
+   until it has been let go. */
+static void test_a_button_held_since_reset_never_counts(void)
+{
+    in.start_pressed = true;
+    brake_on();
+    to_ts_active();
+    run_ms(1000u);
+    TEST_ASSERT_EQUAL_UINT8(VCU_STATE_TS_ACTIVE, out.state);
+}
+
+static void test_start_is_refused_in_glv_on(void)
+{
+    to_glv_on();
+    brake_on();
+    press_start();
+    TEST_ASSERT_EQUAL_UINT8(VCU_STATE_GLV_ON, out.state);
+    TEST_ASSERT_BITS_HIGH(VCU_START_NOT_TS_ACTIVE, out.start_blockers);
+}
+
+static void test_start_is_refused_without_the_brake(void)
+{
+    to_ts_active();
+    assert_start_refused(VCU_START_BRAKE);
+}
+
+/* The 5% release uses the higher Pedal travel. */
+static void test_start_is_refused_with_the_pedal_at_5_percent(void)
+{
+    to_ts_active();
+    brake_on();
+    set_pedal(50u); /* 5.0% */
+    assert_start_refused(VCU_START_PEDAL);
+
+    set_pedal(49u);
+    press_start();
+    TEST_ASSERT_EQUAL_UINT8(VCU_STATE_READY_TO_DRIVE, out.state);
+}
+
+static void test_start_is_refused_with_one_pedal_sensor_pressed(void)
+{
+    to_ts_active();
+    brake_on();
+    in.raw.apps[1] = (uint16_t)(APPS_MAX - 200u); /* APPS2 alone at 10% */
+    assert_start_refused(VCU_START_PEDAL);
+}
+
+/* A broken pedal sensor reads 0% travel: that must not pass for released. */
+static void test_start_is_refused_with_a_pedal_sensor_failed(void)
+{
+    to_ts_active();
+    brake_on();
+    in.raw.apps[0] = 50u; /* far below its min: open circuit */
+    assert_start_refused(VCU_START_PEDAL_SENSOR);
+}
+
+static void test_start_is_refused_with_a_brake_sensor_failed(void)
+{
+    to_ts_active();
+    brake_on();
+    in.raw.brake[1] = 3800u;
+    assert_start_refused(VCU_START_BRAKE_SENSOR);
+}
+
+static void test_start_is_refused_with_parameters_defaulted(void)
+{
+    config.params_defaulted = true;
+    vcu_control_init(&vc, &config);
+    to_ts_active();
+    brake_on();
+    assert_start_refused(VCU_START_PARAMS_DEFAULTED);
+    TEST_ASSERT_EQUAL_UINT8(1u, status_frame().parameters_defaulted);
+}
+
+static void test_start_is_refused_with_a_mailbox_not_valid(void)
+{
+    to_ts_active();
+    brake_on();
+    playing[VCU_RX_BMS_POWER] = false;
+    run_ms(100u); /* its timeout */
+    assert_start_refused(VCU_START_MAILBOX);
+    TEST_ASSERT_EQUAL_UINT8(1u, status_frame().bms_power_timeout);
+}
+
+static void test_start_is_refused_while_the_bms_reports_a_fault(void)
+{
+    to_ts_active();
+    brake_on();
+    bmsStatus.under_voltage_active = 1u;
+    assert_start_refused(VCU_START_BMS_FAULT);
+}
+
+static void test_start_is_refused_while_the_inverter_reports_a_fault(void)
+{
+    to_ts_active();
+    brake_on();
+    invFaults.run_faults = 0x00000100u;
+    assert_start_refused(VCU_START_INVERTER_FAULT);
+    TEST_ASSERT_EQUAL_UINT8(1u, status_frame().inverter_fault_reported);
+}
+
+static void test_start_is_refused_with_the_shutdown_circuit_open(void)
+{
+    to_ts_active();
+    brake_on();
+    in.sdc_closed = false;
+    assert_start_refused(VCU_START_SDC_OPEN);
+}
+
+static void test_start_is_refused_with_the_bus_off_latch_set(void)
+{
+    to_ts_active();
+    brake_on();
+    in.bus_off_latched = true;
+    assert_start_refused(VCU_START_BUS_OFF);
+}
+
+static void test_start_is_refused_with_the_bus_below_90_percent(void)
+{
+    to_ts_active();
+    brake_on();
+    set_bus_dv(3599);
+    assert_start_refused(VCU_START_BUS_VOLTAGE);
+}
+
+static void test_start_is_refused_on_a_timing_fault(void)
+{
+    to_ts_active();
+    brake_on();
+    in.timing_fault = true;
+    assert_start_refused(VCU_START_TIMING_FAULT);
+}
+
+/* ------------------------------------------------------------------ */
+/* Leaving Ready to Drive (ADR 0006)                                  */
+/* ------------------------------------------------------------------ */
+
+static uint16_t event_causes(void)
+{
+    const vcu_event_t *ev = state_event();
+    TEST_ASSERT_NOT_NULL(ev);
+    return (uint16_t)(ev->data[8] | (ev->data[9] << 8));
+}
+
+static uint16_t cause_bit(vcu_cause_t cause)
+{
+    return (uint16_t)(1u << (cause - VCU_CAUSE_SDC_OPEN));
+}
+
+static void test_ready_to_drive_is_left_when_the_shutdown_circuit_opens(void)
+{
+    to_ready_to_drive();
+    in.sdc_closed = false;
+    step();
+    assert_transition(VCU_STATE_READY_TO_DRIVE, VCU_STATE_TS_ACTIVE, VCU_CAUSE_SDC_OPEN);
+    TEST_ASSERT_EQUAL_HEX16(cause_bit(VCU_CAUSE_SDC_OPEN), event_causes());
+}
+
+static void test_ready_to_drive_is_left_when_the_bms_reports_a_fault(void)
+{
+    to_ready_to_drive();
+    bmsStatus.over_voltage_active = 1u;
+    step();
+    assert_transition(VCU_STATE_READY_TO_DRIVE, VCU_STATE_TS_ACTIVE, VCU_CAUSE_BMS_FAULT);
+}
+
+static void test_ready_to_drive_is_left_when_the_inverter_reports_a_fault(void)
+{
+    to_ready_to_drive();
+    invFaults.post_faults = 0x1u;
+    step();
+    assert_transition(VCU_STATE_READY_TO_DRIVE, VCU_STATE_TS_ACTIVE, VCU_CAUSE_INVERTER_FAULT);
+}
+
+static void test_ready_to_drive_is_left_when_the_bus_off_latch_sets(void)
+{
+    to_ready_to_drive();
+    in.bus_off_latched = true;
+    step();
+    assert_transition(VCU_STATE_READY_TO_DRIVE, VCU_STATE_TS_ACTIVE, VCU_CAUSE_BUS_OFF_LATCHED);
+}
+
+static void test_ready_to_drive_is_left_below_80_percent_of_the_pack(void)
+{
+    to_ready_to_drive();
+    set_bus_dv(3200); /* exactly 80% */
+    run_ms(500u);
+    TEST_ASSERT_EQUAL_UINT8(VCU_STATE_READY_TO_DRIVE, out.state);
+
+    set_bus_dv(3199);
+    step();
+    assert_transition(VCU_STATE_READY_TO_DRIVE, VCU_STATE_TS_ACTIVE, VCU_CAUSE_BUS_VOLTAGE_LOW);
+}
+
+static void test_leaving_ready_to_drive_records_every_cause_that_applied(void)
+{
+    to_ready_to_drive();
+    in.sdc_closed = false;
+    in.bus_off_latched = true;
+    set_bus_dv(1000);
+    step();
+    assert_transition(VCU_STATE_READY_TO_DRIVE, VCU_STATE_TS_ACTIVE, VCU_CAUSE_SDC_OPEN);
+    TEST_ASSERT_EQUAL_HEX16(cause_bit(VCU_CAUSE_SDC_OPEN) | cause_bit(VCU_CAUSE_BUS_OFF_LATCHED) |
+                                cause_bit(VCU_CAUSE_BUS_VOLTAGE_LOW),
+                            event_causes());
+}
+
+/* ADR 0006: a mailbox timeout is a Torque cut, never Leaving Ready to
+   Drive, though BMS_Status's Substitute says "BMS faulted". */
+static void test_a_silent_bms_does_not_leave_ready_to_drive(void)
+{
+    to_ready_to_drive();
+    playing[VCU_RX_BMS_STATUS] = false;
+    playing[VCU_RX_BMS_LIMITS] = false;
+    run_ms(1000u);
+    TEST_ASSERT_EQUAL_UINT8(VCU_STATE_READY_TO_DRIVE, out.state);
+    TEST_ASSERT_EQUAL_UINT8(1u, status_frame().bms_status_timeout);
+    TEST_ASSERT_EQUAL_UINT8(0u, status_frame().bms_fault_reported);
+}
+
+/* ...and the inverter's voltage Substitute, 0 V, is not a lost bus. */
+static void test_a_silent_inverter_does_not_leave_ready_to_drive(void)
+{
+    to_ready_to_drive();
+    playing[VCU_RX_INV_VOLTAGE] = false;
+    playing[VCU_RX_INV_FAULT_CODES] = false;
+    run_ms(1000u);
+    TEST_ASSERT_EQUAL_UINT8(VCU_STATE_READY_TO_DRIVE, out.state);
+    TEST_ASSERT_EQUAL_UINT8(1u, status_frame().inverter_timeout);
+}
+
+/* Back in TS_ACTIVE, Ready to Drive needs the Start procedure again. */
+static void test_after_leaving_the_start_procedure_is_needed_again(void)
+{
+    to_ready_to_drive();
+    in.sdc_closed = false;
+    step();
+    in.sdc_closed = true;
+    run_ms(1000u); /* button still held, brake still on */
+    TEST_ASSERT_EQUAL_UINT8(VCU_STATE_TS_ACTIVE, out.state);
+
+    press_start();
+    TEST_ASSERT_EQUAL_UINT8(VCU_STATE_READY_TO_DRIVE, out.state);
+}
+
+/* ------------------------------------------------------------------ */
+/* The Ready to Drive sound (EV.10.7)                                 */
+/* ------------------------------------------------------------------ */
+
+/* EV.10.7: the sound lasts 1-3 s from entry; ours 2.0 s. */
+static void test_the_sound_runs_2_s_from_entry(void)
+{
+    to_ready_to_drive();
+    TEST_ASSERT_TRUE(out.sound);
+    run_ms(VCU_SOUND_MS - STEP_MS); /* the last step is 1990 ms from entry */
+    TEST_ASSERT_TRUE(out.sound);
+    TEST_ASSERT_EQUAL_UINT8(1u, status_frame().sound_on);
+    step();
+    TEST_ASSERT_FALSE(out.sound);
+    TEST_ASSERT_EQUAL_UINT8(VCU_STATE_READY_TO_DRIVE, out.state);
+}
+
+static void test_the_sound_stops_at_once_when_ready_to_drive_is_left(void)
+{
+    to_ready_to_drive();
+    run_ms(500u);
+    in.sdc_closed = false;
+    step();
+    TEST_ASSERT_FALSE(out.sound);
+}
+
+static void test_there_is_no_sound_outside_ready_to_drive(void)
+{
+    to_ts_active();
+    run_ms(100u);
+    TEST_ASSERT_FALSE(out.sound);
+}
+
+/* EV.10.7 across the 32-bit millisecond wrap. */
+static void test_the_sound_times_2_s_across_the_clock_wrap(void)
+{
+    in.now_ms = 0xFFFFFF00u;
+    to_ready_to_drive();
+    TEST_ASSERT_TRUE(out.sound);
+    run_ms(VCU_SOUND_MS - STEP_MS);
+    TEST_ASSERT_TRUE(out.sound);
+    step();
+    TEST_ASSERT_FALSE(out.sound);
+}
+
+/* EV.10.6 across the wrap: the debounce measures by subtraction. */
+static void test_the_start_procedure_works_across_the_clock_wrap(void)
+{
+    in.now_ms = 0xFFFFFFE0u;
+    to_ts_active();
+    brake_on();
+    run_ms(VCU_START_RELEASE_MS); /* the release spans the wrap */
+    in.start_pressed = true;
+    step();
+    TEST_ASSERT_EQUAL_UINT8(VCU_STATE_READY_TO_DRIVE, out.state);
+}
+
+/* ------------------------------------------------------------------ */
+/* The inverter command (0x0C0)                                       */
+/* ------------------------------------------------------------------ */
+
+static void test_the_command_goes_every_step_after_startup_with_enable_0(void)
+{
+    to_glv_on();
+    for (int i = 0; i < 5; i++) {
+        const struct can_control_inv_command_t c = command_frame();
+        TEST_ASSERT_EQUAL_UINT8(0u, c.inverter_enable);
+        TEST_ASSERT_EQUAL_UINT8(1u, c.direction_command); /* forward */
+        TEST_ASSERT_EQUAL_INT16(0, c.torque_command);
+        TEST_ASSERT_EQUAL_INT16(0, c.speed_command);
+        TEST_ASSERT_EQUAL_UINT8(0u, c.inverter_discharge);
+        TEST_ASSERT_EQUAL_UINT8(0u, c.speed_mode_enable);
+        TEST_ASSERT_EQUAL_INT16(1000, c.torque_limit); /* the max_torque Parameter */
+        step();
+    }
+}
+
+static void test_the_command_is_sent_in_ts_active_with_enable_0(void)
+{
+    to_ts_active();
+    TEST_ASSERT_EQUAL_UINT8(0u, command_frame().inverter_enable);
+}
+
+/* CM manual section 8.12: the rolling counter is the last value + 1,
+   modulo 16, every frame. */
+static void test_the_rolling_counter_counts_every_frame_modulo_16(void)
+{
+    to_glv_on();
+    uint8_t expected = command_frame().rolling_counter;
+    for (int i = 0; i < 40; i++) {
+        step();
+        expected = (uint8_t)((expected + 1u) % 16u);
+        TEST_ASSERT_EQUAL_UINT8(expected, command_frame().rolling_counter);
+    }
+}
+
+/* Issue 13: the first frame after entry carries Enable=1 and zero torque. */
+static void test_the_first_command_in_ready_to_drive_enables_with_zero_torque(void)
+{
+    to_ready_to_drive();
+    const struct can_control_inv_command_t c = command_frame();
+    TEST_ASSERT_EQUAL_UINT8(1u, c.inverter_enable);
+    TEST_ASSERT_EQUAL_INT16(0, c.torque_command);
+    TEST_ASSERT_EQUAL_UINT8(0u, c.inverter_discharge);
+}
+
+static void test_ready_to_drive_keeps_enable_1_and_reports_it(void)
+{
+    to_ready_to_drive();
+    run_ms(100u);
+    TEST_ASSERT_EQUAL_UINT8(1u, command_frame().inverter_enable);
+    const struct can_control_vcu_status_t st = status_frame();
+    TEST_ASSERT_EQUAL_UINT8(VCU_STATE_READY_TO_DRIVE, st.state);
+    TEST_ASSERT_EQUAL_UINT8(1u, st.enable_sent);
+    TEST_ASSERT_EQUAL_INT16(0, st.torque_sent);
+}
+
+static void test_leaving_ready_to_drive_sends_enable_0_in_the_same_step(void)
+{
+    to_ready_to_drive();
+    run_ms(100u);
+    invFaults.run_faults = 0x80000000u;
+    step();
+    TEST_ASSERT_EQUAL_UINT8(VCU_STATE_TS_ACTIVE, out.state);
+    TEST_ASSERT_EQUAL_UINT8(0u, command_frame().inverter_enable);
+    step();
+    TEST_ASSERT_EQUAL_UINT8(0u, status_frame().enable_sent);
+}
+
+/* ------------------------------------------------------------------ */
+/* The fault LED and VCU_Status                                       */
+/* ------------------------------------------------------------------ */
+
+static void test_the_fault_led_is_on_in_startup(void)
+{
+    in.startup_ok = false;
+    in.now_ms = 10000u;
+    step();
+    TEST_ASSERT_TRUE(out.fault_led);
+}
+
+/* Spec #36: the fault LED is held 3 s after every reset. */
+static void test_the_fault_led_is_held_3_s_after_reset(void)
+{
+    to_glv_on();
+    TEST_ASSERT_TRUE(out.fault_led);
+    while (in.now_ms < VCU_LAMP_CHECK_MS) {
+        TEST_ASSERT_TRUE(out.fault_led);
+        step();
+    }
+    TEST_ASSERT_TRUE(out.fault_led); /* the step at 2990 ms */
+    step();                          /* 3000 ms */
+    TEST_ASSERT_FALSE(out.fault_led);
+}
+
+static void test_the_fault_led_lamp_check_ends_across_the_clock_wrap(void)
+{
+    config.reset_ms = 0xFFFFF000u; /* 4096 ms before the wrap */
+    vcu_control_init(&vc, &config);
+    in.now_ms = 0xFFFFF000u;
+    to_glv_on();
+    run_ms(VCU_LAMP_CHECK_MS);
+    TEST_ASSERT_FALSE(out.fault_led);
+    run_ms(5000u); /* past the wrap: still off */
+    TEST_ASSERT_FALSE(out.fault_led);
+}
+
+static void test_vcu_status_reports_the_last_reset_and_the_flash(void)
+{
+    config.last_reset_not_power_on = true;
+    config.not_dual_bank = true;
+    vcu_control_init(&vc, &config);
+    step();
+    const struct can_control_vcu_status_t st = status_frame();
+    TEST_ASSERT_EQUAL_UINT8(1u, st.last_reset_not_power_on);
+    TEST_ASSERT_EQUAL_UINT8(1u, st.not_dual_bank);
+}
+
+static void test_vcu_status_reports_the_start_button(void)
+{
+    to_glv_on();
+    in.start_pressed = true;
+    run_ms(20u);
+    TEST_ASSERT_EQUAL_UINT8(1u, status_frame().start_button);
+}
+
+static void test_vcu_status_goes_every_second_step_with_its_e2e_check(void)
+{
+    e2e_p11_rx_t check = {0};
+    for (int i = 0; i < 10; i++) {
+        step();
+        TEST_ASSERT_EQUAL(i % 2 == 0, out.send_status);
+        if (out.send_status) {
+            TEST_ASSERT_EQUAL(E2E_P11_OK, e2e_p11_check(&check, 0x0090u, out.status, 8u));
+        }
+    }
+}
+
+/* ------------------------------------------------------------------ */
+/* The save and bench refusal rules                                   */
+/* ------------------------------------------------------------------ */
+
+/* ADR 0015: a Parameter save only in GLV_ON. */
+static void test_a_parameter_save_is_allowed_only_in_glv_on(void)
+{
+    TEST_ASSERT_NULL(vcu_control_save_refusal(true, VCU_STATE_GLV_ON));
+    TEST_ASSERT_NOT_NULL(vcu_control_save_refusal(false, VCU_STATE_GLV_ON));
+    TEST_ASSERT_NOT_NULL(vcu_control_save_refusal(true, VCU_STATE_STARTUP));
+    TEST_ASSERT_NOT_NULL(vcu_control_save_refusal(true, VCU_STATE_TS_ACTIVE));
+    TEST_ASSERT_NOT_NULL(vcu_control_save_refusal(true, VCU_STATE_READY_TO_DRIVE));
+}
+
+/* ADR 0002 amendment: `hang` and `crash` are refused in READY_TO_DRIVE. */
+static void test_the_bench_commands_are_refused_only_in_ready_to_drive(void)
+{
+    TEST_ASSERT_NOT_NULL(vcu_control_bench_refusal(true, VCU_STATE_READY_TO_DRIVE));
+    TEST_ASSERT_NULL(vcu_control_bench_refusal(true, VCU_STATE_TS_ACTIVE));
+    TEST_ASSERT_NULL(vcu_control_bench_refusal(true, VCU_STATE_GLV_ON));
+    TEST_ASSERT_NULL(vcu_control_bench_refusal(false, VCU_STATE_STARTUP));
+}
+
+static void test_state_names(void)
+{
+    TEST_ASSERT_EQUAL_STRING("STARTUP", vcu_control_state_name(VCU_STATE_STARTUP));
+    TEST_ASSERT_EQUAL_STRING("GLV_ON", vcu_control_state_name(VCU_STATE_GLV_ON));
+    TEST_ASSERT_EQUAL_STRING("TS_ACTIVE", vcu_control_state_name(VCU_STATE_TS_ACTIVE));
+    TEST_ASSERT_EQUAL_STRING("READY_TO_DRIVE", vcu_control_state_name(VCU_STATE_READY_TO_DRIVE));
+    TEST_ASSERT_EQUAL_STRING("?", vcu_control_state_name(9u));
+}
+
+int main(void)
+{
+    UNITY_BEGIN();
+    RUN_TEST(test_startup_goes_to_glv_on_on_the_first_step_with_everything_ready);
+    RUN_TEST(test_startup_stays_while_a_task_or_queue_is_missing);
+    RUN_TEST(test_startup_waits_for_can1_and_a_full_set_of_samples);
+    RUN_TEST(test_startup_ends_with_parameters_defaulted);
+    RUN_TEST(test_startup_sends_no_inverter_command);
+    RUN_TEST(test_glv_on_goes_to_ts_active_once_every_mailbox_is_valid);
+    RUN_TEST(test_glv_on_stays_with_the_shutdown_circuit_open);
+    RUN_TEST(test_glv_on_stays_while_the_bms_reports_a_fault);
+    RUN_TEST(test_glv_on_stays_while_a_bms_fault_bit_is_active);
+    RUN_TEST(test_glv_on_stays_with_any_bms_or_inverter_mailbox_silent);
+    RUN_TEST(test_glv_on_does_not_need_the_logged_only_frames);
+    RUN_TEST(test_glv_on_needs_the_bus_at_90_percent_of_the_pack);
+    RUN_TEST(test_glv_on_needs_the_bus_at_60_v_whatever_the_pack_says);
+    RUN_TEST(test_ts_active_returns_to_glv_on_below_60_v);
+    RUN_TEST(test_ts_active_lasts_while_the_bus_discharges);
+    RUN_TEST(test_a_silent_inverter_does_not_end_ts_active);
+    RUN_TEST(test_brake_engaged_is_above_the_threshold_not_at_it);
+    RUN_TEST(test_brake_engaged_releases_only_below_its_hysteresis);
+    RUN_TEST(test_either_brake_sensor_alone_engages_the_brake);
+    RUN_TEST(test_a_failed_brake_sensor_does_not_engage_the_brake);
+    RUN_TEST(test_the_brake_light_follows_the_brake_in_startup);
+    RUN_TEST(test_the_brake_light_follows_the_brake_in_ts_active);
+    RUN_TEST(test_the_start_procedure_enters_ready_to_drive);
+    RUN_TEST(test_a_button_held_before_the_brake_does_not_start);
+    RUN_TEST(test_the_brake_and_the_button_in_the_same_step_do_not_start);
+    RUN_TEST(test_a_bounce_shorter_than_the_debounce_is_not_a_press);
+    RUN_TEST(test_a_button_held_since_reset_never_counts);
+    RUN_TEST(test_start_is_refused_in_glv_on);
+    RUN_TEST(test_start_is_refused_without_the_brake);
+    RUN_TEST(test_start_is_refused_with_the_pedal_at_5_percent);
+    RUN_TEST(test_start_is_refused_with_one_pedal_sensor_pressed);
+    RUN_TEST(test_start_is_refused_with_a_pedal_sensor_failed);
+    RUN_TEST(test_start_is_refused_with_a_brake_sensor_failed);
+    RUN_TEST(test_start_is_refused_with_parameters_defaulted);
+    RUN_TEST(test_start_is_refused_with_a_mailbox_not_valid);
+    RUN_TEST(test_start_is_refused_while_the_bms_reports_a_fault);
+    RUN_TEST(test_start_is_refused_while_the_inverter_reports_a_fault);
+    RUN_TEST(test_start_is_refused_with_the_shutdown_circuit_open);
+    RUN_TEST(test_start_is_refused_with_the_bus_off_latch_set);
+    RUN_TEST(test_start_is_refused_with_the_bus_below_90_percent);
+    RUN_TEST(test_start_is_refused_on_a_timing_fault);
+    RUN_TEST(test_ready_to_drive_is_left_when_the_shutdown_circuit_opens);
+    RUN_TEST(test_ready_to_drive_is_left_when_the_bms_reports_a_fault);
+    RUN_TEST(test_ready_to_drive_is_left_when_the_inverter_reports_a_fault);
+    RUN_TEST(test_ready_to_drive_is_left_when_the_bus_off_latch_sets);
+    RUN_TEST(test_ready_to_drive_is_left_below_80_percent_of_the_pack);
+    RUN_TEST(test_leaving_ready_to_drive_records_every_cause_that_applied);
+    RUN_TEST(test_a_silent_bms_does_not_leave_ready_to_drive);
+    RUN_TEST(test_a_silent_inverter_does_not_leave_ready_to_drive);
+    RUN_TEST(test_after_leaving_the_start_procedure_is_needed_again);
+    RUN_TEST(test_the_sound_runs_2_s_from_entry);
+    RUN_TEST(test_the_sound_stops_at_once_when_ready_to_drive_is_left);
+    RUN_TEST(test_there_is_no_sound_outside_ready_to_drive);
+    RUN_TEST(test_the_sound_times_2_s_across_the_clock_wrap);
+    RUN_TEST(test_the_start_procedure_works_across_the_clock_wrap);
+    RUN_TEST(test_the_command_goes_every_step_after_startup_with_enable_0);
+    RUN_TEST(test_the_command_is_sent_in_ts_active_with_enable_0);
+    RUN_TEST(test_the_rolling_counter_counts_every_frame_modulo_16);
+    RUN_TEST(test_the_first_command_in_ready_to_drive_enables_with_zero_torque);
+    RUN_TEST(test_ready_to_drive_keeps_enable_1_and_reports_it);
+    RUN_TEST(test_leaving_ready_to_drive_sends_enable_0_in_the_same_step);
+    RUN_TEST(test_the_fault_led_is_on_in_startup);
+    RUN_TEST(test_the_fault_led_is_held_3_s_after_reset);
+    RUN_TEST(test_the_fault_led_lamp_check_ends_across_the_clock_wrap);
+    RUN_TEST(test_vcu_status_reports_the_last_reset_and_the_flash);
+    RUN_TEST(test_vcu_status_reports_the_start_button);
+    RUN_TEST(test_vcu_status_goes_every_second_step_with_its_e2e_check);
+    RUN_TEST(test_a_parameter_save_is_allowed_only_in_glv_on);
+    RUN_TEST(test_the_bench_commands_are_refused_only_in_ready_to_drive);
+    RUN_TEST(test_state_names);
+    return UNITY_END();
+}
