@@ -406,7 +406,7 @@ static void print_start_blockers(uint16_t blockers)
    (vcu_control.h). Provisional (#28). */
 static void print_torque(const vcu_inputs_t *in)
 {
-    static const char *const cutName[VCU_CUT_LIMIT] = {
+    static const char *const cutName[VCU_CUT_COUNT] = {
         [VCU_CUT_APPS]         = "APPS implausible",
         [VCU_CUT_BRAKE_SENSOR] = "brake sensor",
         [VCU_CUT_BRAKE_PEDAL]  = "brake and pedal",
@@ -421,7 +421,7 @@ static void print_torque(const vcu_inputs_t *in)
         shell_printf(" none\r\n");
         return;
     }
-    for (unsigned i = 1u; i < VCU_CUT_LIMIT; i++) {
+    for (unsigned i = 1u; i < VCU_CUT_COUNT; i++) {
         if ((in->cuts & (1u << i)) != 0u) {
             shell_printf(" %s;", cutName[i]);
         }

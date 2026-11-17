@@ -182,6 +182,16 @@ static uint16_t higher_travel(const vcu_sensors_t *sensors)
     return (a > b) ? a : b;
 }
 
+static bool cut_active(const vcu_control_out_t *out, vcu_cut_t cause)
+{
+    return (out->cuts & (1u << cause)) != 0u;
+}
+
+static bool brake_sensor_failed(const vcu_sensors_t *sn)
+{
+    return sn->brake[0].status != VCU_SENSOR_OK || sn->brake[1].status != VCU_SENSOR_OK;
+}
+
 static uint16_t lower_travel(const vcu_sensors_t *sensors)
 {
     const uint16_t a = sensors->apps[0].travel;
@@ -225,7 +235,7 @@ static uint16_t start_blockers(const vcu_control_t *vc, const vcu_control_in_t *
     if (sn->apps[0].status != VCU_SENSOR_OK || sn->apps[1].status != VCU_SENSOR_OK) {
         b |= VCU_START_PEDAL_SENSOR;
     }
-    if (sn->brake[0].status != VCU_SENSOR_OK || sn->brake[1].status != VCU_SENSOR_OK) {
+    if (brake_sensor_failed(sn)) {
         b |= VCU_START_BRAKE_SENSOR;
     }
     if (vc->config.params_defaulted) {
@@ -249,7 +259,7 @@ static uint16_t start_blockers(const vcu_control_t *vc, const vcu_control_in_t *
     if (!ts_up(bus)) {
         b |= VCU_START_BUS_VOLTAGE;
     }
-    if ((out->cuts & (1u << VCU_CUT_TIMING)) != 0u) {
+    if (cut_active(out, VCU_CUT_TIMING)) {
         b |= VCU_START_TIMING_FAULT;
     }
     if (out->cuts != 0u) {
@@ -355,10 +365,10 @@ static void enter(vcu_control_t *vc, const vcu_control_in_t *in, vcu_control_out
     /* Leaving Ready to Drive needs the Start procedure again: the fault
        LED is solid until it is done, or until the Tractive System is
        down and there is nothing to restart (ADR 0006). */
-    if (vc->state == VCU_STATE_READY_TO_DRIVE) {
-        vc->restart_needed = true;
-    } else if (to == VCU_STATE_READY_TO_DRIVE || to == VCU_STATE_GLV_ON) {
+    if (to == VCU_STATE_READY_TO_DRIVE || to == VCU_STATE_GLV_ON) {
         vc->restart_needed = false;
+    } else if (vc->state == VCU_STATE_READY_TO_DRIVE) {
+        vc->restart_needed = true;
     }
     vc->state = to;
     vc->entered_ms = in->now_ms;
@@ -443,14 +453,14 @@ static void send_status(vcu_control_t *vc, const vcu_control_in_t *in,
     }
     const struct can_control_vcu_status_t status = {
         .state = vc->state,
-        .apps_implausible = (out->cuts & (1u << VCU_CUT_APPS)) != 0u ? 1u : 0u,
-        .brake_sensor_failed = (out->cuts & (1u << VCU_CUT_BRAKE_SENSOR)) != 0u ? 1u : 0u,
-        .brake_pedal_cut = (out->cuts & (1u << VCU_CUT_BRAKE_PEDAL)) != 0u ? 1u : 0u,
+        .apps_implausible = cut_active(out, VCU_CUT_APPS) ? 1u : 0u,
+        .brake_sensor_failed = cut_active(out, VCU_CUT_BRAKE_SENSOR) ? 1u : 0u,
+        .brake_pedal_cut = cut_active(out, VCU_CUT_BRAKE_PEDAL) ? 1u : 0u,
         .bms_status_timeout = bus->bms_status_valid ? 0u : 1u,
         .bms_limits_timeout = bus->bms_limits_valid ? 0u : 1u,
         .bms_power_timeout = bus->bms_power_valid ? 0u : 1u,
         .inverter_timeout = bus->inverter_valid ? 0u : 1u,
-        .timing_fault = (out->cuts & (1u << VCU_CUT_TIMING)) != 0u ? 1u : 0u,
+        .timing_fault = cut_active(out, VCU_CUT_TIMING) ? 1u : 0u,
         .bms_fault_reported = bus->bms_fault ? 1u : 0u,
         .inverter_fault_reported = bus->inverter_fault ? 1u : 0u,
         .shutdown_circuit_open = in->sdc_closed ? 0u : 1u,
@@ -489,9 +499,7 @@ void vcu_control_step(vcu_control_t *vc, const vcu_control_in_t *in,
     vcu_sensors_compute(&in->raw, &vc->config.cal, &out->sensors);
     out->samples_ready = all_sampled(&in->raw);
     run_cut(vc, in, out, VCU_CUT_APPS, apps_implausible(&out->sensors), VCU_CUT_PERSIST_MS);
-    run_cut(vc, in, out, VCU_CUT_BRAKE_SENSOR,
-            out->sensors.brake[0].status != VCU_SENSOR_OK ||
-                out->sensors.brake[1].status != VCU_SENSOR_OK,
+    run_cut(vc, in, out, VCU_CUT_BRAKE_SENSOR, brake_sensor_failed(&out->sensors),
             VCU_CUT_PERSIST_MS);
     run_cut(vc, in, out, VCU_CUT_TIMING, in->timing_fault, 0u);
 
@@ -502,7 +510,7 @@ void vcu_control_step(vcu_control_t *vc, const vcu_control_in_t *in,
     const bool press = start_press(vc, in);
 
     /* 4. The state transitions, at most one per step. */
-    const uint8_t was = vc->state;
+    const uint8_t state_before = vc->state;
     switch (vc->state) {
     case VCU_STATE_STARTUP:
         if (in->startup_ok && in->can_running && out->samples_ready) {
@@ -553,7 +561,7 @@ void vcu_control_step(vcu_control_t *vc, const vcu_control_in_t *in,
     /* 7. The gates: zero torque outside READY_TO_DRIVE, on the first
        0x0C0 after entry, and during any Torque cut. Nothing runs after
        them. */
-    if (vc->state != VCU_STATE_READY_TO_DRIVE || was != VCU_STATE_READY_TO_DRIVE ||
+    if (vc->state != VCU_STATE_READY_TO_DRIVE || state_before != VCU_STATE_READY_TO_DRIVE ||
         out->cuts != 0u) {
         torque = 0;
     }
@@ -567,7 +575,8 @@ void vcu_control_step(vcu_control_t *vc, const vcu_control_in_t *in,
         (uint32_t)(in->now_ms - vc->config.reset_ms) >= VCU_LAMP_CHECK_MS) {
         vc->lamp_check_done = true;
     }
-    out->brake_light = out->brake_engaged || (out->cuts & (1u << VCU_CUT_BRAKE_SENSOR)) != 0u;
+    out->brake_light = out->brake_engaged || brake_sensor_failed(&out->sensors) ||
+                       cut_active(out, VCU_CUT_BRAKE_SENSOR);
     out->sound = vc->state == VCU_STATE_READY_TO_DRIVE &&
                  (uint32_t)(in->now_ms - vc->entered_ms) < VCU_SOUND_MS;
     /* The fault LED: on for the lamp check and in STARTUP, solid while a

@@ -41,8 +41,8 @@
  *
  * Brake engaged: either brake sensor reads OK and above the brake_engaged
  * Parameter, with VCU_BRAKE_HYSTERESIS counts of hysteresis per sensor. The
- * brake light follows it in every state, and is also on while the
- * brake-sensor Torque cut lasts.
+ * brake light follows it in every state, and is also on whenever a brake
+ * sensor is not OK and while the brake-sensor Torque cut lasts.
  *
  * The torque path (issue 57), in the step's order: the pedal sensors and
  * the plausibility timers; Brake engaged and the brake-and-pedal check;
@@ -53,10 +53,14 @@
  *   Gates: zero torque outside READY_TO_DRIVE, on the first 0x0C0 after
  *   entry, and while any Torque cut is active.
  *
- * Torque cuts (ADR 0006, vcu_cut_t). Each keeps Enable=1 with zero torque,
- * is tracked in every state, and ends only once its cause is gone and the
+ * Torque cuts (ADR 0006, vcu_cut_t). Each keeps Enable=1 with zero torque
+ * and ends only once its cause is gone and the
  * higher Pedal travel is below 5%, so torque never returns under a pressed
- * pedal. Each start and end is an EVENT_TORQUE_CUT Event.
+ * pedal. Each start and end is an EVENT_TORQUE_CUT Event. A cut only zeroes
+ * torque in Ready to Drive (the Glossary's Torque cut), but its timer and
+ * latch run in every state, so a cause already present when Ready to
+ * Drive is entered cuts from the first step, and the Start procedure is
+ * refused while one is active (VCU_START_TORQUE_CUT).
  *   APPS implausible  more than 10 points apart, or either APPS not OK
  *                     (out of range, its supply out of window, no sample),
  *                     for VCU_CUT_PERSIST_MS (T.4.2.4, T.4.2.5, T.4.2.10)
@@ -176,7 +180,7 @@ typedef enum {
     VCU_CUT_BRAKE_SENSOR = 2, /* a brake sensor failed for VCU_CUT_PERSIST_MS */
     VCU_CUT_BRAKE_PEDAL  = 3, /* Brake engaged with the higher travel above 25% */
     VCU_CUT_TIMING       = 4, /* three Overruns within a second */
-    VCU_CUT_LIMIT
+    VCU_CUT_COUNT             /* one past the last; arrays by vcu_cut_t leave [0] unused */
 } vcu_cut_t;
 
 #define VCU_CUT_PERSIST_MS   80u  /* T.4.2.5, T.4.3.3 allow 100 ms */
@@ -254,7 +258,7 @@ typedef struct {
 
 /* The step's own state. vcu_control_init() it; touch nothing inside. */
 typedef struct {
-    vcu_cut_timer_t cut[VCU_CUT_LIMIT]; /* by vcu_cut_t; [0] unused */
+    vcu_cut_timer_t cut[VCU_CUT_COUNT]; /* by vcu_cut_t; [0] unused */
     bool         cut_was;        /* a Torque cut was active on the last step */
     uint32_t     blink_from_ms;  /* the first step of the Torque cuts now active */
     bool         restart_needed; /* Ready to Drive was left for a fault */
