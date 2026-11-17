@@ -32,16 +32,21 @@
 
 /* USER CODE BEGIN DECL */
 
-/* Includes ------------------------------------------------------------------*/
-#include <string.h>
+/* The FatFs disk driver for the microSD card. The driver itself is common
+   code, App/common/Src/sd_spi.c (issue #54); these blocks only translate
+   between it and FatFs's diskio shape. */
 #include "ff_gen_drv.h"
 
-/* Private typedef -----------------------------------------------------------*/
-/* Private define ------------------------------------------------------------*/
+#include "sd_spi.h"
 
-/* Private variables ---------------------------------------------------------*/
-/* Disk status */
-static volatile DSTATUS Stat = STA_NOINIT;
+static DRESULT to_dresult(sd_spi_result_t result)
+{
+    switch (result) {
+    case SD_SPI_OK:        return RES_OK;
+    case SD_SPI_NOT_READY: return RES_NOTRDY;
+    default:               return RES_ERROR;
+    }
+}
 
 /* USER CODE END DECL */
 
@@ -81,8 +86,8 @@ DSTATUS USER_initialize (
 )
 {
   /* USER CODE BEGIN INIT */
-    Stat = STA_NOINIT;
-    return Stat;
+    (void)pdrv;
+    return sd_spi_init() ? 0u : STA_NOINIT;
   /* USER CODE END INIT */
 }
 
@@ -96,8 +101,8 @@ DSTATUS USER_status (
 )
 {
   /* USER CODE BEGIN STATUS */
-    Stat = STA_NOINIT;
-    return Stat;
+    (void)pdrv;
+    return sd_spi_ready() ? 0u : STA_NOINIT;
   /* USER CODE END STATUS */
 }
 
@@ -117,7 +122,8 @@ DRESULT USER_read (
 )
 {
   /* USER CODE BEGIN READ */
-    return RES_OK;
+    (void)pdrv;
+    return to_dresult(sd_spi_read(buff, sector, count));
   /* USER CODE END READ */
 }
 
@@ -138,8 +144,8 @@ DRESULT USER_write (
 )
 {
   /* USER CODE BEGIN WRITE */
-  /* USER CODE HERE */
-    return RES_OK;
+    (void)pdrv;
+    return to_dresult(sd_spi_write(buff, sector, count));
   /* USER CODE END WRITE */
 }
 #endif /* _USE_WRITE == 1 */
@@ -159,8 +165,19 @@ DRESULT USER_ioctl (
 )
 {
   /* USER CODE BEGIN IOCTL */
-    DRESULT res = RES_ERROR;
-    return res;
+    (void)pdrv;
+
+    switch (cmd) {
+    case CTRL_SYNC:
+        return to_dresult(sd_spi_sync());
+    case GET_SECTOR_SIZE:
+        *(WORD *)buff = 512u;
+        return RES_OK;
+    default:
+        /* GET_SECTOR_COUNT and GET_BLOCK_SIZE serve only f_mkfs: a card is
+           formatted on a PC, never by the firmware. */
+        return RES_PARERR;
+    }
   /* USER CODE END IOCTL */
 }
 #endif /* _USE_IOCTL == 1 */

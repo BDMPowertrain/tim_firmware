@@ -68,6 +68,7 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     ../../App/common/Src/print.c
     ../../App/common/Src/reset_handler.s
     ../../App/common/Src/reset_info.c
+    ../../App/common/Src/sd_spi.c
     ../../App/common/Src/shell.c
     ../../App/common/Src/spi3_bus.c
     ../../App/common/Src/stats.c
