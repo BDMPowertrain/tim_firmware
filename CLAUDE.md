@@ -152,8 +152,8 @@ undo provisioning.
   card), the heartbeat LED and the IMU chip select held high. Its image
   links print, shell, stats, the crash routine, reset_info, the Event log
   (events), the control step with its Control bus driver, the DAQ bus
-  driver and the SD driver from App/common/; the other common modules join
-  when their peripherals are configured.
+  driver, the SD driver and the Data log from App/common/; the other
+  common modules join when their peripherals are configured.
 - The SD card (SPI2) is driven by App/common/Src/sd_spi.c in both images;
   each image's FATFS/Target/user_diskio.c only calls it from its USER CODE
   blocks. The card is identified below 400 kHz by clocking the pins by
@@ -170,9 +170,9 @@ undo provisioning.
 - The Data log (ADR 0021) leaves the control step through a ring with one
   writer and one reader, no lock (App/common/Src/data_log_ring.c, linked
   into both images); the Event writer copies each Event into a second
-  ring. The SD logger (App/common/Src/data_log.c) is their one reader and
-  the only FatFS caller; it joins the BMS image when SPI2 is configured
-  there. The file format is App/common/logic/Inc/data_log_record.h, and
+  ring. The SD logger (App/common/Src/data_log.c, both images) is their
+  one reader and the only FatFS caller; it starts when the step leaves
+  STARTUP, which the BMS step does not do yet. The file format is App/common/logic/Inc/data_log_record.h, and
   tools/data_log_decode.py turns a file into CSV: change both together
   (a host test checks they agree, and needs Python 3.10 or later).
 

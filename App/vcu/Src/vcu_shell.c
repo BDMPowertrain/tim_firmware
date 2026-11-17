@@ -15,7 +15,6 @@
 #include "control_bus.h"
 #include "adc_window.h"
 #include "imu.h"
-#include "data_log.h"
 #include "print.h"
 #include "shell.h"
 #include "vbat.h"
@@ -468,7 +467,6 @@ static int cmd_inputs(int argc, char **argv)
 static const shell_cmd_t vcuCommands[] = {
     { "imu",       cmd_imu,       "latest accel/gyro sample" },
     { "imustream", cmd_imustream, "live accel/gyro stream, any key to stop" },
-    { "datalog",   data_log_cmd,  "the Data log: card, file, Records written and dropped" },
     { "can",       cmd_can,       "can status[1|2]|stby2 on|off|send2 <id> <hex> [fd] [brs]|stream2" },
     { "vbat",      cmd_vbat,      "battery voltage" },
     { "inputs",    cmd_inputs,    "pedal, brake and supply readings [stream]" },

@@ -51,14 +51,14 @@ target_link_directories(${CMAKE_PROJECT_NAME} PRIVATE
 target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     # Add user sources here
     # App/common/ is compiled into both images, App/bms/ into this one only
-    # (ADR 0001). The SD driver (sd_spi.c) is linked, with FatFs. The Data
-    # log's SD logger (data_log.c), VBAT and the SPI3 bus lock join when this
-    # project configures their peripherals; until then nothing opens the
-    # Data log's rings and the step's pushes do nothing.
+    # (ADR 0001). The Data log (data_log.c, data_log_ring.c) writes through
+    # the SD driver (sd_spi.c) and FatFs; VBAT and the SPI3 bus lock join
+    # when this project configures their peripherals.
     ../../App/common/Src/can_if.c
     ../../App/common/Src/control_bus.c
     ../../App/common/Src/control_step.c
     ../../App/common/Src/crash.c
+    ../../App/common/Src/data_log.c
     ../../App/common/Src/data_log_ring.c
     ../../App/common/Src/events.c
     ../../App/common/Src/cycle_counter.c
