@@ -141,6 +141,11 @@ static void phase_output(control_step_ctx_t *ctx)
                                CAN_CONTROL_INV_COMMAND_IS_EXTENDED != 0, out.command,
                                (uint8_t)sizeof(out.command));
     }
+    if (out.send_fault_clear) {
+        (void)control_bus_send(CAN_CONTROL_INV_PARAMETER_COMMAND_FRAME_ID,
+                               CAN_CONTROL_INV_PARAMETER_COMMAND_IS_EXTENDED != 0,
+                               out.fault_clear, (uint8_t)sizeof(out.fault_clear));
+    }
     HAL_GPIO_WritePin(FAULT_TP_GPIO_Port, FAULT_TP_Pin, level(out.test_point));
     HAL_GPIO_WritePin(BRAKE_LIGHT_GPIO_Port, BRAKE_LIGHT_Pin, level(out.brake_light));
     HAL_GPIO_WritePin(RTD_SOUND_GPIO_Port, RTD_SOUND_Pin, level(out.sound));
