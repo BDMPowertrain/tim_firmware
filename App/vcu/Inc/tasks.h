@@ -96,14 +96,14 @@
 #define IMU_TASK_PRIORITY         osPriorityAboveNormal
 #define IMU_TASK_STACK_SIZE       1024u
 
-/* "Logging, slow sensing, stats" band per the reserved-priority table.
-   FatFS's f_mount/f_open/f_write call chain (ff.c) is known to be
-   stack-hungry even with long filenames disabled (_USE_LFN=0 in
-   ffconf.h) — starting at the same size that turned out right for
-   shellTask rather than guessing low; measure with `tasks` once
-   `log start` has actually written a file and adjust. */
-#define LOGGER_TASK_PRIORITY      osPriorityBelowNormal
-#define LOGGER_TASK_STACK_SIZE    2048u
+/* The Data log's SD logger (ADR 0021, issue 53): BelowNormal, as it only
+   records. Every FatFS call happens here, and the f_mount, f_getfree,
+   f_readdir and f_write call chain (ff.c and the SD driver) is deep even
+   with long names off (_USE_LFN=0 in ffconf.h); its batch and buffers are
+   static, not on this stack. The old CSV logger's size, unmeasured.
+   Measure with `tasks` after a roll and a card pull, and adjust. */
+#define DATA_LOG_TASK_PRIORITY    osPriorityBelowNormal
+#define DATA_LOG_TASK_STACK_SIZE  2048u
 
 /* The DAQ bus (CAN2) receive task and send task (daqTask, which also runs
    the 100 ms DAQ publisher). The DAQ bus carries no safety function, so

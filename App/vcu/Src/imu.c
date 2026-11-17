@@ -26,7 +26,6 @@
 
 #include "cmsis_os2.h"
 
-#include "logger.h"
 #include "main.h"
 #include "print.h"
 #include "spi3_bus.h"
@@ -257,13 +256,11 @@ static void imu_drain_fifo(void)
             latestAccel.y = y;
             latestAccel.z = z;
             haveAccel = true;
-            logger_post('A', x, y, z);
         } else if (sensor == IMU_FIFO_TAG_GYRO) {
             latestGyro.x = x;
             latestGyro.y = y;
             latestGyro.z = z;
             haveGyro = true;
-            logger_post('G', x, y, z);
         }
     }
     osMutexRelease(imuDataMutex);

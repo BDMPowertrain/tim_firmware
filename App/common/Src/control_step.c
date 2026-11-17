@@ -7,6 +7,8 @@
 #include "cmsis_os2.h"
 
 #include "cycle_counter.h"
+#include "data_log_record.h"
+#include "data_log_ring.h"
 #include "event_codes.h"
 #include "events.h"
 #include "housekeeping.h"
@@ -121,6 +123,23 @@ void control_step_task(void *argument)
 
         step_stats_record(&stats, stepUs, phaseUs, phaseCount);
         wake = step_sched_next(&sched, endMs);
+
+        /* The Data log's Record of this step (ADR 0021): copied into the
+           step ring, never waiting; a full ring drops it and counts. */
+        const data_log_step_t record = {
+            .step_count = ctx.step_count,
+            .state = ctx.state,
+            .fault_active = ctx.fault_active,
+            .background_stalled = ctx.background_stalled,
+            .timing_fault = ctx.timing_fault,
+            .startup_ok = ctx.startup_ok,
+            .step_us = stepUs,
+            .overruns = sched.overruns,
+        };
+        uint8_t recordBytes[DATA_LOG_STEP_SIZE];
+        data_log_step_encode(recordBytes, &record);
+        (void)data_log_push_step(DATA_LOG_STEP, ctx.now_ms, recordBytes, sizeof recordBytes);
+
         ctx.step_count++;
 
         timingFault = false;

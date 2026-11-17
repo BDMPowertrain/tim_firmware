@@ -24,8 +24,9 @@
 
    The image says what its phases are; beyond them the runner knows only
    the Control bus, which every image has, and whose report it publishes
-   with the step, so the step leaves through one snapshot and the Event
-   queue (ADR 0010). This file never checks
+   with the step, so the step leaves through one snapshot, the Event
+   queue and the Data log's step ring, one Record per step (ADR 0010,
+   0021, data_log_ring.h). This file never checks
    which image it is built into. */
 
 #include <stdbool.h>

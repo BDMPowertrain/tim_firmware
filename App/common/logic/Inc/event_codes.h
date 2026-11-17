@@ -47,6 +47,9 @@ typedef enum {
 
     /* The VCU's states (ADR 0006, vcu_control.h). */
     EVENT_VCU_STATE = 64, /* event_data_vcu_state() */
+
+    /* The Data log (ADR 0021, data_log.h). */
+    EVENT_DATA_LOG_CARD = 80, /* event_data_data_log_card(): no card, or a card error */
 } event_code_t;
 
 /* "boot", "overrun" and so on, for the shell; "?" for a code not here. */
@@ -127,5 +130,16 @@ typedef struct {
 /* 0 from (u8), 1 to (u8), 2 cause (u8), 4 bus voltage (i16, 0.1 V),
    6 pack voltage (u16, 0.1 V), 8 causes (u16). */
 void event_data_vcu_state(uint8_t data[EVENT_DATA_SIZE], const event_vcu_state_t *state);
+
+typedef struct {
+    uint8_t  state;   /* data_log_state_t (data_log_card.h): MISSING or ERROR */
+    uint8_t  result;  /* the FatFS result (FRESULT) that failed */
+    uint32_t written; /* Records written since power-on */
+    uint32_t dropped; /* Records dropped at the rings since power-on */
+} event_data_log_card_t;
+
+/* 0 state (u8), 1 FatFS result (u8), 4 Records written (u32),
+   8 Records dropped (u32). */
+void event_data_data_log_card(uint8_t data[EVENT_DATA_SIZE], const event_data_log_card_t *card);
 
 #endif /* EVENT_CODES_H */

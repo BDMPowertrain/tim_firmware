@@ -134,4 +134,9 @@ bool event_log_newer(const event_log_t *log, event_pos_t *pos);
 /* Reads the Event at pos. */
 event_read_t event_log_read(const event_log_t *log, event_pos_t pos, event_t *out);
 
+/* The 32 bytes the log stores for ev, its CRC included, laid out as at the
+   top of this file. The Data log copies each Event in this form
+   (data_log_record.h). */
+void event_log_encode(const event_t *ev, uint8_t out[EVENT_SIZE]);
+
 #endif /* EVENT_LOG_H */

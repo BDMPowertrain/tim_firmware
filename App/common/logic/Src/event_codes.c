@@ -35,6 +35,7 @@ const char *event_code_name(uint16_t code)
     case EVENT_BUS_OFF_UNLATCHED:  return "bus-off latch cleared";
     case EVENT_MAILBOX_TIMEOUT:    return "mailbox timeout";
     case EVENT_VCU_STATE:          return "VCU state";
+    case EVENT_DATA_LOG_CARD:      return "data log card";
     default:                       return "?";
     }
 }
@@ -168,4 +169,13 @@ void event_data_vcu_state(uint8_t data[EVENT_DATA_SIZE], const event_vcu_state_t
     put_u16(&data[4], (uint16_t)state->bus_dv);
     put_u16(&data[6], state->pack_dv);
     put_u16(&data[8], state->causes);
+}
+
+void event_data_data_log_card(uint8_t data[EVENT_DATA_SIZE], const event_data_log_card_t *card)
+{
+    memset(data, 0, EVENT_DATA_SIZE);
+    data[0] = card->state;
+    data[1] = card->result;
+    put_u32(&data[4], card->written);
+    put_u32(&data[8], card->dropped);
 }

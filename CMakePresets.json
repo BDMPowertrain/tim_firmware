@@ -34,7 +34,8 @@
             "name": "host-tests-sanitize",
             "inherits": "host-tests",
             "cacheVariables": {
-                "TIM_HOST_SANITIZE": "ON"
+                "TIM_HOST_SANITIZE": "ON",
+                "TIM_REQUIRE_PYTHON": "ON"
             }
         }
     ],

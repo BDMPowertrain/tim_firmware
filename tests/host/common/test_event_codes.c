@@ -99,8 +99,26 @@ static void test_the_vcu_state_event(void)
     TEST_ASSERT_EQUAL_HEX8_ARRAY(want, data, EVENT_DATA_SIZE);
 }
 
+/* A Data log card failure (issue 53): the state it went to, the FatFS
+   result, Records written and dropped so far. */
+static void test_the_data_log_card_event(void)
+{
+    const event_data_log_card_t card = {
+        .state = 3u, .result = 9u, .written = 0x01020304u, .dropped = 0x0A0Bu,
+    };
+    const uint8_t want[EVENT_DATA_SIZE] = {
+        3, 9, 0, 0, 0x04, 0x03, 0x02, 0x01, 0x0B, 0x0A, 0, 0, 0, 0, 0, 0,
+    };
+    uint8_t data[EVENT_DATA_SIZE];
+
+    memset(data, 0xAA, sizeof data);
+    event_data_data_log_card(data, &card);
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(want, data, EVENT_DATA_SIZE);
+}
+
 static void test_names(void)
 {
+    TEST_ASSERT_EQUAL_STRING("data log card", event_code_name(EVENT_DATA_LOG_CARD));
     TEST_ASSERT_EQUAL_STRING("VCU state", event_code_name(EVENT_VCU_STATE));
     TEST_ASSERT_EQUAL_STRING("boot", event_code_name(EVENT_BOOT));
     TEST_ASSERT_EQUAL_STRING("bus-off", event_code_name(EVENT_BUS_OFF));
@@ -115,6 +133,7 @@ int main(void)
     RUN_TEST(test_the_overrun_event);
     RUN_TEST(test_the_crash_event);
     RUN_TEST(test_the_vcu_state_event);
+    RUN_TEST(test_the_data_log_card_event);
     RUN_TEST(test_names);
     return UNITY_END();
 }

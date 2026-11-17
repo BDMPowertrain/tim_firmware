@@ -1,0 +1,94 @@
+/*
+ * The Data log's file format (ADR 0021, issue 53): what the SD logger
+ * writes and tools/data_log_decode.py reads. Every number is
+ * little-endian. A change to a layout below bumps DATA_LOG_LAYOUT and
+ * changes the decoder in the same commit.
+ *
+ * A file is one header, then Records back to back, nothing between them:
+ *
+ *   header (DATA_LOG_HEADER_SIZE): 0 magic "TDLG", 4 layout version (u16),
+ *     6 image (u8, PARAMS_IMAGE_VCU or PARAMS_IMAGE_BMS), 7 flags (u8,
+ *     bit 0: built from a dirty tree), 8 build ID (u32), 12 boot number
+ *     (u16, the Event log's), 14 file number in the boot's directory (u16),
+ *     16 uptime at open (ms, u32), 20..29 zero, 30 CRC-16 of bytes 0..29
+ *
+ *   Record: 0 sync DATA_LOG_SYNC (u8), 1 type (u8), 2 payload length (u16),
+ *     4 uptime (ms, u32), 8 sequence number (u32), 12 payload,
+ *     then CRC-16 (crc16.h) of everything before it
+ *
+ * Each type has one producer and its own sequence numbers (record_ring.h),
+ * so a gap in one type's numbers is a Record of that type lost. A reader
+ * that meets a bad CRC looks for the next sync byte that starts a whole
+ * Record; a file cut off by a power loss or a pulled card ends in a torn
+ * Record, which the reader reports and ignores.
+ *
+ * Record types and their payloads:
+ *
+ *   DATA_LOG_STEP  (1): the minimal step Record every image's Control step
+ *     writes until its full Record exists: data_log_step_encode().
+ *   DATA_LOG_EVENT (2): a copy of one Event, the 32 bytes the Event log
+ *     stores (event_log.h, event_log_encode()), its own CRC included.
+ *
+ * This is logic (ADR 0002): no HAL, no RTOS, no clock.
+ */
+#ifndef DATA_LOG_RECORD_H
+#define DATA_LOG_RECORD_H
+
+#include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
+
+#include "record_ring.h"
+
+#define DATA_LOG_MAGIC       0x474C4454u /* "TDLG" */
+#define DATA_LOG_LAYOUT      1u
+#define DATA_LOG_HEADER_SIZE 32u
+#define DATA_LOG_SYNC        0xA5u
+
+/* A Record's bytes around its payload: 12 before, the CRC after. */
+#define DATA_LOG_RECORD_OVERHEAD 14u
+
+typedef enum {
+    DATA_LOG_STEP  = 1,
+    DATA_LOG_EVENT = 2,
+} data_log_type_t;
+
+typedef struct {
+    uint8_t  image; /* PARAMS_IMAGE_VCU or PARAMS_IMAGE_BMS */
+    bool     dirty;
+    uint32_t build_id;
+    uint16_t boot;
+    uint16_t file;
+    uint32_t opened_ms;
+} data_log_header_t;
+
+void data_log_header_encode(uint8_t out[DATA_LOG_HEADER_SIZE], const data_log_header_t *h);
+
+/* Bytes a Record with len payload bytes takes in the file. */
+size_t data_log_record_size(uint16_t len);
+
+/* Encodes one Record into out. Returns its size, or 0 (nothing written) if
+   it does not fit in cap. */
+size_t data_log_record_encode(uint8_t *out, size_t cap, const record_head_t *head,
+                              const uint8_t *payload);
+
+/* The minimal step Record. */
+#define DATA_LOG_STEP_SIZE 12u
+
+typedef struct {
+    uint32_t step_count;
+    uint8_t  state;
+    bool     fault_active;
+    bool     background_stalled;
+    bool     timing_fault;
+    bool     startup_ok;
+    uint32_t step_us;  /* saturates at 65535 in the Record */
+    uint32_t overruns; /* since power-on */
+} data_log_step_t;
+
+/* 0 step count (u32), 4 state (u8), 5 flags (u8: bit 0 fault active,
+   1 background stalled, 2 timing fault, 3 start-up ok), 6 step time
+   (us, u16, saturated), 8 Overruns (u32). */
+void data_log_step_encode(uint8_t out[DATA_LOG_STEP_SIZE], const data_log_step_t *s);
+
+#endif /* DATA_LOG_RECORD_H */

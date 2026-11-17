@@ -82,7 +82,7 @@ static bool partly_written(const uint8_t b[EVENT_SIZE])
     return false;
 }
 
-static void encode(const event_t *ev, uint8_t b[EVENT_SIZE])
+void event_log_encode(const event_t *ev, uint8_t b[EVENT_SIZE])
 {
     memset(b, 0, EVENT_SIZE);
     put_u16(&b[0], ev->boot);
@@ -333,7 +333,7 @@ event_append_t event_log_append(event_log_t *log, uint16_t code, uint32_t uptime
 
     uint8_t b[EVENT_SIZE];
 
-    encode(&ev, b);
+    event_log_encode(&ev, b);
     /* The slot is used whether or not the write works: a half-written one
        is never written again. */
     const uint8_t slot = log->used[log->head]++;

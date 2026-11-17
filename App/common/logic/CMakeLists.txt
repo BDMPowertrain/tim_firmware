@@ -13,6 +13,8 @@ add_logic_library(logic_common
         Src/cpu_share.c
         Src/daq_retry.c
         Src/daq_status.c
+        Src/data_log_card.c
+        Src/data_log_record.c
         Src/e2e_p11.c
         Src/event_codes.c
         Src/event_flood.c
@@ -20,9 +22,11 @@ add_logic_library(logic_common
         Src/frame_queue.c
         Src/heartbeat.c
         Src/kick_gate.c
+        Src/log_batch.c
         Src/mailbox.c
         Src/overrun_watch.c
         Src/params.c
+        Src/record_ring.c
         Src/reset_cause.c
         Src/reset_record.c
         Src/stall_watch.c

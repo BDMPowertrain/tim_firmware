@@ -75,3 +75,29 @@ add_host_test(test_vcu_sensors logic_vcu vcu/test_vcu_sensors.c)
 add_host_test(test_vcu_control logic_vcu vcu/test_vcu_control.c)
 add_host_test(test_bms_tx logic_bms bms/test_bms_tx.c)
 add_host_test(test_bms_params logic_bms bms/test_bms_params.c)
+add_host_test(test_record_ring logic_common common/test_record_ring.c)
+add_host_test(test_data_log_record logic_common common/test_data_log_record.c)
+add_host_test(test_log_batch logic_common common/test_log_batch.c)
+add_host_test(test_data_log_card logic_common common/test_data_log_card.c)
+
+# The Python decoder against the sample file test_data_log_record writes
+# (issue 53). Python 3.10 or later, standard library only. Required in CI
+# (the host-tests-sanitize preset), so the check cannot drop out there.
+option(TIM_REQUIRE_PYTHON "Fail the configure without Python for the decoder test" OFF)
+if(TIM_REQUIRE_PYTHON)
+    find_package(Python3 3.10 REQUIRED COMPONENTS Interpreter)
+else()
+    find_package(Python3 3.10 COMPONENTS Interpreter)
+endif()
+if(Python3_Interpreter_FOUND)
+    set_tests_properties(test_data_log_record PROPERTIES FIXTURES_SETUP data_log_sample)
+    add_test(NAME test_data_log_decoder
+        COMMAND ${CMAKE_COMMAND}
+            -DPYTHON=${Python3_EXECUTABLE}
+            -DDECODER=${repo_root}/tools/data_log_decode.py
+            -DDIR=${CMAKE_CURRENT_BINARY_DIR}
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/data_log_decoder_check.cmake)
+    set_tests_properties(test_data_log_decoder PROPERTIES FIXTURES_REQUIRED data_log_sample)
+else()
+    message(WARNING "No Python 3.10 or later: test_data_log_decoder is not run")
+endif()

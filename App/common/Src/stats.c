@@ -19,8 +19,8 @@
 #include "print.h"
 
 /* Covers every task either image creates (idle, timer service, print,
-   shell, housekeeping, the IMU and logger on the VCU, the two DAQ bus
-   tasks, the control step) with headroom. With more tasks than this,
+   shell, housekeeping, the Event writer, the Data log and the IMU on
+   the VCU, the two DAQ bus tasks, the control step) with headroom. With more tasks than this,
    uxTaskGetSystemState() returns none at all and `tasks` says "none
    gathered yet" for good: bump this if it does. */
 #define STATS_MAX_TASKS 16u

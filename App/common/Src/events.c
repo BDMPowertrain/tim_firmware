@@ -14,6 +14,7 @@
 #include "cmsis_os2.h"
 
 #include "build_id.h"
+#include "data_log_ring.h"
 #include "event_codes.h"
 #include "event_flood.h"
 #include "flash_bank2.h"
@@ -87,13 +88,37 @@ static void unlock(void)
     (void)osMutexRelease(logMutex);
 }
 
-/* ---- the writer -------------------------------------------------------- */
-
-static void store(uint16_t code, uint32_t uptime_ms, const uint8_t data[EVENT_DATA_SIZE])
+bool events_boot_number(uint16_t *boot)
 {
     lock();
+    const bool ok = opened;
+    *boot = log_.boot;
+    unlock();
+    return ok;
+}
+
+/* ---- the writer -------------------------------------------------------- */
+
+/* Appends one Event, then hands the Data log a copy of the same 32 bytes
+   (ADR 0021): its boot and sequence numbers are the ones the log gives it,
+   so the two logs line up. */
+static void store(uint16_t code, uint32_t uptime_ms, const uint8_t data[EVENT_DATA_SIZE])
+{
+    event_t ev = {
+        .code = code,
+        .uptime_ms = uptime_ms,
+    };
+    uint8_t bytes[EVENT_SIZE];
+
+    memcpy(ev.data, data, EVENT_DATA_SIZE);
+    lock();
+    ev.boot = log_.boot;
+    ev.seq = log_.seq; /* the number append gives it, written or not */
     (void)event_log_append(&log_, code, uptime_ms, data); /* failures are counted in log_ */
     unlock();
+
+    event_log_encode(&ev, bytes);
+    data_log_push_event(bytes, uptime_ms);
 }
 
 /* The boot Event, then the records the last reset left (event_codes.h). */

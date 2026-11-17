@@ -1,6 +1,6 @@
 /* vcu_shell.c — the shell commands only the VCU image has: the IMU, the
-   pedal and brake inputs, and the practice logger, CAN and VBAT modules
-   the BMS image does not link yet. shell.c is common code and knows none of them; they reach it
+   pedal and brake inputs, and the Data log, CAN and VBAT modules the BMS
+   image does not link yet. shell.c is common code and knows none of them; they reach it
    through shell_register_commands() (ADR 0001). */
 
 #include "vcu_shell.h"
@@ -15,7 +15,7 @@
 #include "control_bus.h"
 #include "adc_window.h"
 #include "imu.h"
-#include "logger.h"
+#include "data_log.h"
 #include "print.h"
 #include "shell.h"
 #include "vbat.h"
@@ -90,58 +90,6 @@ static int cmd_imustream(int argc, char **argv)
         if (shell_wait_key(100)) {
             break;
         }
-    }
-
-    return 0;
-}
-
-static const char *logger_state_name(logger_state_t state)
-{
-    switch (state) {
-    case LOGGER_IDLE:   return "idle";
-    case LOGGER_ACTIVE: return "active";
-    case LOGGER_ERROR:  return "error";
-    default:             return "unknown";
-    }
-}
-
-#define CMD_LOG_USAGE "usage: log start|stop|status|list|dump <file>\r\n"
-
-/* logger_request_*() only post to loggerTask's control queue and
-   return immediately — the actual f_mount()/f_open()/f_read()/
-   f_write()/f_close() happens over in loggerTask, never here. That's
-   why this can't report success/failure synchronously; run `log
-   status` (or just watch the output) a moment later to see how it
-   landed. `list`/`dump` are a testing-only readback path over this same
-   UART — see logger.h for why, and don't run `dump` while a session is
-   active. */
-static int cmd_log(int argc, char **argv)
-{
-    if (argc < 2) {
-        shell_printf(CMD_LOG_USAGE);
-        return 0;
-    }
-
-    if (strcmp(argv[1], "start") == 0) {
-        logger_request_start();
-        shell_printf("log: start requested\r\n");
-    } else if (strcmp(argv[1], "stop") == 0) {
-        logger_request_stop();
-        shell_printf("log: stop requested\r\n");
-    } else if (strcmp(argv[1], "status") == 0) {
-        shell_printf("log: %s, %lu records written\r\n",
-                     logger_state_name(logger_get_state()),
-                     (unsigned long)logger_get_record_count());
-    } else if (strcmp(argv[1], "list") == 0) {
-        logger_request_list();
-    } else if (strcmp(argv[1], "dump") == 0) {
-        if (argc < 3) {
-            shell_printf(CMD_LOG_USAGE);
-        } else {
-            logger_request_dump(argv[2]);
-        }
-    } else {
-        shell_printf(CMD_LOG_USAGE);
     }
 
     return 0;
@@ -520,7 +468,7 @@ static int cmd_inputs(int argc, char **argv)
 static const shell_cmd_t vcuCommands[] = {
     { "imu",       cmd_imu,       "latest accel/gyro sample" },
     { "imustream", cmd_imustream, "live accel/gyro stream, any key to stop" },
-    { "log",       cmd_log,       "log start|stop|status|list|dump <file>" },
+    { "datalog",   data_log_cmd,  "the Data log: card, file, Records written and dropped" },
     { "can",       cmd_can,       "can status[1|2]|stby2 on|off|send2 <id> <hex> [fd] [brs]|stream2" },
     { "vbat",      cmd_vbat,      "battery voltage" },
     { "inputs",    cmd_inputs,    "pedal, brake and supply readings [stream]" },

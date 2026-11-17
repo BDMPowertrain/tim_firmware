@@ -31,6 +31,8 @@
 
 #include "control_step.h"
 #include "daq_retry.h"
+#include "data_log_card.h"
+#include "data_log_ring.h"
 #include "fdcan_irq.h"
 #include "frame_queue.h"
 #include "main.h"
@@ -336,14 +338,15 @@ static void publish(void)
     control_snapshot_t snap;
     control_step_read(&snap);
 
-    /* card_state (0, MISSING), events_dropped, allocation_failed and
-       records_dropped wait for the Data log and Event log. */
+    /* events_dropped and allocation_failed wait for the Event log. */
     const daq_status_t status = {
         .overruns = snap.overruns,
         .background_stalled = snap.background_stalled,
         .control_bus_off = snap.bus.health.off,
         .control_bus_latched = snap.bus.health.latched,
         .control_bus_error_passive = snap.bus.health.error_passive,
+        .card_state = data_log_card_choice(data_log_state()),
+        .records_dropped = data_log_dropped(),
     };
     can_frame_t frame = {
         .id = publisher->status_frame_id,

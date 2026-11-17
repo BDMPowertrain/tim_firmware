@@ -11,17 +11,20 @@
 #include "can_daq.h"
 #include "can_if.h"
 #include "control_step.h"
+#include "data_log.h"
+#include "data_log_record.h"
 #include "events.h"
 #include "flash_bank2.h"
 #include "housekeeping.h"
 #include "imu.h"
-#include "logger.h"
 #include "main.h"
 #include "parameters.h"
 #include "print.h"
+#include "record_ring.h"
 #include "shell.h"
 #include "spi3_bus.h"
 #include "vcu_adc.h"
+#include "vcu_control.h"
 #include "vcu_daq.h"
 #include "vcu_params.h"
 #include "vcu_shell.h"
@@ -61,6 +64,21 @@ static const events_task_args_t eventTaskArgs = {
     .image = PARAMS_IMAGE_VCU,
 };
 
+/* The Data log's step ring (ADR 0021): 64 Records, 640 ms of steps. */
+#define STEP_RECORDS 64u
+
+static uint32_t stepRecords[RECORD_RING_STORAGE_SIZE(STEP_RECORDS, DATA_LOG_STEP_SIZE) /
+                            sizeof(uint32_t)];
+
+/* Read by the Data log for as long as it runs. */
+static const data_log_def_t dataLogDef = {
+    .image = PARAMS_IMAGE_VCU,
+    .startup_state = VCU_STATE_STARTUP,
+    .step_storage = stepRecords,
+    .step_storage_size = sizeof stepRecords,
+    .step_payload_max = DATA_LOG_STEP_SIZE,
+};
+
 /* The VCU's own Housekeeping work: VBAT, from the ADC1 scan. */
 static const housekeeping_def_t housekeepingDef = {
     .poll = vcu_adc_poll_vbat,
@@ -94,7 +112,8 @@ void tasks_init(void)
     ok = shell_init() && ok;
     vcu_shell_register();
     ok = spi3_bus_init() && ok;
-    ok = logger_init() && ok;
+    /* The rings before the Control step and the Event writer push. */
+    ok = data_log_init(&dataLogDef) && ok;
     ok = can_if_init(&daqPublisher, parameters_value(VCU_PARAM_CAN2_TERM) != 0) && ok;
     /* The analog inputs run from here on, the first scan discarded, so the
        control step's first read has samples (issue 55). */
@@ -113,8 +132,8 @@ void tasks_init(void)
                      (osPriority_t)HOUSEKEEPING_TASK_PRIORITY, HOUSEKEEPING_TASK_STACK_SIZE) && ok;
     ok = create_task(imuTask, NULL, "imuTask",
                      (osPriority_t)IMU_TASK_PRIORITY, IMU_TASK_STACK_SIZE) && ok;
-    ok = create_task(loggerTask, NULL, "loggerTask",
-                     (osPriority_t)LOGGER_TASK_PRIORITY, LOGGER_TASK_STACK_SIZE) && ok;
+    ok = create_task(dataLogTask, NULL, "dataLog",
+                     (osPriority_t)DATA_LOG_TASK_PRIORITY, DATA_LOG_TASK_STACK_SIZE) && ok;
     ok = create_task(canRxTask, NULL, "can2RxTask",
                      (osPriority_t)CAN_RX_TASK_PRIORITY, CAN_RX_TASK_STACK_SIZE) && ok;
     ok = create_task(daqTask, NULL, "daqTask",

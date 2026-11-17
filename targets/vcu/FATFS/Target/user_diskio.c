@@ -50,8 +50,8 @@ extern SPI_HandleTypeDef hspi2;
    ChaN's widely-used reference MMC/SDC module, which FatFS itself is
    written by): CMD0 -> CMD8 (probe SDv2 vs SDv1/MMC) -> ACMD41 poll
    (HCS set for SDv2) -> CMD58 (read OCR for the CCS/block-addressing
-   bit). Called from loggerTask (via f_mount/f_open/f_write), never from
-   shellTask -- see App/common/Src/logger.c. */
+   bit). Called from dataLogTask (via f_mount/f_open/f_write), never from
+   shellTask -- see App/common/Src/data_log.c. */
 
 /* Commands, already in SPI-mode framing (0x40 | command index) --
    sd_send_cmd() sends these bytes as-is. ACMD41 is not a real command
@@ -130,7 +130,7 @@ static void sd_deselect(void)
    the card holds MISO low while it programs flash internally -- that
    can legitimately take tens of ms, hence a real timeout rather than a
    fixed retry count. osDelay(1), not HAL_Delay(), since this always
-   runs from loggerTask's context (CLAUDE.md: no HAL_Delay in a task). */
+   runs from dataLogTask's context (CLAUDE.md: no HAL_Delay in a task). */
 static int sd_wait_ready(uint32_t timeout_ms)
 {
     uint32_t start = HAL_GetTick();

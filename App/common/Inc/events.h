@@ -20,8 +20,10 @@
 
    Without flash nothing is stored: the writer still runs the same
    sequence, "not dual-bank" included, and takes every Event from the
-   queue, but stores none; the read-out says why the log is empty. The
-   Events reach a record once the Data log copies them.
+   queue, but stores none; the read-out says why the log is empty.
+
+   Every Event, stored or not, is also copied to the Data log as a Record
+   carrying the same 32 bytes (ADR 0021, data_log_ring.h).
 
    This file never checks which image it is built into. */
 
@@ -45,6 +47,10 @@ bool events_init(void);
    waits: false if the queue was full (or not created), and the Event is
    counted as dropped. Any task; not from an interrupt. */
 bool events_post(uint16_t code, const uint8_t data[EVENT_DATA_SIZE]);
+
+/* This start's boot number, once the writer has opened the log. False
+   before then. Any task. */
+bool events_boot_number(uint16_t *boot);
 
 /* Events waiting in the queue now. */
 uint32_t events_queued(void);

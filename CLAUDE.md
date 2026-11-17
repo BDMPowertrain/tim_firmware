@@ -160,6 +160,14 @@ undo provisioning.
 - The Control bus (CAN1) is driven only by the image's control step
   (App/common/Src/control_step.c, control_bus.c, ADR 0004 and 0010): no
   task, queue or shell command sends on it.
+- The Data log (ADR 0021) leaves the control step through a ring with one
+  writer and one reader, no lock (App/common/Src/data_log_ring.c, linked
+  into both images); the Event writer copies each Event into a second
+  ring. The SD logger (App/common/Src/data_log.c) is their one reader and
+  the only FatFS caller; it joins the BMS image when SPI2 is configured
+  there. The file format is App/common/logic/Inc/data_log_record.h, and
+  tools/data_log_decode.py turns a file into CSV: change both together
+  (a host test checks they agree, and needs Python 3.10 or later).
 
 ## Conventions
 - Tasks are created in the image's tasks.c (App/vcu/Src/tasks.c,

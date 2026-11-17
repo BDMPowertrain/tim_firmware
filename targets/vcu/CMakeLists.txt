@@ -56,13 +56,14 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     ../../App/common/Src/control_bus.c
     ../../App/common/Src/control_step.c
     ../../App/common/Src/crash.c
+    ../../App/common/Src/data_log.c
+    ../../App/common/Src/data_log_ring.c
     ../../App/common/Src/events.c
     ../../App/common/Src/cycle_counter.c
     ../../App/common/Src/fdcan_irq.c
     ../../App/common/Src/flash_bank2.c
     ../../App/common/Src/housekeeping.c
     ../../App/vcu/Src/imu.c
-    ../../App/common/Src/logger.c
     ../../App/common/Src/parameters.c
     ../../App/common/Src/print.c
     ../../App/common/Src/reset_handler.s
