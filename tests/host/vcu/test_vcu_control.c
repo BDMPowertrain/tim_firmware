@@ -866,6 +866,17 @@ static void test_ready_to_drive_is_left_below_80_percent_of_the_pack(void)
     assert_transition(VCU_STATE_READY_TO_DRIVE, VCU_STATE_TS_ACTIVE, VCU_CAUSE_BUS_VOLTAGE_LOW);
 }
 
+/* A VALID pack voltage of 0 cannot hide a lost bus: below 60 V is lost
+   whatever the pack says. */
+static void test_ready_to_drive_is_left_below_60_v_whatever_the_pack_says(void)
+{
+    to_ready_to_drive();
+    bmsLimits.pack_voltage = 0u;
+    set_bus_dv(599);
+    step();
+    assert_transition(VCU_STATE_READY_TO_DRIVE, VCU_STATE_TS_ACTIVE, VCU_CAUSE_BUS_VOLTAGE_LOW);
+}
+
 static void test_leaving_ready_to_drive_records_every_cause_that_applied(void)
 {
     to_ready_to_drive();
@@ -1049,8 +1060,8 @@ static struct can_control_inv_parameter_command_t fault_clear_frame(void)
 {
     struct can_control_inv_parameter_command_t c;
     TEST_ASSERT_TRUE(out.send_fault_clear);
-    TEST_ASSERT_EQUAL_INT(0, can_control_inv_parameter_command_unpack(&c, out.fault_clear,
-                                                                       sizeof(out.fault_clear)));
+    TEST_ASSERT_EQUAL_INT(0, can_control_inv_parameter_command_unpack(
+                                 &c, out.fault_clear_frame, sizeof(out.fault_clear_frame)));
     return c;
 }
 
@@ -1136,6 +1147,27 @@ static void test_a_fault_clear_that_does_not_clear_is_recorded_as_failed(void)
     /* A new press tries again. */
     press_start();
     TEST_ASSERT_TRUE(out.send_fault_clear);
+}
+
+/* A second press before the first result: the first attempt is recorded
+   as failed (the fault is still reported), then the second goes. */
+static void test_a_second_press_records_the_first_attempt_before_retrying(void)
+{
+    to_inverter_fault();
+    press_start();
+    TEST_ASSERT_TRUE(out.send_fault_clear);
+    press_start();
+    TEST_ASSERT_TRUE(out.send_fault_clear);
+    int failed = 0;
+    int sent = 0;
+    for (size_t i = 0; i < out.event_count; i++) {
+        if (out.events[i].code == EVENT_INVERTER_FAULT_CLEAR) {
+            failed += out.events[i].data[0] == EVENT_FAULT_CLEAR_FAILED;
+            sent += out.events[i].data[0] == EVENT_FAULT_CLEAR_SENT;
+        }
+    }
+    TEST_ASSERT_EQUAL_INT(1, failed);
+    TEST_ASSERT_EQUAL_INT(1, sent);
 }
 
 static void test_no_fault_clear_with_the_pedal_at_5_percent(void)
@@ -2016,6 +2048,28 @@ static void test_the_reaction_row_bus_off_latch_needs_the_start_procedure(void)
     TEST_ASSERT_FALSE(out.fault_led);
 }
 
+/* A device fault that left Ready to Drive keeps the light solid after the
+   bus discharges to GLV_ON, while the fault is still reported. */
+static void test_a_device_fault_keeps_the_fault_led_solid_in_glv_on(void)
+{
+    in.now_ms = 10000u;
+    driving();
+    invFaults.run_faults = 0x8u;
+    step();
+    TEST_ASSERT_EQUAL_UINT8(VCU_STATE_TS_ACTIVE, out.state);
+    set_bus_dv(0);
+    step();
+    TEST_ASSERT_EQUAL_UINT8(VCU_STATE_GLV_ON, out.state);
+    for (int i = 0; i < 100; i++) {
+        step();
+        TEST_ASSERT_TRUE(out.fault_led);
+        TEST_ASSERT_TRUE(out.fault_active);
+    }
+    invFaults.run_faults = 0u;
+    step();
+    TEST_ASSERT_FALSE(out.fault_led);
+}
+
 /* The Shutdown Circuit input is trusted only in the safe direction: open
    takes torque away at once, but closed alone grants nothing. */
 static void test_the_shutdown_circuit_closed_alone_grants_nothing(void)
@@ -2219,6 +2273,7 @@ int main(void)
     RUN_TEST(test_ready_to_drive_is_left_when_the_inverter_reports_a_fault);
     RUN_TEST(test_ready_to_drive_is_left_when_the_bus_off_latch_sets);
     RUN_TEST(test_ready_to_drive_is_left_below_80_percent_of_the_pack);
+    RUN_TEST(test_ready_to_drive_is_left_below_60_v_whatever_the_pack_says);
     RUN_TEST(test_leaving_ready_to_drive_records_every_cause_that_applied);
     RUN_TEST(test_a_silent_bms_does_not_leave_ready_to_drive);
     RUN_TEST(test_a_silent_inverter_does_not_leave_ready_to_drive);
@@ -2232,6 +2287,7 @@ int main(void)
     RUN_TEST(test_a_press_with_an_inverter_fault_sends_one_fault_clear);
     RUN_TEST(test_after_a_fault_clear_a_second_press_runs_the_start_procedure);
     RUN_TEST(test_a_fault_clear_that_does_not_clear_is_recorded_as_failed);
+    RUN_TEST(test_a_second_press_records_the_first_attempt_before_retrying);
     RUN_TEST(test_no_fault_clear_with_the_pedal_at_5_percent);
     RUN_TEST(test_no_fault_clear_while_the_inverter_reads_enabled);
     RUN_TEST(test_no_fault_clear_without_a_press);
@@ -2284,6 +2340,7 @@ int main(void)
     RUN_TEST(test_the_fault_led_is_solid_while_the_bus_off_latch_is_set);
     RUN_TEST(test_the_fault_led_is_solid_while_a_leave_condition_is_present);
     RUN_TEST(test_the_reaction_row_bus_off_latch_needs_the_start_procedure);
+    RUN_TEST(test_a_device_fault_keeps_the_fault_led_solid_in_glv_on);
     RUN_TEST(test_the_shutdown_circuit_closed_alone_grants_nothing);
     RUN_TEST(test_the_fault_led_is_on_in_startup);
     RUN_TEST(test_the_fault_led_is_held_3_s_after_reset);

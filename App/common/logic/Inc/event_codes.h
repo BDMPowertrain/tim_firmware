@@ -155,12 +155,14 @@ void event_data_inverter_fault(uint8_t data[EVENT_DATA_SIZE], uint32_t post_faul
                                uint32_t run_faults);
 
 /* An EVENT_INVERTER_FAULT_CLEAR Event's result. */
-#define EVENT_FAULT_CLEAR_SENT    0u /* the 0x0C1 went out */
-#define EVENT_FAULT_CLEAR_CLEARED 1u /* INV_FaultCodes then read no fault */
-#define EVENT_FAULT_CLEAR_FAILED  2u /* still a fault, or no VALID frame, in time */
+typedef enum {
+    EVENT_FAULT_CLEAR_SENT    = 0, /* the 0x0C1 went out */
+    EVENT_FAULT_CLEAR_CLEARED = 1, /* INV_FaultCodes then read no fault */
+    EVENT_FAULT_CLEAR_FAILED  = 2, /* still a fault, or no VALID frame, in time */
+} event_fault_clear_result_t;
 
 typedef struct {
-    uint8_t  result;      /* EVENT_FAULT_CLEAR_... */
+    event_fault_clear_result_t result;
     uint8_t  state;       /* VCU_Status State value at the time */
     uint32_t post_faults; /* INV_FaultCodes as last read */
     uint32_t run_faults;

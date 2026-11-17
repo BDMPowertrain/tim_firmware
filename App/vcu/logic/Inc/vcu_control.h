@@ -26,7 +26,7 @@
  *   READY_TO_DRIVE  Leaving Ready to Drive, to TS_ACTIVE at once, on the
  *                   Shutdown Circuit input open, a BMS-reported fault, an
  *                   inverter-reported fault, the bus-off latch, or the bus
- *                   below 80% of the pack voltage. A fault is "reported"
+ *                   below 80% of the pack voltage or below 60 V. A fault is "reported"
  *                   only by a VALID mailbox, and the bus voltage is judged
  *                   only with both its mailboxes VALID: a mailbox that is
  *                   not VALID is a Torque cut (ADR 0006, issue 58), and its
@@ -53,10 +53,10 @@
  *   Gates: zero torque outside READY_TO_DRIVE, on the first 0x0C0 after
  *   entry, and while any Torque cut is active.
  *
- * Torque cuts (ADR 0006, vcu_cut_t). Each keeps Enable=1 with zero torque,
- * except the mailbox cut, which sends Enable=0, and ends only once its
- * cause is gone and the higher Pedal travel is below 5%, so torque never
- * returns under a pressed pedal. However long it lasts, a Torque cut never
+ * Torque cuts (ADR 0006, vcu_cut_t). Each ends only once its cause is gone
+ * and the higher Pedal travel is below 5%, so torque never returns under a
+ * pressed pedal. Each keeps Enable=1 with zero torque, except the mailbox
+ * cut, which sends Enable=0. However long it lasts, a Torque cut never
  * becomes Leaving Ready to Drive. Each start and end is an EVENT_TORQUE_CUT
  * Event. A cut only zeroes
  * torque in Ready to Drive (the Glossary's Torque cut), but its timer and
@@ -106,9 +106,9 @@
  *
  * Fault LED: on in STARTUP and for VCU_LAMP_CHECK_MS after reset release
  * (config.reset_ms); solid from Leaving Ready to Drive until the Start
- * procedure is done again or the state is GLV_ON, while the bus-off latch
- * is set, and in TS_ACTIVE while a cause of Leaving Ready to Drive is
- * present; otherwise blinking every VCU_FAULT_BLINK_MS while a Torque cut
+ * procedure is done again or the state is GLV_ON, after STARTUP while the
+ * bus-off latch is set or a device reports a fault, and in TS_ACTIVE while
+ * a cause of Leaving Ready to Drive is present; otherwise blinking every VCU_FAULT_BLINK_MS while a Torque cut
  * lasts. The fault-active test point and fault_active (the heartbeat's
  * 5 Hz) are on whenever it is solid or a Torque cut lasts, in the same step
  * that zeroes the command.
@@ -283,8 +283,8 @@ typedef struct {
 
     bool          send_command;   /* command holds an INV_Command (0x0C0) */
     uint8_t       command[CAN_CONTROL_INV_COMMAND_LENGTH];
-    bool          send_fault_clear; /* fault_clear holds an INV_ParameterCommand (0x0C1) */
-    uint8_t       fault_clear[CAN_CONTROL_INV_PARAMETER_COMMAND_LENGTH];
+    bool          send_fault_clear; /* fault_clear_frame holds an INV_ParameterCommand (0x0C1) */
+    uint8_t       fault_clear_frame[CAN_CONTROL_INV_PARAMETER_COMMAND_LENGTH];
     bool          send_status;    /* status holds a VCU_Status (0x090) */
     uint8_t       status[CAN_CONTROL_VCU_STATUS_LENGTH];
 
