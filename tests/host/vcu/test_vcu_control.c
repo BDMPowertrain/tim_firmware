@@ -1010,9 +1010,8 @@ static void test_leaving_ready_to_drive_sends_enable_0_in_the_same_step(void)
     TEST_ASSERT_EQUAL_UINT8(0u, status_frame().enable_sent);
 }
 
-
 /* ------------------------------------------------------------------ */
-/* The torque path: pedal map and gates                               */
+/* The torque path: pedal map and gates                              */
 /* ------------------------------------------------------------------ */
 
 static int16_t torque_sent(void)
@@ -1286,7 +1285,7 @@ static void test_a_brake_sensor_failed_for_80_ms_cuts_torque(void)
     run_ms(80u);
     step_after(9u);
     TEST_ASSERT_EQUAL_UINT8(0u, out.cuts);
-    TEST_ASSERT_FALSE(out.brake_light);
+    TEST_ASSERT_TRUE(out.brake_light); /* on from the failure, not the cut */
 
     step_after(1u);
     assert_cut_starts(VCU_CUT_BRAKE_SENSOR);
@@ -1316,6 +1315,31 @@ static void test_a_brake_sensor_cut_recovers_only_below_5_percent(void)
     step();
     assert_cut_ends(VCU_CUT_BRAKE_SENSOR);
     TEST_ASSERT_FALSE(out.brake_light);
+}
+
+/* Spec #36: the brake light is on whenever a brake sensor has failed, from
+   its first step, before the 80 ms that make it a Torque cut. */
+static void test_a_failed_brake_sensor_lights_the_brake_light_at_once(void)
+{
+    driving();
+    in.raw.brake[0] = 3800u;
+    step();
+    TEST_ASSERT_EQUAL_UINT8(0u, out.cuts);
+    TEST_ASSERT_TRUE(out.brake_light);
+}
+
+/* T.4.3.3 across the 32-bit millisecond wrap. */
+static void test_the_brake_sensor_timer_works_across_the_clock_wrap(void)
+{
+    in.now_ms = 0xFFFFFF90u;
+    driving();
+    TEST_ASSERT_TRUE(in.now_ms > 0xFFFFFF00u); /* the wrap is still ahead */
+    in.raw.brake[1] = 10u;
+    run_ms(80u);
+    TEST_ASSERT_TRUE(in.now_ms < 0x100u);
+    TEST_ASSERT_EQUAL_UINT8(0u, out.cuts);
+    step();
+    assert_cut_starts(VCU_CUT_BRAKE_SENSOR);
 }
 
 /* Spec #36: the brake light is on for a failed brake sensor in any state. */
@@ -1400,7 +1424,7 @@ static void test_a_timing_fault_cuts_torque_until_below_5_percent(void)
 }
 
 /* ------------------------------------------------------------------ */
-/* The fault LED: blinking for a Torque cut, solid for a restart       */
+/* The fault LED: blinking for a Torque cut, solid for a restart      */
 /* ------------------------------------------------------------------ */
 
 /* ADR 0006: the fault LED blinks while a Torque cut lasts, from the step
@@ -1496,7 +1520,7 @@ static void test_the_restart_light_is_solid_through_a_torque_cut(void)
 }
 
 /* ------------------------------------------------------------------ */
-/* The fault LED and VCU_Status                                    */
+/* The fault LED and VCU_Status                                       */
 /* ------------------------------------------------------------------ */
 
 static void test_the_fault_led_is_on_in_startup(void)
@@ -1675,6 +1699,8 @@ int main(void)
     RUN_TEST(test_the_apps_timer_works_across_the_clock_wrap);
     RUN_TEST(test_a_brake_sensor_failed_for_80_ms_cuts_torque);
     RUN_TEST(test_a_brake_sensor_cut_recovers_only_below_5_percent);
+    RUN_TEST(test_a_failed_brake_sensor_lights_the_brake_light_at_once);
+    RUN_TEST(test_the_brake_sensor_timer_works_across_the_clock_wrap);
     RUN_TEST(test_a_failed_brake_sensor_lights_the_brake_light_in_glv_on);
     RUN_TEST(test_brake_with_the_pedal_above_25_percent_cuts_torque_at_once);
     RUN_TEST(test_the_25_percent_check_uses_the_higher_travel);
