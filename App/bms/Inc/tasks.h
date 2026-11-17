@@ -44,6 +44,13 @@
 #define EVENT_TASK_PRIORITY       osPriorityBelowNormal
 #define EVENT_TASK_STACK_SIZE     1024u
 
+/* The Data log's SD logger (ADR 0021, issues 53 and 54): BelowNormal, as it
+   only records. The VCU's size (App/vcu/Inc/tasks.h), where 1348 of 2048 B
+   stayed free on the bench; unmeasured on the BMS. Measure with `tasks`
+   after a roll and a card pull, and adjust. */
+#define DATA_LOG_TASK_PRIORITY    osPriorityBelowNormal
+#define DATA_LOG_TASK_STACK_SIZE  2048u
+
 /* The Control step (ADR 0010): the one Realtime task, every 20 ms. It
    takes no mutex and blocks only on its own period (and, once the Sweep
    exists, its own cell-monitor exchange). Measure with `tasks`. */

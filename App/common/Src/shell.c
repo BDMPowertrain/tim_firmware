@@ -15,6 +15,7 @@
 #include "control_bus.h"
 #include "control_step.h"
 #include "crash.h"
+#include "data_log.h"
 #include "events.h"
 
 #include "main.h"
@@ -102,6 +103,7 @@ static const shell_cmd_t commandTable[] = {
     { "param",     parameters_cmd, "param [dump] | set <name> <value> | save" },
     { "term",      termination_cmd, "term [1|2 on|off|stored]: CAN termination; on/off is a bench override, not saved" },
     { "events",    events_cmd,    "events [n]: the Event log's state and its newest n Events" },
+    { "datalog",   data_log_cmd,  "the Data log: card, file, Records written and dropped" },
     { "lastreset", cmd_lastreset, "last reset: cause, Breadcrumb, Crash record, resets not power-on" },
     { "hang",      cmd_hang,      "hang " BENCH_CONFIRM_WORD ": hang the control step, for a watchdog reset" },
     { "crash",     cmd_crash,     "crash " BENCH_CONFIRM_WORD ": call the crash routine, for a crash reset" },

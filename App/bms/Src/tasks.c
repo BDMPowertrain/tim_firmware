@@ -15,15 +15,19 @@
 #include "bms_daq.h"
 #include "bms_params.h"
 #include "bms_step.h"
+#include "can_control.h"
 #include "can_daq.h"
 #include "can_if.h"
 #include "control_step.h"
+#include "data_log.h"
+#include "data_log_record.h"
 #include "events.h"
 #include "flash_bank2.h"
 #include "housekeeping.h"
 #include "main.h"
 #include "parameters.h"
 #include "print.h"
+#include "record_ring.h"
 #include "shell.h"
 #include "watchdog.h"
 
@@ -48,6 +52,26 @@ static control_step_args_t controlStepArgs;
 /* Read by the Event writer for as long as it runs. */
 static const events_task_args_t eventTaskArgs = {
     .image = PARAMS_IMAGE_BMS,
+};
+
+/* The Data log's step ring (ADR 0021): 64 of today's step Records, 1.28 s
+   of 20 ms steps. The full cell snapshot (16 deep, every fifth Sweep)
+   replaces it with its own ticket. */
+#define STEP_RECORDS 64u
+
+static uint32_t stepRecords[RECORD_RING_STORAGE_SIZE(STEP_RECORDS, DATA_LOG_STEP_SIZE) /
+                            sizeof(uint32_t)];
+
+/* Read by the Data log for as long as it runs. Logging starts when the
+   step leaves STARTUP, which the BMS step does not do until the Sweep and
+   its states exist (#63, #65): until then the logger waits and mounts
+   nothing. */
+static const data_log_def_t dataLogDef = {
+    .image = PARAMS_IMAGE_BMS,
+    .startup_state = CAN_CONTROL_BMS_STATUS_STATE_STARTUP_CHOICE,
+    .step_storage = stepRecords,
+    .step_storage_size = sizeof stepRecords,
+    .step_payload_max = DATA_LOG_STEP_SIZE,
 };
 
 /* The BMS has no slow reading of its own yet: ADC1 (board temperature,
@@ -79,6 +103,8 @@ void tasks_init(void)
        anything shares bank 2. */
     ok = events_init() && ok;
     ok = flash_bank2_init() && ok;
+    /* The rings before the Control step and the Event writer push. */
+    ok = data_log_init(&dataLogDef) && ok;
     /* Parameters before anything that reads them, read once (ADR 0015).
        The BMS accepts a save at any time, so it has no save hook. */
     ok = parameters_init(&bms_param_table, NULL) && ok;
@@ -102,6 +128,8 @@ void tasks_init(void)
                      (osPriority_t)DAQ_TASK_PRIORITY, DAQ_TASK_STACK_SIZE) && ok;
     ok = create_task(eventTask, (void *)&eventTaskArgs, "eventTask",
                      (osPriority_t)EVENT_TASK_PRIORITY, EVENT_TASK_STACK_SIZE) && ok;
+    ok = create_task(dataLogTask, NULL, "dataLog",
+                     (osPriority_t)DATA_LOG_TASK_PRIORITY, DATA_LOG_TASK_STACK_SIZE) && ok;
 
     /* The control step last, so it starts with everything else in place.
        Start-up Kick 2 of 2 (watchdog.h): from here the control step is the
