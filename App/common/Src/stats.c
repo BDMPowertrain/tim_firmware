@@ -4,6 +4,7 @@
 
 #include "stats.h"
 
+#include <stddef.h>
 #include <stdint.h>
 #include <string.h>
 
@@ -12,6 +13,8 @@
 
 #include "cmsis_os2.h"
 
+#include "cpu_share.h"
+#include "cycle_counter.h"
 #include "print.h"
 
 /* Covers every task either image creates (idle, timer service, print,
@@ -29,23 +32,24 @@ typedef struct {
     uint32_t    cpu_permille; /* of the run time since the last gathering */
 } stats_row_t;
 
-/* Housekeeping's alone: the last gathering's run-time counters, to take
-   each task's run time in this window by difference. */
-typedef struct {
-    UBaseType_t number; /* FreeRTOS's unique task number */
-    uint32_t    run_time;
-} stats_prev_t;
-
+/* Housekeeping's alone. prev is the last gathering's run-time counters,
+   to take each task's part of this window (cpu_share.h). */
 static TaskStatus_t status[STATS_MAX_TASKS];
-static stats_prev_t prev[STATS_MAX_TASKS];
-static UBaseType_t  prevCount;
-static uint32_t     windowRun[STATS_MAX_TASKS];
+static cpu_sample_t prev[STATS_MAX_TASKS];
+static cpu_sample_t now[STATS_MAX_TASKS];
+static size_t       prevCount;
+static uint32_t     share[STATS_MAX_TASKS];
 
 /* Shared with the shell, under statsMutex. */
 static osMutexId_t statsMutex;
 static stats_row_t rows[STATS_MAX_TASKS];
 static UBaseType_t rowCount;
 static uint32_t    gatherings;
+
+/* How long uxTaskGetSystemState() held the scheduler suspended, in us:
+   written by Housekeeping, read by the shell as single words. */
+static volatile uint32_t lastSuspendUs;
+static volatile uint32_t worstSuspendUs;
 
 bool stats_init(void)
 {
@@ -54,38 +58,32 @@ bool stats_init(void)
     return statsMutex != NULL;
 }
 
-/* The run time in this window: the counter's rise since the last
-   gathering, by unsigned difference (each counter wraps every 25 s of its
-   own task's time, far beyond one second). A task new since then is
-   counted from its creation. */
-static uint32_t window_run_time(const TaskStatus_t *task)
-{
-    for (UBaseType_t i = 0; i < prevCount; i++) {
-        if (prev[i].number == task->xTaskNumber) {
-            return task->ulRunTimeCounter - prev[i].run_time;
-        }
-    }
-    return task->ulRunTimeCounter;
-}
-
 void stats_gather(void)
 {
     /* uxTaskGetSystemState() suspends the scheduler while it walks every
        task and scans each one's unused stack for the high-water mark, so
-       the Control step cannot start until it ends (an estimated few hundred
-       microseconds; unmeasured, watch the step's worst time with `step`).
-       Housekeeping's boundaries fall on the step's, and the step, being
-       higher, runs first: so this normally runs just after a step, with
-       nearly a whole period to the next. */
+       the Control step cannot start until it ends. The step's own times
+       cannot show that (it times itself from its wake), so the call is
+       timed here and `tasks` prints the worst: on the bench VCU (Debug
+       build, 10 tasks, 13 minutes) 669 us typical, 1034 us worst.
+       Housekeeping's boundaries
+       fall on the step's, and the step, being higher, runs first: so this
+       normally runs just after a step, with nearly a whole period to the
+       next. */
+    const uint32_t start = cycle_counter_read();
     const UBaseType_t count = uxTaskGetSystemState(status, STATS_MAX_TASKS, NULL);
+    const uint32_t suspendUs = (cycle_counter_read() - start) / (SystemCoreClock / 1000000u);
 
-    /* The window's total is the sum of every task's part, the Idle task
-       included, so the shares add to 1000 and need no separate clock. */
-    uint64_t total = 0u;
-    for (UBaseType_t i = 0; i < count; i++) {
-        windowRun[i] = window_run_time(&status[i]);
-        total += windowRun[i];
+    lastSuspendUs = suspendUs;
+    if (suspendUs > worstSuspendUs) {
+        worstSuspendUs = suspendUs;
     }
+
+    for (UBaseType_t i = 0; i < count; i++) {
+        now[i].task_number = (uint32_t)status[i].xTaskNumber;
+        now[i].run_time = status[i].ulRunTimeCounter;
+    }
+    cpu_share_compute(prev, prevCount, now, count, share);
 
     if (statsMutex == NULL || osMutexAcquire(statsMutex, osWaitForever) != osOK) {
         return;
@@ -99,18 +97,13 @@ void stats_gather(void)
         /* usStackHighWaterMark is in words; bytes, to compare directly
            with the *_STACK_SIZE values in tasks.h. */
         row->stack_free_bytes = (uint32_t)status[i].usStackHighWaterMark * sizeof(StackType_t);
-        row->cpu_permille = (total == 0u)
-            ? 0u
-            : (uint32_t)(((uint64_t)windowRun[i] * 1000u + total / 2u) / total);
+        row->cpu_permille = share[i];
     }
     rowCount = count;
     gatherings++;
     (void)osMutexRelease(statsMutex);
 
-    for (UBaseType_t i = 0; i < count; i++) {
-        prev[i].number = status[i].xTaskNumber;
-        prev[i].run_time = status[i].ulRunTimeCounter;
-    }
+    memcpy(prev, now, count * sizeof(now[0]));
     prevCount = count;
 }
 
@@ -165,4 +158,6 @@ void stats_print_tasks(void)
     if (gathering != first) {
         shell_printf("(rows span two gatherings)\r\n");
     }
+    shell_printf("scheduler suspended to gather: last %lu us, worst %lu us\r\n",
+                 (unsigned long)lastSuspendUs, (unsigned long)worstSuspendUs);
 }

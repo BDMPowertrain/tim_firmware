@@ -183,6 +183,14 @@ _Avoid_: Feed, pet, refresh, service the watchdog
 A **Control step** that had not finished when its next period began. The late step is not caught up; the next one starts on the following period boundary.
 _Avoid_: Deadline miss, late step, timing violation
 
+**Housekeeping**:
+The one Low-priority task in each **Image**, every 100 ms: it drives the heartbeat LED, takes the image's slow readings and gathers task statistics once a second. Being the lowest task, it is the first to starve, which is what **Background stalled** watches for.
+_Avoid_: Heartbeat task, background task, idle work
+
+**Background stalled**:
+The warning the **Control step** raises when **Housekeeping** has not run for 1 s. It is reported on the **DAQ bus** and resets nothing; it is not a fault.
+_Avoid_: Starvation fault, watchdog, hang
+
 **Breadcrumb**:
 The running note of where the **Control step** last was, kept where it survives a reset, so that after a watchdog reset the image can say what it was doing.
 _Avoid_: Trace, checkpoint, last-gasp record

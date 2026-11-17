@@ -7,6 +7,7 @@ add_logic_library(logic_common
         Src/bus_recovery.c
         Src/control_rx.c
         Src/crc32.c
+        Src/cpu_share.c
         Src/daq_retry.c
         Src/daq_status.c
         Src/e2e_p11.c

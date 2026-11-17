@@ -52,9 +52,12 @@ static void phase_input(control_step_ctx_t *ctx)
 
 static void phase_logic(control_step_ctx_t *ctx)
 {
-    /* No logic yet: the VCU stays in STARTUP, with no fault to show. */
+    /* No logic yet: the VCU stays in STARTUP. A blocked start-up (a task
+       or queue missing, or CAN1 refused) is the only fault so far: the
+       heartbeat shows it at 5 Hz. Torque cuts and Leaving Ready to Drive
+       join it with their logic (#57, #58). */
     ctx->state = CAN_CONTROL_VCU_STATUS_STATE_STARTUP_CHOICE;
-    ctx->fault_active = false;
+    ctx->fault_active = !ctx->startup_ok || !canStarted;
 }
 
 static void phase_output(control_step_ctx_t *ctx)

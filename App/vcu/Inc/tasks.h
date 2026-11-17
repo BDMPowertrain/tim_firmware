@@ -70,7 +70,8 @@
 /* Housekeeping (issue 47): the one Low task, every 100 ms — heartbeat LED,
    VBAT, and once a second the task statistics (whose array is static in
    stats.c, not on this stack). The stack holds a copy of the step's
-   snapshot and the HAL ADC calls; unmeasured. Measure with `tasks`. */
+   snapshot and the HAL ADC calls. Measured on the bench TIM (Debug, 13
+   minutes): 656 B free of 1024. */
 #define HOUSEKEEPING_TASK_PRIORITY   osPriorityLow
 #define HOUSEKEEPING_TASK_STACK_SIZE 1024u
 

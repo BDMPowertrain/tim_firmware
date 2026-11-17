@@ -20,6 +20,7 @@ static const control_bus_rx_t bmsRx[] = {
 };
 
 /* Owned by the step; nothing else touches them. */
+static bool canStarted;
 static e2e_p11_tx_t statusTx;
 
 bool bms_step_init(void)
@@ -31,9 +32,10 @@ static void phase_input(control_step_ctx_t *ctx)
 {
     /* CAN1 starts on the first step, a full period after the transceiver
        left standby in bms_step_init(). A failure is visible as zero frames
-       sent in the shell's `step` and on the bench tool. */
+       sent in the shell's `step`, on the bench tool and as a 5 Hz
+       heartbeat. */
     if (ctx->step_count == 0u) {
-        (void)control_bus_start();
+        canStarted = control_bus_start();
     }
     /* Bus-off never stops this step or touches BMS_OK (ADR 0005): sends
        are skipped until the restart and the Sweep carries on. The latch
@@ -43,10 +45,12 @@ static void phase_input(control_step_ctx_t *ctx)
 
 static void phase_logic(control_step_ctx_t *ctx)
 {
-    /* No Sweep or logic yet: the BMS stays in STARTUP, with no BMS fault
-       to show. */
+    /* No Sweep or logic yet: the BMS stays in STARTUP. A blocked start-up
+       (a task or queue missing, or CAN1 refused) is the only fault so far:
+       the heartbeat shows it at 5 Hz. BMS faults join it with their logic
+       (#63, #65). */
     ctx->state = CAN_CONTROL_BMS_STATUS_STATE_STARTUP_CHOICE;
-    ctx->fault_active = false;
+    ctx->fault_active = !ctx->startup_ok || !canStarted;
 }
 
 static void phase_output(control_step_ctx_t *ctx)
