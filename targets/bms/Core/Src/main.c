@@ -19,6 +19,7 @@
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
 #include "cmsis_os.h"
+#include "app_fatfs.h"
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
@@ -47,6 +48,10 @@
 FDCAN_HandleTypeDef hfdcan1;
 FDCAN_HandleTypeDef hfdcan2;
 
+SPI_HandleTypeDef hspi2;
+DMA_HandleTypeDef hdma_spi2_rx;
+DMA_HandleTypeDef hdma_spi2_tx;
+
 UART_HandleTypeDef huart1;
 
 /* Definitions for initTask */
@@ -63,8 +68,10 @@ const osThreadAttr_t initTask_attributes = {
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
+static void MX_DMA_Init(void);
 static void MX_FDCAN1_Init(void);
 static void MX_FDCAN2_Init(void);
+static void MX_SPI2_Init(void);
 static void MX_USART1_UART_Init(void);
 void StartDefaultTask(void *argument);
 
@@ -108,9 +115,14 @@ int main(void)
 
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
+  MX_DMA_Init();
   MX_FDCAN1_Init();
   MX_FDCAN2_Init();
+  MX_SPI2_Init();
   MX_USART1_UART_Init();
+  if (MX_FATFS_Init() != APP_OK) {
+    Error_Handler();
+  }
   /* USER CODE BEGIN 2 */
   /* Start-up Kick 1 of 2, after the peripheral init (watchdog.h). */
   watchdog_kick();
@@ -296,6 +308,46 @@ static void MX_FDCAN2_Init(void)
 }
 
 /**
+  * @brief SPI2 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_SPI2_Init(void)
+{
+
+  /* USER CODE BEGIN SPI2_Init 0 */
+
+  /* USER CODE END SPI2_Init 0 */
+
+  /* USER CODE BEGIN SPI2_Init 1 */
+
+  /* USER CODE END SPI2_Init 1 */
+  /* SPI2 parameter configuration*/
+  hspi2.Instance = SPI2;
+  hspi2.Init.Mode = SPI_MODE_MASTER;
+  hspi2.Init.Direction = SPI_DIRECTION_2LINES;
+  hspi2.Init.DataSize = SPI_DATASIZE_8BIT;
+  hspi2.Init.CLKPolarity = SPI_POLARITY_LOW;
+  hspi2.Init.CLKPhase = SPI_PHASE_1EDGE;
+  hspi2.Init.NSS = SPI_NSS_SOFT;
+  hspi2.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_16;
+  hspi2.Init.FirstBit = SPI_FIRSTBIT_MSB;
+  hspi2.Init.TIMode = SPI_TIMODE_DISABLE;
+  hspi2.Init.CRCCalculation = SPI_CRCCALCULATION_DISABLE;
+  hspi2.Init.CRCPolynomial = 7;
+  hspi2.Init.CRCLength = SPI_CRC_LENGTH_DATASIZE;
+  hspi2.Init.NSSPMode = SPI_NSS_PULSE_ENABLE;
+  if (HAL_SPI_Init(&hspi2) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN SPI2_Init 2 */
+
+  /* USER CODE END SPI2_Init 2 */
+
+}
+
+/**
   * @brief USART1 Initialization Function
   * @param None
   * @retval None
@@ -344,6 +396,26 @@ static void MX_USART1_UART_Init(void)
 }
 
 /**
+  * Enable DMA controller clock
+  */
+static void MX_DMA_Init(void)
+{
+
+  /* DMA controller clock enable */
+  __HAL_RCC_DMAMUX1_CLK_ENABLE();
+  __HAL_RCC_DMA1_CLK_ENABLE();
+
+  /* DMA interrupt init */
+  /* DMA1_Channel3_IRQn interrupt configuration */
+  HAL_NVIC_SetPriority(DMA1_Channel3_IRQn, 9, 0);
+  HAL_NVIC_EnableIRQ(DMA1_Channel3_IRQn);
+  /* DMA1_Channel4_IRQn interrupt configuration */
+  HAL_NVIC_SetPriority(DMA1_Channel4_IRQn, 9, 0);
+  HAL_NVIC_EnableIRQ(DMA1_Channel4_IRQn);
+
+}
+
+/**
   * @brief GPIO Initialization Function
   * @param None
   * @retval None
@@ -358,12 +430,15 @@ static void MX_GPIO_Init(void)
   /* GPIO Ports Clock Enable */
   __HAL_RCC_GPIOC_CLK_ENABLE();
   __HAL_RCC_GPIOF_CLK_ENABLE();
+  __HAL_RCC_GPIOB_CLK_ENABLE();
   __HAL_RCC_GPIOA_CLK_ENABLE();
   __HAL_RCC_GPIOD_CLK_ENABLE();
-  __HAL_RCC_GPIOB_CLK_ENABLE();
 
   /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(GPIOC, Can_Term_2_Pin|Can_Term_1_Pin, GPIO_PIN_RESET);
+
+  /*Configure GPIO pin Output Level */
+  HAL_GPIO_WritePin(GPIOB, SPI2_CS_Pin|FDCAN2_STB_Pin, GPIO_PIN_SET);
 
   /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(GPIOC, GPIO_CAN2LED_Pin|GPIO_CAN1LED_Pin|GPIO_HBLED_Pin, GPIO_PIN_SET);
@@ -374,9 +449,6 @@ static void MX_GPIO_Init(void)
   /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(SPI3_CS_GPIO_Port, SPI3_CS_Pin, GPIO_PIN_SET);
 
-  /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(FDCAN2_STB_GPIO_Port, FDCAN2_STB_Pin, GPIO_PIN_SET);
-
   /*Configure GPIO pins : Can_Term_2_Pin GPIO_CAN2LED_Pin GPIO_CAN1LED_Pin GPIO_HBLED_Pin
                            Can_Term_1_Pin */
   GPIO_InitStruct.Pin = Can_Term_2_Pin|GPIO_CAN2LED_Pin|GPIO_CAN1LED_Pin|GPIO_HBLED_Pin
@@ -385,6 +457,13 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(GPIOC, &GPIO_InitStruct);
+
+  /*Configure GPIO pins : SPI2_CS_Pin FDCAN2_STB_Pin */
+  GPIO_InitStruct.Pin = SPI2_CS_Pin|FDCAN2_STB_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+  HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
 
   /*Configure GPIO pin : FDCAN1_STB_Pin */
   GPIO_InitStruct.Pin = FDCAN1_STB_Pin;
@@ -399,13 +478,6 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(SPI3_CS_GPIO_Port, &GPIO_InitStruct);
-
-  /*Configure GPIO pin : FDCAN2_STB_Pin */
-  GPIO_InitStruct.Pin = FDCAN2_STB_Pin;
-  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
-  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
-  HAL_GPIO_Init(FDCAN2_STB_GPIO_Port, &GPIO_InitStruct);
 
   /* USER CODE BEGIN MX_GPIO_Init_2 */
   /* Straight after GPIO init, with every pin at its safe level (ADR 0013,
