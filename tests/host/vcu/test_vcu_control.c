@@ -1263,9 +1263,59 @@ static void test_a_bus_above_60_v_5_s_after_the_opening_is_discharge_slow(void)
     }
     TEST_ASSERT_EQUAL_UINT8(1u, status_frame().discharge_slow);
 
-    /* Closed again: the flag clears. */
+    /* Closed again: the flag clears only once it has read closed for
+       VCU_SDC_RECLOSED_MS, as a closed reading is not trusted alone. */
     in.sdc_closed = true;
-    run_ms(2u * STEP_MS);
+    run_ms(VCU_SDC_RECLOSED_MS - 2u * STEP_MS);
+    TEST_ASSERT_EQUAL_UINT8(1u, status_frame().discharge_slow);
+    run_ms(4u * STEP_MS);
+    TEST_ASSERT_EQUAL_UINT8(0u, status_frame().discharge_slow);
+}
+
+/* A chattering input (one closed reading a second) does not restart the
+   5 s: they count from the first opening. */
+static void test_a_chattering_input_does_not_restart_the_discharge_watch(void)
+{
+    to_ts_active();
+    const uint32_t opened = in.now_ms;
+    bool seen = false;
+    while (in.now_ms - opened <= VCU_DISCHARGE_SLOW_MS + 100u) {
+        in.sdc_closed = (in.now_ms - opened) % 1000u == 500u;
+        step();
+        const vcu_event_t *ev = find_event(EVENT_DISCHARGE_SLOW);
+        if (ev != NULL) {
+            TEST_ASSERT_FALSE(seen);
+            TEST_ASSERT_EQUAL_UINT32(VCU_DISCHARGE_SLOW_MS, event_u32(ev, 4u));
+            seen = true;
+        }
+    }
+    TEST_ASSERT_TRUE(seen);
+}
+
+/* The flag is judged only while the input reads open: a real re-close,
+   with the bus pre-charged again, is no slow discharge. */
+static void test_a_real_reclose_with_the_bus_up_is_not_discharge_slow(void)
+{
+    to_ts_active();
+    in.sdc_closed = false;
+    set_bus_dv(1000);
+    run_ms(4000u);
+    in.sdc_closed = true;
+    set_bus_dv((int16_t)PACK_DV);
+    run_ms(4000u);
+    TEST_ASSERT_EQUAL_UINT8(0u, status_frame().discharge_slow);
+}
+
+/* A VALID bus below 60 V ends this opening's watch: it discharged. */
+static void test_a_discharged_bus_ends_the_watch_for_this_opening(void)
+{
+    to_ts_active();
+    in.sdc_closed = false;
+    run_ms(1000u);
+    set_bus_dv(0);
+    run_ms(1000u);
+    set_bus_dv(1000);
+    run_ms(VCU_DISCHARGE_SLOW_MS);
     TEST_ASSERT_EQUAL_UINT8(0u, status_frame().discharge_slow);
 }
 
@@ -1316,6 +1366,18 @@ static void test_an_energy_meter_timeout_is_reported_and_cuts_nothing(void)
     TEST_ASSERT_EQUAL_UINT16(0u, out.cuts);
     TEST_ASSERT_EQUAL_UINT8(1u, command_frame().inverter_enable);
     TEST_ASSERT_NOT_EQUAL_INT16(0, command_frame().torque_command);
+}
+
+/* EM_Status alone silent is a timeout too: it carries the Violation bit,
+   and nothing else would say it is no longer heard. */
+static void test_a_silent_em_status_alone_is_an_energy_meter_timeout(void)
+{
+    to_ts_active();
+    run_ms(200u);
+    TEST_ASSERT_EQUAL_UINT8(0u, status_frame().energy_meter_timeout);
+    playing[VCU_RX_EM_STATUS] = false;
+    run_ms(2000u);
+    TEST_ASSERT_EQUAL_UINT8(1u, status_frame().energy_meter_timeout);
 }
 
 /* Its Violation bit writes an Event, once each time it sets, and cuts
@@ -2328,8 +2390,12 @@ int main(void)
     RUN_TEST(test_the_reaction_row_inverter_fault_then_clear_then_start);
     RUN_TEST(test_a_bus_above_60_v_5_s_after_the_opening_is_discharge_slow);
     RUN_TEST(test_a_bus_at_60_v_5_s_after_the_opening_is_not_slow);
+    RUN_TEST(test_a_chattering_input_does_not_restart_the_discharge_watch);
+    RUN_TEST(test_a_real_reclose_with_the_bus_up_is_not_discharge_slow);
+    RUN_TEST(test_a_discharged_bus_ends_the_watch_for_this_opening);
     RUN_TEST(test_discharge_slow_waits_for_a_valid_inv_voltage);
     RUN_TEST(test_an_energy_meter_timeout_is_reported_and_cuts_nothing);
+    RUN_TEST(test_a_silent_em_status_alone_is_an_energy_meter_timeout);
     RUN_TEST(test_the_energy_meter_violation_bit_writes_an_event);
     RUN_TEST(test_after_leaving_the_start_procedure_is_needed_again);
     RUN_TEST(test_the_sound_runs_2_s_from_entry);
