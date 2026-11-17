@@ -171,7 +171,7 @@ DRESULT USER_ioctl (
     case CTRL_SYNC:
         return to_dresult(sd_spi_sync());
     case GET_SECTOR_SIZE:
-        *(WORD *)buff = 512u;
+        *(WORD *)buff = SD_SPI_SECTOR_SIZE;
         return RES_OK;
     default:
         /* GET_SECTOR_COUNT and GET_BLOCK_SIZE serve only f_mkfs: a card is

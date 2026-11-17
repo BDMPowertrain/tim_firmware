@@ -38,6 +38,8 @@
 #include "main.h"
 #include "sd_proto.h"
 
+_Static_assert(SD_SPI_SECTOR_SIZE == SD_PROTO_BLOCK_SIZE, "one sector is one card block");
+
 extern SPI_HandleTypeDef hspi2;
 
 /* SD commands used here (section 7.3.1.3); ACMD41 follows CMD55. */
@@ -77,7 +79,8 @@ extern SPI_HandleTypeDef hspi2;
 /* The thread flag the DMA completion sets for the task waiting on it. */
 #define DMA_DONE_FLAG 0x00000100u
 
-/* SPI2's pins on GPIOB (targets/<image>/tim.ioc). */
+/* SPI2's pins on GPIOB, as both targets/<image>/tim.ioc place them (PB13
+   SCK, PB14 MISO, PB15 MOSI). Move a pin in CubeMX and these move too. */
 #define SCK_PIN  GPIO_PIN_13
 #define MISO_PIN GPIO_PIN_14
 #define MOSI_PIN GPIO_PIN_15
@@ -92,6 +95,10 @@ static const uint8_t allOnes[SD_PROTO_BLOCK_SIZE] = {
 };
 
 static bool cardReady;
+/* Set when SPI2 itself failed a polled byte (HAL busy or timeout). That
+   byte reads 0xFF, which a poll would take for "not busy", so every public
+   call clears this first and fails if it is set at the end. */
+static bool linkFailed;
 static bool blockAddressed;
 static uint8_t (*xfer)(uint8_t out);
 
@@ -131,6 +138,7 @@ static uint8_t fast_xfer(uint8_t out)
     uint8_t in = R1_NONE;
 
     if (HAL_SPI_TransmitReceive(&hspi2, &out, &in, 1u, BYTE_TIMEOUT_MS) != HAL_OK) {
+        linkFailed = true;
         return R1_NONE;
     }
     return in;
@@ -237,7 +245,7 @@ static bool wait_ready(uint32_t timeout_ms)
     for (;;) {
         for (uint32_t i = 0u; i < POLL_BURST; i++) {
             if (xfer(0xFFu) == 0xFFu) {
-                return true;
+                return !linkFailed;
             }
         }
         if ((HAL_GetTick() - start) >= timeout_ms) {
@@ -333,9 +341,10 @@ static bool leave_idle(uint32_t start, uint32_t arg)
 bool sd_spi_init(void)
 {
     bool ok = false;
-    bool block = false;
+    bool blockAddr = false;
 
     cardReady = false;
+    linkFailed = false;
     HAL_GPIO_WritePin(SPI2_CS_GPIO_Port, SPI2_CS_Pin, GPIO_PIN_SET);
     use_slow_clock();
 
@@ -354,7 +363,7 @@ bool sd_spi_init(void)
                 command(CMD_READ_OCR, 0u) == R1_READY) {
                 uint8_t ocr[4];
                 read_bytes(ocr, sizeof(ocr));
-                block = sd_proto_ocr_block_addressed(ocr);
+                blockAddr = sd_proto_ocr_block_addressed(ocr);
                 ok = true;
             }
         } else {
@@ -363,7 +372,7 @@ bool sd_spi_init(void)
             ok = leave_idle(start, 0u);
         }
 
-        if (ok && !block) {
+        if (ok && !blockAddr) {
             ok = command(CMD_SET_BLOCKLEN, SD_PROTO_BLOCK_SIZE) == R1_READY;
         }
     }
@@ -371,7 +380,7 @@ bool sd_spi_init(void)
     deselect();
     use_fast_clock();
 
-    blockAddressed = block;
+    blockAddressed = blockAddr;
     cardReady = ok;
     return ok;
 }
@@ -381,10 +390,21 @@ bool sd_spi_ready(void)
     return cardReady;
 }
 
-static sd_spi_result_t finish(bool ok)
+/* Every transfer starts here: it needs an identified card, and a link
+   failure from an earlier call must not count against this one. */
+static bool begin_transfer(void)
+{
+    linkFailed = false;
+    return cardReady;
+}
+
+/* Every transfer ends here: the card deselected, and any failure (the
+   card's or SPI2's) leaves it not ready, for the next mount to identify
+   again. */
+static sd_spi_result_t end_transfer(bool ok)
 {
     deselect();
-    if (!ok) {
+    if (!ok || linkFailed) {
         cardReady = false;
         return SD_SPI_ERROR;
     }
@@ -428,34 +448,34 @@ static bool write_block(const uint8_t *buf, uint32_t sector)
 
 sd_spi_result_t sd_spi_read(uint8_t *buf, uint32_t sector, uint32_t count)
 {
-    if (!cardReady) {
+    if (!begin_transfer()) {
         return SD_SPI_NOT_READY;
     }
     bool ok = true;
     for (uint32_t i = 0u; ok && i < count; i++) {
-        ok = read_block(buf + i * SD_PROTO_BLOCK_SIZE, sector + i);
+        ok = read_block(buf + i * SD_SPI_SECTOR_SIZE, sector + i);
     }
-    return finish(ok);
+    return end_transfer(ok);
 }
 
 sd_spi_result_t sd_spi_write(const uint8_t *buf, uint32_t sector, uint32_t count)
 {
-    if (!cardReady) {
+    if (!begin_transfer()) {
         return SD_SPI_NOT_READY;
     }
     bool ok = true;
     for (uint32_t i = 0u; ok && i < count; i++) {
-        ok = write_block(buf + i * SD_PROTO_BLOCK_SIZE, sector + i);
+        ok = write_block(buf + i * SD_SPI_SECTOR_SIZE, sector + i);
     }
-    return finish(ok);
+    return end_transfer(ok);
 }
 
 sd_spi_result_t sd_spi_sync(void)
 {
-    if (!cardReady) {
+    if (!begin_transfer()) {
         return SD_SPI_NOT_READY;
     }
     /* Every write already waited for programming; selecting waits once
        more for a card that is still busy. */
-    return finish(select_card());
+    return end_transfer(select_card());
 }

@@ -20,6 +20,9 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+/* One sector, as FatFs sees it: one card block. */
+#define SD_SPI_SECTOR_SIZE 512u
+
 typedef enum {
     SD_SPI_OK,
     SD_SPI_ERROR,     /* the card did not answer, refused, or a transfer timed out */
