@@ -16,6 +16,14 @@ static void put_u32(uint8_t *b, uint32_t v)
     put_u16(&b[2], (uint16_t)(v >> 16));
 }
 
+static uint32_t get_u32(const uint8_t *b)
+{
+    return (uint32_t)b[0] | ((uint32_t)b[1] << 8) | ((uint32_t)b[2] << 16) |
+           ((uint32_t)b[3] << 24);
+}
+
+#define PEDAL_CHECK_DIRTY 0x01u
+
 const char *event_code_name(uint16_t code)
 {
     switch (code) {
@@ -36,6 +44,9 @@ const char *event_code_name(uint16_t code)
     case EVENT_MAILBOX_TIMEOUT:    return "mailbox timeout";
     case EVENT_VCU_STATE:          return "VCU state";
     case EVENT_TORQUE_CUT:         return "torque cut";
+    case EVENT_PEDAL_CHECK:        return "pedal check passed";
+    case EVENT_PEDAL_CHECK_FAILED: return "pedal check failed";
+    case EVENT_NOT_CALIBRATED:     return "not calibrated";
     case EVENT_DATA_LOG_CARD:      return "data log card";
     default:                       return "?";
     }
@@ -193,4 +204,44 @@ void event_data_data_log_card(uint8_t data[EVENT_DATA_SIZE], const event_data_lo
     data[1] = card->result;
     put_u32(&data[4], card->written);
     put_u32(&data[8], card->dropped);
+}
+
+void event_data_pedal_check(uint8_t data[EVENT_DATA_SIZE], uint32_t build_id,
+                            uint32_t save_counter, bool dirty)
+{
+    memset(data, 0, EVENT_DATA_SIZE);
+    put_u32(&data[0], build_id);
+    put_u32(&data[4], save_counter);
+    data[8] = dirty ? PEDAL_CHECK_DIRTY : 0u;
+}
+
+bool event_pedal_check_matches(const event_t *ev, const void *key)
+{
+    const event_pedal_check_key_t *k = (const event_pedal_check_key_t *)key;
+
+    if (k->dirty || k->build_id == 0u || ev->code != EVENT_PEDAL_CHECK) {
+        return false;
+    }
+    return get_u32(&ev->data[0]) == k->build_id && get_u32(&ev->data[4]) == k->save_counter &&
+           (ev->data[8] & PEDAL_CHECK_DIRTY) == 0u;
+}
+
+void event_data_pedal_check_failed(uint8_t data[EVENT_DATA_SIZE], uint8_t reason, uint8_t phase,
+                                   const uint16_t travel[2])
+{
+    memset(data, 0, EVENT_DATA_SIZE);
+    data[0] = reason;
+    data[1] = phase;
+    put_u16(&data[4], travel[0]);
+    put_u16(&data[6], travel[1]);
+}
+
+void event_data_not_calibrated(uint8_t data[EVENT_DATA_SIZE], uint8_t reason, uint8_t sensor,
+                               uint16_t stored_revision, uint16_t image_revision)
+{
+    memset(data, 0, EVENT_DATA_SIZE);
+    data[0] = reason;
+    data[1] = sensor;
+    put_u16(&data[2], stored_revision);
+    put_u16(&data[4], image_revision);
 }

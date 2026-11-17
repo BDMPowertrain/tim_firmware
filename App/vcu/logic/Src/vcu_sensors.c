@@ -24,7 +24,8 @@ static vcu_apps_reading_t apps_reading(uint16_t raw, int32_t min, int32_t max, b
         r.status = VCU_SENSOR_NOT_CALIBRATED;
         return r;
     }
-    if (v < min - margin || v > max + margin) {
+    if (v < (int32_t)VCU_APPS_MIN_COUNTS || v > (int32_t)VCU_APPS_MAX_COUNTS ||
+        v < min - margin || v > max + margin) {
         r.status = VCU_SENSOR_OUT_OF_RANGE;
         return r;
     }

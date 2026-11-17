@@ -44,6 +44,7 @@
 #include "mailbox.h"
 #include "unity.h"
 #include "vcu_control.h"
+#include "vcu_params.h"
 
 #define STEP_MS 10u
 
@@ -58,6 +59,9 @@
 
 #define PACK_DV 4000u /* 400.0 V */
 
+#define BUILD_ID     0x1234ABCDu /* the running image's */
+#define SAVE_COUNTER 7u          /* the loaded Parameters' save counter */
+
 static vcu_control_t vc;
 static vcu_control_config_t config;
 static vcu_control_in_t in;
@@ -70,6 +74,7 @@ static bool playing[VCU_RX_COUNT];
 static e2e_p11_tx_t bmsTx[3];
 static uint8_t lastStatus[CAN_CONTROL_VCU_STATUS_LENGTH]; /* the last VCU_Status sent */
 static bool statusSent;
+static unsigned passes; /* EVENT_PEDAL_CHECK Events written since setUp */
 
 static struct can_control_bms_status_t bmsStatus;
 static struct can_control_bms_limits_t bmsLimits;
@@ -157,6 +162,9 @@ static void step(void)
                              in.now_ms);
     }
     vcu_control_step(&vc, &in, &out);
+    for (size_t i = 0; i < out.event_count; i++) {
+        passes += out.events[i].code == EVENT_PEDAL_CHECK ? 1u : 0u;
+    }
     if (out.send_status) {
         memcpy(lastStatus, out.status, sizeof(lastStatus));
         statusSent = true;
@@ -263,6 +271,7 @@ void setUp(void)
     memset(rx, 0, sizeof(rx));
     memset(bmsTx, 0, sizeof(bmsTx));
     statusSent = false;
+    passes = 0u;
     play_all(false);
 
     config = (vcu_control_config_t){
@@ -272,12 +281,17 @@ void setUp(void)
             .brake_zero = { BRAKE_ZERO, BRAKE_ZERO },
         },
         .brake_engaged = BRAKE_THRESH,
+        .cal_revision = VCU_CALIBRATION_REVISION,
+        .cal_present = true,
         .max_torque = 1000u, /* 100.0 N.m */
         .reset_ms = 0u,
+        .build_id = BUILD_ID,
+        .param_save_counter = SAVE_COUNTER,
     };
     vcu_control_init(&vc, &config);
 
     in.now_ms = 20u; /* the first step, a little after reset release */
+    in.pedal_check_record = VCU_PEDAL_CHECK_FOUND; /* this image's check passed before */
     in.startup_ok = true;
     in.can_running = true;
     in.raw.supply[0] = SUPPLY_OK;
@@ -1620,9 +1634,366 @@ static void test_state_names(void)
     TEST_ASSERT_EQUAL_STRING("?", vcu_control_state_name(9u));
 }
 
+/* ------------------------------------------------------------------ */
+/* Calibrated (issue 59; ADR 0015, 0016)                              */
+/* ------------------------------------------------------------------ */
+
+/* The first Event of this step with code, or NULL. */
+static const vcu_event_t *find_event(uint16_t code)
+{
+    for (size_t i = 0; i < out.event_count; i++) {
+        if (out.events[i].code == code) {
+            return &out.events[i];
+        }
+    }
+    return NULL;
+}
+
+static uint32_t get_u32(const uint8_t *b)
+{
+    return (uint32_t)b[0] | ((uint32_t)b[1] << 8) | ((uint32_t)b[2] << 16) |
+           ((uint32_t)b[3] << 24);
+}
+
+/* ADR 0015: not calibrated, the VCU still reaches GLV_ON (the shell is
+   needed to calibrate) and writes an Event with the reason. */
+static void test_not_calibrated_still_reaches_glv_on_and_writes_an_event(void)
+{
+    config.cal_revision = VCU_CALIBRATION_REVISION + 1u; /* another sensor path */
+    vcu_control_init(&vc, &config);
+    step();
+    assert_transition(VCU_STATE_STARTUP, VCU_STATE_GLV_ON, VCU_CAUSE_STARTUP_DONE);
+
+    const vcu_event_t *ev = find_event(EVENT_NOT_CALIBRATED);
+    TEST_ASSERT_NOT_NULL(ev);
+    TEST_ASSERT_EQUAL_UINT8(VCU_CAL_REVISION, ev->data[0]);
+    TEST_ASSERT_EQUAL_UINT8(VCU_CALIBRATION_REVISION + 1u, ev->data[2]); /* stored */
+    TEST_ASSERT_EQUAL_UINT8(VCU_CALIBRATION_REVISION, ev->data[4]);      /* the image's */
+
+    step();
+    TEST_ASSERT_NULL(find_event(EVENT_NOT_CALIBRATED)); /* once */
+}
+
+static void test_a_calibrated_vcu_writes_no_not_calibrated_event(void)
+{
+    step();
+    TEST_ASSERT_NULL(find_event(EVENT_NOT_CALIBRATED));
+    TEST_ASSERT_EQUAL_INT(VCU_CAL_OK, out.calibration.reason);
+}
+
+/* Each part of the Calibrated rule reaches the step: a span too small. */
+static void test_a_calibration_failing_the_rule_is_not_calibrated(void)
+{
+    config.cal.apps_max[1] = APPS_MIN + 700; /* under the 744-count minimum span */
+    vcu_control_init(&vc, &config);
+    step();
+    TEST_ASSERT_EQUAL_INT(VCU_CAL_APPS_SPAN, out.calibration.reason);
+    TEST_ASSERT_EQUAL_INT(VCU_CAL_SENSOR_APPS2, out.calibration.sensor);
+}
+
+static void test_not_calibrated_treats_the_pedals_as_implausible(void)
+{
+    config.cal_present = false;
+    vcu_control_init(&vc, &config);
+    set_pedal(0u); /* agreeing, in range */
+    to_glv_on();
+    TEST_ASSERT_EQUAL(VCU_SENSOR_NOT_CALIBRATED, out.sensors.apps[0].status);
+    TEST_ASSERT_EQUAL(VCU_SENSOR_NOT_CALIBRATED, out.sensors.apps[1].status);
+    run_ms(VCU_CUT_PERSIST_MS);
+    TEST_ASSERT_BITS_HIGH(1u << VCU_CUT_APPS, out.cuts);
+    TEST_ASSERT_EQUAL_UINT8(1u, status_frame().apps_implausible);
+}
+
+static void test_start_is_refused_when_not_calibrated(void)
+{
+    config.cal_present = false;
+    vcu_control_init(&vc, &config);
+    to_ts_active();
+    brake_on();
+    assert_start_refused(VCU_START_NOT_CALIBRATED);
+    TEST_ASSERT_EQUAL_UINT8(1u, status_frame().not_calibrated);
+}
+
+static void test_vcu_status_reports_calibrated(void)
+{
+    step();
+    TEST_ASSERT_EQUAL_UINT8(0u, status_frame().not_calibrated);
+    TEST_ASSERT_BITS_LOW(VCU_START_NOT_CALIBRATED, out.start_blockers);
+}
+
+/* ADR 0015: not calibrated, or parameters defaulted, shows the fault LED
+   past the lamp check, steadily. */
+static void test_the_fault_led_shows_when_not_calibrated(void)
+{
+    config.cal_present = false;
+    vcu_control_init(&vc, &config);
+    to_glv_on();
+    run_ms(VCU_LAMP_CHECK_MS);
+    for (unsigned i = 0; i < 100u; i++) {
+        step();
+        TEST_ASSERT_TRUE(out.fault_led);
+    }
+}
+
+static void test_parameters_defaulted_treats_the_pedals_as_implausible_with_the_fault_led(void)
+{
+    config.params_defaulted = true; /* the calibration itself loaded fine */
+    vcu_control_init(&vc, &config);
+    to_glv_on();
+    TEST_ASSERT_EQUAL(VCU_SENSOR_NOT_CALIBRATED, out.sensors.apps[0].status);
+    run_ms(VCU_LAMP_CHECK_MS);
+    for (unsigned i = 0; i < 100u; i++) {
+        step();
+        TEST_ASSERT_TRUE(out.fault_led);
+    }
+    TEST_ASSERT_BITS_HIGH(1u << VCU_CUT_APPS, out.cuts);
+}
+
+/* ------------------------------------------------------------------ */
+/* The Pedal check (issue 59; ADR 0016)                               */
+/* ------------------------------------------------------------------ */
+
+/* Both APPS from one travel to another in 1% steps, one step each. */
+static void sweep_pedal(uint16_t from, uint16_t to)
+{
+    uint16_t t = from;
+
+    for (;;) {
+        set_pedal(t);
+        step();
+        if (t == to) {
+            break;
+        }
+        if (to > t) {
+            t = (uint16_t)(((unsigned)(to - t) > 10u) ? t + 10u : to);
+        } else {
+            t = (uint16_t)(((unsigned)(t - to) > 10u) ? t - 10u : to);
+        }
+    }
+}
+
+/* In GLV_ON with no matching pass in the Event log. */
+static void check_due_in_glv_on(void)
+{
+    in.pedal_check_record = VCU_PEDAL_CHECK_ABSENT;
+    set_pedal(0u);
+    brake_off();
+    to_glv_on();
+    TEST_ASSERT_TRUE(out.pedal_check_due);
+}
+
+/* Released, floored, released, then the brake engaged. True if any of it
+   wrote a pass. */
+static bool do_pedal_check(uint16_t floor)
+{
+    const unsigned before = passes;
+
+    brake_off();
+    sweep_pedal(0u, floor);
+    sweep_pedal(floor, 0u);
+    brake_on();
+    step();
+    return passes > before;
+}
+
+static void test_start_is_refused_while_a_pedal_check_is_due(void)
+{
+    in.pedal_check_record = VCU_PEDAL_CHECK_ABSENT;
+    to_ts_active();
+    brake_on();
+    assert_start_refused(VCU_START_PEDAL_CHECK_DUE);
+    TEST_ASSERT_EQUAL_UINT8(1u, status_frame().pedal_check_due);
+}
+
+/* Until the Event log has been searched, a check is due. */
+static void test_a_pedal_check_is_due_until_the_event_log_is_searched(void)
+{
+    in.pedal_check_record = VCU_PEDAL_CHECK_UNKNOWN;
+    to_ts_active();
+    brake_on();
+    assert_start_refused(VCU_START_PEDAL_CHECK_DUE);
+}
+
+static void test_a_matching_pass_in_the_event_log_needs_no_check(void)
+{
+    to_glv_on();
+    TEST_ASSERT_FALSE(out.pedal_check_due);
+    TEST_ASSERT_EQUAL_UINT8(0u, status_frame().pedal_check_due);
+}
+
+/* ADR 0016: a pass writes an Event with the build ID and the parameter
+   save counter, and the Start procedure is then accepted. */
+static void test_a_pedal_check_pass_writes_its_event_and_allows_the_start(void)
+{
+    check_due_in_glv_on();
+    TEST_ASSERT_TRUE(do_pedal_check(1000u));
+
+    const vcu_event_t *ev = find_event(EVENT_PEDAL_CHECK); /* on the brake step */
+    TEST_ASSERT_NOT_NULL(ev);
+    TEST_ASSERT_EQUAL_UINT32(BUILD_ID, get_u32(&ev->data[0]));
+    TEST_ASSERT_EQUAL_UINT32(SAVE_COUNTER, get_u32(&ev->data[4]));
+    TEST_ASSERT_EQUAL_UINT8(0u, ev->data[8]); /* not a dirty build */
+    TEST_ASSERT_FALSE(out.pedal_check_due);
+
+    step();
+    TEST_ASSERT_NULL(find_event(EVENT_PEDAL_CHECK)); /* once */
+
+    play_all(true);
+    run_ms(3u * STEP_MS);
+    TEST_ASSERT_EQUAL_UINT8(VCU_STATE_TS_ACTIVE, out.state);
+    press_start();
+    TEST_ASSERT_EQUAL_UINT8(VCU_STATE_READY_TO_DRIVE, out.state);
+}
+
+static void test_a_dirty_build_marks_its_pass(void)
+{
+    config.build_dirty = true;
+    vcu_control_init(&vc, &config);
+    check_due_in_glv_on();
+    TEST_ASSERT_TRUE(do_pedal_check(1000u));
+    TEST_ASSERT_EQUAL_UINT8(1u, find_event(EVENT_PEDAL_CHECK)->data[8]);
+}
+
+/* Floored is both above 95%: 95.0% is not enough. */
+static void test_floored_means_both_above_95_percent(void)
+{
+    check_due_in_glv_on();
+    TEST_ASSERT_FALSE(do_pedal_check(950u));
+    TEST_ASSERT_TRUE(out.pedal_check_due);
+    TEST_ASSERT_TRUE(do_pedal_check(951u));
+}
+
+/* Released is both below 5%: a pedal that comes back only to 5.0% has
+   not been released. */
+static void test_released_means_both_below_5_percent(void)
+{
+    check_due_in_glv_on();
+    brake_off();
+    sweep_pedal(0u, 1000u);
+    sweep_pedal(1000u, 50u);
+    brake_on();
+    run_ms(100u);
+    TEST_ASSERT_EQUAL_UINT(0u, passes);
+    set_pedal(49u);
+    step();
+    TEST_ASSERT_NOT_NULL(find_event(EVENT_PEDAL_CHECK));
+}
+
+/* The two sensors within 10 points throughout: 10.0 apart is fine, 10.1
+   fails the attempt with an Event, and the check starts over. */
+static void test_sensors_more_than_10_points_apart_fail_the_check(void)
+{
+    check_due_in_glv_on();
+    brake_off();
+    sweep_pedal(0u, 500u);
+    set_pedals(500u, 600u);
+    step();
+    TEST_ASSERT_NULL(find_event(EVENT_PEDAL_CHECK_FAILED));
+    set_pedals(500u, 601u);
+    step();
+    const vcu_event_t *ev = find_event(EVENT_PEDAL_CHECK_FAILED);
+    TEST_ASSERT_NOT_NULL(ev);
+    TEST_ASSERT_EQUAL_UINT8(VCU_PEDAL_CHECK_FAIL_APART, ev->data[0]);
+
+    /* The rest of the press no longer counts: floored and released, the
+       brake engaged, and still no pass. */
+    sweep_pedal(500u, 1000u);
+    sweep_pedal(1000u, 0u);
+    brake_on();
+    step();
+    TEST_ASSERT_EQUAL_UINT(0u, passes);
+    TEST_ASSERT_TRUE(out.pedal_check_due);
+
+    /* A whole new check passes. */
+    brake_off();
+    step();
+    TEST_ASSERT_TRUE(do_pedal_check(1000u));
+}
+
+static void test_a_failed_pedal_sensor_fails_the_check(void)
+{
+    check_due_in_glv_on();
+    sweep_pedal(0u, 500u);
+    in.raw.apps[0] = 50u; /* open circuit */
+    step();
+    const vcu_event_t *ev = find_event(EVENT_PEDAL_CHECK_FAILED);
+    TEST_ASSERT_NOT_NULL(ev);
+    TEST_ASSERT_EQUAL_UINT8(VCU_PEDAL_CHECK_FAIL_SENSOR, ev->data[0]);
+}
+
+/* Before the pedal leaves released nothing is under way, so nothing
+   fails: no Event per step for a pedal sitting at rest. */
+static void test_nothing_fails_before_the_check_is_under_way(void)
+{
+    check_due_in_glv_on();
+    in.raw.apps[0] = 50u;
+    run_ms(500u);
+    TEST_ASSERT_NULL(find_event(EVENT_PEDAL_CHECK_FAILED));
+}
+
+/* The brake must read released and then engaged: a brake held on through
+   the whole check has not been seen released. */
+static void test_the_brake_must_be_released_then_engaged(void)
+{
+    check_due_in_glv_on();
+    brake_on();
+    step();
+    sweep_pedal(0u, 1000u);
+    sweep_pedal(1000u, 0u);
+    run_ms(100u);
+    TEST_ASSERT_EQUAL_UINT(0u, passes);
+
+    brake_off();
+    step();
+    TEST_ASSERT_TRUE(out.pedal_check_due);
+    brake_on();
+    step();
+    TEST_ASSERT_NOT_NULL(find_event(EVENT_PEDAL_CHECK));
+}
+
+/* ADR 0016: with the Tractive System off. In TS_ACTIVE it does not run. */
+static void test_the_pedal_check_runs_only_with_the_tractive_system_off(void)
+{
+    in.pedal_check_record = VCU_PEDAL_CHECK_ABSENT;
+    to_ts_active();
+    TEST_ASSERT_FALSE(do_pedal_check(1000u));
+    TEST_ASSERT_TRUE(out.pedal_check_due);
+}
+
+/* There is nothing to confirm without a calibration. */
+static void test_the_pedal_check_needs_a_calibration(void)
+{
+    config.cal_present = false;
+    vcu_control_init(&vc, &config);
+    check_due_in_glv_on();
+    TEST_ASSERT_FALSE(do_pedal_check(1000u));
+    TEST_ASSERT_TRUE(out.pedal_check_due);
+}
+
 int main(void)
 {
     UNITY_BEGIN();
+    RUN_TEST(test_not_calibrated_still_reaches_glv_on_and_writes_an_event);
+    RUN_TEST(test_a_calibrated_vcu_writes_no_not_calibrated_event);
+    RUN_TEST(test_a_calibration_failing_the_rule_is_not_calibrated);
+    RUN_TEST(test_not_calibrated_treats_the_pedals_as_implausible);
+    RUN_TEST(test_start_is_refused_when_not_calibrated);
+    RUN_TEST(test_vcu_status_reports_calibrated);
+    RUN_TEST(test_the_fault_led_shows_when_not_calibrated);
+    RUN_TEST(test_parameters_defaulted_treats_the_pedals_as_implausible_with_the_fault_led);
+    RUN_TEST(test_start_is_refused_while_a_pedal_check_is_due);
+    RUN_TEST(test_a_pedal_check_is_due_until_the_event_log_is_searched);
+    RUN_TEST(test_a_matching_pass_in_the_event_log_needs_no_check);
+    RUN_TEST(test_a_pedal_check_pass_writes_its_event_and_allows_the_start);
+    RUN_TEST(test_a_dirty_build_marks_its_pass);
+    RUN_TEST(test_floored_means_both_above_95_percent);
+    RUN_TEST(test_released_means_both_below_5_percent);
+    RUN_TEST(test_sensors_more_than_10_points_apart_fail_the_check);
+    RUN_TEST(test_a_failed_pedal_sensor_fails_the_check);
+    RUN_TEST(test_nothing_fails_before_the_check_is_under_way);
+    RUN_TEST(test_the_brake_must_be_released_then_engaged);
+    RUN_TEST(test_the_pedal_check_runs_only_with_the_tractive_system_off);
+    RUN_TEST(test_the_pedal_check_needs_a_calibration);
     RUN_TEST(test_startup_goes_to_glv_on_on_the_first_step_with_everything_ready);
     RUN_TEST(test_startup_stays_while_a_task_or_queue_is_missing);
     RUN_TEST(test_startup_waits_for_can1_and_a_full_set_of_samples);

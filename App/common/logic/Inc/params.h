@@ -75,6 +75,9 @@ typedef struct {
     int32_t      def;
     int32_t      min;
     int32_t      max;
+    bool         calibration; /* captured by the image's guided command, never
+                                 typed: `param set` refuses it and `param dump`
+                                 prints it in the calibration record */
 } param_def_t;
 
 typedef struct {

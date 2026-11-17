@@ -45,6 +45,21 @@ static void test_maximum_torque_is_capped_at_130_nm(void)
     TEST_ASSERT_EQUAL(PARAMS_SET_OUT_OF_RANGE, params_set(&p, VCU_PARAM_MAX_TORQUE, -1));
 }
 
+/* ADR 0016: end points are captured, never typed; `param set` refuses a
+   calibration and `param dump` prints them as one record. The eight
+   calibration Parameters are marked so, and nothing else is. */
+static void test_exactly_the_calibration_is_marked_calibration(void)
+{
+    for (size_t i = 0; i < VCU_PARAM_COUNT; i++) {
+        const bool cal = i == VCU_PARAM_APPS1_MIN || i == VCU_PARAM_APPS1_MAX ||
+                         i == VCU_PARAM_APPS2_MIN || i == VCU_PARAM_APPS2_MAX ||
+                         i == VCU_PARAM_BRAKE1_ZERO || i == VCU_PARAM_BRAKE2_ZERO ||
+                         i == VCU_PARAM_BRAKE_ENGAGED || i == VCU_PARAM_CAL_REVISION;
+        TEST_ASSERT_EQUAL_MESSAGE(cal, vcu_param_table.defs[i].calibration,
+                                  vcu_param_table.defs[i].name);
+    }
+}
+
 static void test_pedal_end_points_are_inside_the_12_bit_adc(void)
 {
     TEST_ASSERT_EQUAL(PARAMS_SET_OK, params_set(&p, VCU_PARAM_APPS1_MAX, 4095));
@@ -60,5 +75,6 @@ int main(void)
     RUN_TEST(test_the_default_calibration_revision_is_not_the_images);
     RUN_TEST(test_maximum_torque_is_capped_at_130_nm);
     RUN_TEST(test_pedal_end_points_are_inside_the_12_bit_adc);
+    RUN_TEST(test_exactly_the_calibration_is_marked_calibration);
     return UNITY_END();
 }

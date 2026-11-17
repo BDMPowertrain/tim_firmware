@@ -136,6 +136,43 @@ static void test_apps_past_the_margin_is_out_of_range(void)
 
 /* ADR 0015: the default end points are all 0, which never allow driving.
    With min not below max there is no span to scale with. */
+/* T.4.2.10 (issue 59): an APPS outside 0.25-4.75 V is out of range even
+   inside its margin, so a short to either rail is caught whatever the
+   end points. Calibrated over 200-3500, the margin alone reaches -130 and
+   3830. */
+static void test_apps_outside_the_electrical_window_is_out_of_range(void)
+{
+    cal.apps_min[0] = 200;
+    cal.apps_max[0] = 3500;
+
+    raw.apps[0] = 0u;
+    compute();
+    TEST_ASSERT_EQUAL(VCU_SENSOR_OUT_OF_RANGE, out.apps[0].status);
+    TEST_ASSERT_EQUAL_UINT16(0u, out.apps[0].travel);
+
+    raw.apps[0] = 185u;
+    compute();
+    TEST_ASSERT_EQUAL(VCU_SENSOR_OUT_OF_RANGE, out.apps[0].status);
+
+    raw.apps[0] = 186u;
+    compute();
+    TEST_ASSERT_EQUAL(VCU_SENSOR_OK, out.apps[0].status);
+    TEST_ASSERT_EQUAL_UINT16(0u, out.apps[0].travel);
+
+    raw.apps[0] = 3536u;
+    compute();
+    TEST_ASSERT_EQUAL(VCU_SENSOR_OK, out.apps[0].status);
+    TEST_ASSERT_EQUAL_UINT16(1000u, out.apps[0].travel);
+
+    raw.apps[0] = 3537u;
+    compute();
+    TEST_ASSERT_EQUAL(VCU_SENSOR_OUT_OF_RANGE, out.apps[0].status);
+
+    raw.apps[0] = 3722u; /* shorted to the 5 V supply */
+    compute();
+    TEST_ASSERT_EQUAL(VCU_SENSOR_OUT_OF_RANGE, out.apps[0].status);
+}
+
 static void test_default_end_points_are_not_calibrated(void)
 {
     cal = (vcu_sensor_cal_t){0};
@@ -277,6 +314,7 @@ int main(void)
     RUN_TEST(test_no_sample_is_never_ok);
     RUN_TEST(test_apps_inside_the_margin_clamps_to_0_or_100);
     RUN_TEST(test_apps_past_the_margin_is_out_of_range);
+    RUN_TEST(test_apps_outside_the_electrical_window_is_out_of_range);
     RUN_TEST(test_apps2_falls_from_its_max_to_its_min);
     RUN_TEST(test_each_apps_scales_from_its_own_end_points);
     RUN_TEST(test_apps1_rises_from_its_min_to_its_max);

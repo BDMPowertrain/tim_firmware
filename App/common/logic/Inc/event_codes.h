@@ -5,7 +5,7 @@
  * it: a stored Event outlives the image that wrote it.
  *
  * Codes for Events whose source is not built yet (BMS fault
- * trip, charger, balancing, pedal check and the rest of the spec's list)
+ * trip, charger, balancing and the rest of the spec's list)
  * are added here when their source is.
  *
  * This is logic (ADR 0002): no HAL, no RTOS, no clock.
@@ -48,6 +48,11 @@ typedef enum {
     /* The VCU's states (ADR 0006, vcu_control.h). */
     EVENT_VCU_STATE  = 64, /* event_data_vcu_state() */
     EVENT_TORQUE_CUT = 65, /* event_data_torque_cut(): one cause starting or ending */
+
+    /* Calibration and the Pedal check (ADR 0016, vcu_control.h). */
+    EVENT_PEDAL_CHECK        = 66, /* event_data_pedal_check(): a pass */
+    EVENT_PEDAL_CHECK_FAILED = 67, /* event_data_pedal_check_failed() */
+    EVENT_NOT_CALIBRATED     = 68, /* event_data_not_calibrated() */
 
     /* The Data log (ADR 0021, data_log.h). */
     EVENT_DATA_LOG_CARD = 80, /* event_data_data_log_card(): no card, or a card error */
@@ -145,6 +150,34 @@ typedef struct {
    6 APPS2 travel (u16), 8 APPS1 status (u8), 9 APPS2 status (u8),
    10 front brake status (u8), 11 rear brake status (u8). */
 void event_data_torque_cut(uint8_t data[EVENT_DATA_SIZE], const event_torque_cut_t *cut);
+
+/* 0 build ID (u32), 4 parameter save counter (u32), 8 flags (u8): bit 0,
+   a dirty build. */
+void event_data_pedal_check(uint8_t data[EVENT_DATA_SIZE], uint32_t build_id,
+                            uint32_t save_counter, bool dirty);
+
+/* The running image and the loaded Parameters, for a Pedal check search. */
+typedef struct {
+    uint32_t build_id;
+    uint32_t save_counter; /* the loaded copy's */
+    bool     dirty;        /* the running image is a dirty build */
+} event_pedal_check_key_t;
+
+/* ADR 0016: ev is a Pedal check pass for key (an event_pedal_check_key_t),
+   in the form event_log_find() takes. A dirty build, or one with no build
+   ID (0), never matches, nor does a pass a dirty build wrote: two
+   uncommitted images share an ID (cmake/build_id_write.cmake). */
+bool event_pedal_check_matches(const event_t *ev, const void *key);
+
+/* 0 vcu_pedal_check_result_t (u8, vcu_pedal_check.h), 1 phase reached
+   (u8), 4 APPS1 travel (u16), 6 APPS2 travel (u16). */
+void event_data_pedal_check_failed(uint8_t data[EVENT_DATA_SIZE], uint8_t reason, uint8_t phase,
+                                   const uint16_t travel[2]);
+
+/* 0 vcu_cal_reason_t (u8, vcu_calibration.h), 1 vcu_cal_sensor_t (u8),
+   2 stored calibration revision (u16), 4 the image's (u16). */
+void event_data_not_calibrated(uint8_t data[EVENT_DATA_SIZE], uint8_t reason, uint8_t sensor,
+                               uint16_t stored_revision, uint16_t image_revision);
 
 typedef struct {
     uint8_t  state;   /* data_log_state_t (data_log_card.h): MISSING or ERROR */

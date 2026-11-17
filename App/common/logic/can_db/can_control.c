@@ -790,6 +790,8 @@ int can_control_vcu_status_pack(
     dst_p[3] |= pack_left_shift_u8(src_p->bus_off_latched, 3u, 0x08u);
     dst_p[3] |= pack_left_shift_u8(src_p->parameters_defaulted, 4u, 0x10u);
     dst_p[3] |= pack_left_shift_u8(src_p->startup_blocked, 5u, 0x20u);
+    dst_p[3] |= pack_left_shift_u8(src_p->not_calibrated, 6u, 0x40u);
+    dst_p[3] |= pack_left_shift_u8(src_p->pedal_check_due, 7u, 0x80u);
     dst_p[4] |= pack_left_shift_u8(src_p->energy_meter_timeout, 0u, 0x01u);
     dst_p[4] |= pack_left_shift_u8(src_p->error_passive, 1u, 0x02u);
     dst_p[4] |= pack_left_shift_u8(src_p->receive_overflow, 2u, 0x04u);
@@ -836,6 +838,8 @@ int can_control_vcu_status_unpack(
     dst_p->bus_off_latched = unpack_right_shift_u8(src_p[3], 3u, 0x08u);
     dst_p->parameters_defaulted = unpack_right_shift_u8(src_p[3], 4u, 0x10u);
     dst_p->startup_blocked = unpack_right_shift_u8(src_p[3], 5u, 0x20u);
+    dst_p->not_calibrated = unpack_right_shift_u8(src_p[3], 6u, 0x40u);
+    dst_p->pedal_check_due = unpack_right_shift_u8(src_p[3], 7u, 0x80u);
     dst_p->energy_meter_timeout = unpack_right_shift_u8(src_p[4], 0u, 0x01u);
     dst_p->error_passive = unpack_right_shift_u8(src_p[4], 1u, 0x02u);
     dst_p->receive_overflow = unpack_right_shift_u8(src_p[4], 2u, 0x04u);
@@ -1031,6 +1035,26 @@ bool can_control_vcu_status_startup_blocked_is_in_range(uint8_t value)
 }
 
 bool can_control_vcu_status_startup_blocked_is_in_phys_range(float value)
+{
+    return ((value >= 0.0f) && (value <= 1.0f));
+}
+
+bool can_control_vcu_status_not_calibrated_is_in_range(uint8_t value)
+{
+    return (value <= 1u);
+}
+
+bool can_control_vcu_status_not_calibrated_is_in_phys_range(float value)
+{
+    return ((value >= 0.0f) && (value <= 1.0f));
+}
+
+bool can_control_vcu_status_pedal_check_due_is_in_range(uint8_t value)
+{
+    return (value <= 1u);
+}
+
+bool can_control_vcu_status_pedal_check_due_is_in_phys_range(float value)
 {
     return ((value >= 0.0f) && (value <= 1.0f));
 }

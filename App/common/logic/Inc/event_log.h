@@ -134,6 +134,12 @@ bool event_log_newer(const event_log_t *log, event_pos_t *pos);
 /* Reads the Event at pos. */
 event_read_t event_log_read(const event_log_t *log, event_pos_t pos, event_t *out);
 
+/* Walks from the newest Event to the oldest for the first one match()
+   accepts, skipping any that does not read whole. True, with *out that
+   Event, if one does. Nothing is found in an empty log or without flash. */
+bool event_log_find(const event_log_t *log, bool (*match)(const event_t *ev, const void *ctx),
+                    const void *ctx, event_t *out);
+
 /* The 32 bytes the log stores for ev, its CRC included, laid out as at the
    top of this file. The Data log copies each Event in this form
    (data_log_record.h). */
