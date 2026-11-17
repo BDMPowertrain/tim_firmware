@@ -133,10 +133,11 @@
    averages and the step's own locals, now with vcu_control_step()'s
    unpacked frames (issue 56); its inputs and outputs are static in
    vcu_step.c, the mailboxes and their snapshot static in control_bus.c.
-   Measured on the bench TIM (Debug, 20 s, issue 55): 432 B free of 1024;
-   re-measure with `tasks` after issue 56. */
+   Measured on the bench TIM (Debug, issue 56, after GLV_ON and a forced
+   READY_TO_DRIVE): 256 B free of 1024, the 25% floor (spec #36), so
+   raised to 1280. */
 #define CONTROL_STEP_TASK_PRIORITY   osPriorityRealtime
-#define CONTROL_STEP_TASK_STACK_SIZE 1024u
+#define CONTROL_STEP_TASK_STACK_SIZE 1280u
 
 /* Creates every queue and task the running image needs, the control step
    last, then returns. A failed creation does not stop the board: the
