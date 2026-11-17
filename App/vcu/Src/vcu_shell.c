@@ -147,7 +147,7 @@ static int cmd_log(int argc, char **argv)
     return 0;
 }
 
-#define CMD_CAN_USAGE "usage: can status[1|2]|stby2 on|off|term2 on|off|send2 <id> <hex> [fd] [brs]|stream2\r\n"
+#define CMD_CAN_USAGE "usage: can status[1|2]|stby2 on|off|send2 <id> <hex> [fd] [brs]|stream2 (termination: term)\r\n"
 
 /* Matches "stby1"/"stby2", "term1"/"term2", etc. against a prefix and
    sets *bus to the trailing 1 or 2. Returns false (bus untouched) if
@@ -340,7 +340,12 @@ static int cmd_can(int argc, char **argv)
         return 0;
     }
 
-    if ((parse_bus_suffix(argv[1], "stby", &bus) || parse_bus_suffix(argv[1], "term", &bus)
+    if (parse_bus_suffix(argv[1], "term", &bus)) {
+        shell_printf("can: termination is `term %d on|off|stored` now, in both images\r\n", bus);
+        return 0;
+    }
+
+    if ((parse_bus_suffix(argv[1], "stby", &bus)
          || parse_bus_suffix(argv[1], "send", &bus) || parse_bus_suffix(argv[1], "stream", &bus))
         && bus == 1) {
         shell_printf("can: CAN1 is the Control bus; only the control step drives it\r\n");
@@ -357,21 +362,6 @@ static int cmd_can(int argc, char **argv)
         } else if (strcmp(argv[2], "off") == 0) {
             can_set_standby(false);
             shell_printf("can: standby off\r\n");
-        } else {
-            shell_printf(CMD_CAN_USAGE);
-        }
-        return 0;
-    }
-
-    if (parse_bus_suffix(argv[1], "term", &bus)) {
-        if (argc < 3) {
-            shell_printf(CMD_CAN_USAGE);
-        } else if (strcmp(argv[2], "on") == 0) {
-            can_set_termination(true);
-            shell_printf("can: termination on\r\n");
-        } else if (strcmp(argv[2], "off") == 0) {
-            can_set_termination(false);
-            shell_printf("can: termination off\r\n");
         } else {
             shell_printf(CMD_CAN_USAGE);
         }
@@ -494,7 +484,7 @@ static const shell_cmd_t vcuCommands[] = {
     { "imu",       cmd_imu,       "latest accel/gyro sample" },
     { "imustream", cmd_imustream, "live accel/gyro stream, any key to stop" },
     { "log",       cmd_log,       "log start|stop|status|list|dump <file>" },
-    { "can",       cmd_can,       "can status[1|2]|stby2|term2 on|off|send2 <id> <hex> [fd] [brs]|stream2" },
+    { "can",       cmd_can,       "can status[1|2]|stby2 on|off|send2 <id> <hex> [fd] [brs]|stream2" },
     { "vbat",      cmd_vbat,      "battery voltage" },
     { "inputs",    cmd_inputs,    "pedal, brake and supply readings [stream]" },
 };

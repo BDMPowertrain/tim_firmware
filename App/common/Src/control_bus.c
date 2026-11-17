@@ -13,6 +13,7 @@
 #include "main.h"
 #include "masked_copy.h"
 #include "print.h"
+#include "termination.h"
 
 extern FDCAN_HandleTypeDef hfdcan1;
 
@@ -112,7 +113,7 @@ static bool config_filter(const control_bus_rx_t *row, uint32_t index)
     return HAL_FDCAN_ConfigFilter(&hfdcan1, &filter) == HAL_OK;
 }
 
-bool control_bus_init(const control_bus_rx_t *rows, size_t row_count)
+bool control_bus_init(const control_bus_rx_t *rows, size_t row_count, bool terminate)
 {
     if (row_count > CONTROL_BUS_RX_MAX) {
         return false;
@@ -154,15 +155,20 @@ bool control_bus_init(const control_bus_rx_t *rows, size_t row_count)
         return false;
     }
 
-    /* Out of standby now, so the transceiver has settled well before the
-       first step starts CAN1 (spec: at least 5 ms). */
+    /* Out of standby, then termination from its Parameter (issue 52):
+       the first step, a full step period later, starts CAN1 on a settled
+       bus. */
     HAL_GPIO_WritePin(FDCAN1_STB_GPIO_Port, FDCAN1_STB_Pin, GPIO_PIN_RESET);
+    termination_write_stored(TERMINATION_CONTROL_BUS, terminate);
     return true;
 }
 
-bool control_bus_start(void)
+bool control_bus_start(uint32_t now_ms)
 {
-    started = (HAL_FDCAN_Start(&hfdcan1) == HAL_OK);
+    /* Never reached unsettled: each image's step period is longer than
+       the settle time (a _Static_assert beside it). */
+    started = termination_settled(TERMINATION_CONTROL_BUS, now_ms)
+              && (HAL_FDCAN_Start(&hfdcan1) == HAL_OK);
     return started;
 }
 

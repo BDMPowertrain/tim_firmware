@@ -83,7 +83,7 @@ void tasks_init(void)
        The BMS accepts a save at any time, so it has no save hook. */
     ok = parameters_init(&bms_param_table, NULL) && ok;
     ok = shell_init() && ok;
-    ok = can_if_init(&daqPublisher) && ok;
+    ok = can_if_init(&daqPublisher, parameters_value(BMS_PARAM_CAN2_TERM) != 0) && ok;
     ok = housekeeping_init() && ok;
     ok = bms_step_init() && ok;
     /* Started in main(); a configuration that did not take is a start-up

@@ -22,6 +22,7 @@
 #include "print.h"
 #include "reset_info.h"
 #include "stats.h"
+#include "termination.h"
 #include "stream_buffer.h"
 
 extern UART_HandleTypeDef huart1;
@@ -99,6 +100,7 @@ static const shell_cmd_t commandTable[] = {
     { "step",      cmd_step,      "control step: state, overruns, last and worst times" },
     { "bus",       cmd_bus,       "Control bus (CAN1): bus-off, error-passive, skipped, overflows, error counts" },
     { "param",     parameters_cmd, "param [dump] | set <name> <value> | save" },
+    { "term",      termination_cmd, "term [1|2 on|off|stored]: CAN termination; on/off is a bench override, not saved" },
     { "events",    events_cmd,    "events [n]: the Event log's state and its newest n Events" },
     { "lastreset", cmd_lastreset, "last reset: cause, Breadcrumb, Crash record, resets not power-on" },
     { "hang",      cmd_hang,      "hang " BENCH_CONFIRM_WORD ": hang the control step, for a watchdog reset" },

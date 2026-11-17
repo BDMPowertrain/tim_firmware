@@ -33,8 +33,8 @@ typedef struct {
 
 typedef struct {
     bool     standby;          /* last commanded STBY state */
-    bool     terminated;       /* last commanded termination-relay state --
-                                   NOT a measured fact, see can_set_termination() */
+    bool     terminated;       /* the relay as commanded now -- NOT a
+                                   measured fact (termination.h) */
     bool     fd_capable;       /* the bus's compiled FrameFormat (Classic vs FD_BRS) */
     bool     bus_off;
     bool     error_passive;
@@ -57,12 +57,12 @@ typedef struct {
    call, and with zero filter slots configured the peripheral rejects every
    frame by default), starts FDCAN2, activates the RX FIFO0 interrupt, and
    brings STBY low (out of standby) per the ADM3057EBRWZ's confirmed
-   polarity. Deliberately does NOT touch the termination GPIO -- termination
-   only changes via an explicit can_set_termination() call, never as an
-   init side effect. publisher must outlive daqTask. Must run before
-   canRxTask/daqTask are created -- see tasks_init(). Returns false if a
-   queue, the mutex or the controller could not be set up. */
-bool can_if_init(const can_if_publisher_t *publisher);
+   polarity, then sets termination to terminate, the image's CAN2
+   termination Parameter (termination.h). publisher must outlive daqTask.
+   Must run after parameters_init() and before canRxTask/daqTask are
+   created -- see tasks_init(). Returns false if a queue, the mutex or the
+   controller could not be set up. */
+bool can_if_init(const can_if_publisher_t *publisher, bool terminate);
 
 /* Queues one frame for daqTask to send. Never waits: a full send queue
    drops its oldest frame (counted in tx_queue_dropped) to make room.
@@ -86,11 +86,10 @@ bool can_get_new_rx(can_frame_t *out, uint32_t *last_seq);
 
 bool can_get_status(can_status_t *out);
 
-/* Explicit manual overrides for testing the STBY and termination pins
-   directly — separate from can_if_init()'s automatic out-of-standby-at-
-   boot behavior. */
+/* Explicit manual override for testing the STBY pin directly — separate
+   from can_if_init()'s automatic out-of-standby-at-boot behavior. The
+   termination override is the shell's `term` (termination.h). */
 void can_set_standby(bool standby);
-void can_set_termination(bool on);
 
 /* Task entry points, created once each from tasks_init(). canRxTask drains
    the receive queue; daqTask sends, publishes and handles bus-off, so a

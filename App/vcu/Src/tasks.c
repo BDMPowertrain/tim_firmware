@@ -95,7 +95,7 @@ void tasks_init(void)
     vcu_shell_register();
     ok = spi3_bus_init() && ok;
     ok = logger_init() && ok;
-    ok = can_if_init(&daqPublisher) && ok;
+    ok = can_if_init(&daqPublisher, parameters_value(VCU_PARAM_CAN2_TERM) != 0) && ok;
     /* The analog inputs run from here on, the first scan discarded, so the
        control step's first read has samples (issue 55). */
     ok = vcu_adc_start() && ok;

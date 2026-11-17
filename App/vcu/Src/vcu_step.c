@@ -6,6 +6,7 @@
 #include <string.h>
 
 #include "adc_window.h"
+#include "bus_term.h"
 #include "can_control.h"
 #include "control_bus.h"
 #include "e2e_p11.h"
@@ -16,6 +17,11 @@
 #include "vcu_tx.h"
 
 #define VCU_STEP_PERIOD_MS 10u
+
+/* The first step starts CAN1 one period after termination was written
+   (control_bus_init()), so the period must outlast the settle time. */
+_Static_assert(VCU_STEP_PERIOD_MS > BUS_TERM_SETTLE_MS,
+               "the first step must find CAN1's termination settled");
 
 /* Every frame the VCU reads (the receivers in can/control.dbc), one
    mailbox each. The BMS frames get receive FIFO 0 to themselves, so a
@@ -56,7 +62,8 @@ bool vcu_step_init(void)
         .brake_zero = { parameters_value(VCU_PARAM_BRAKE1_ZERO),
                         parameters_value(VCU_PARAM_BRAKE2_ZERO) },
     };
-    return control_bus_init(vcuRx, sizeof(vcuRx) / sizeof(vcuRx[0]));
+    return control_bus_init(vcuRx, sizeof(vcuRx) / sizeof(vcuRx[0]),
+                            parameters_value(VCU_PARAM_CAN1_TERM) != 0);
 }
 
 static bool all_sampled(const vcu_sensor_raw_t *raw)
@@ -87,9 +94,9 @@ static void read_inputs(void)
 static void phase_input(control_step_ctx_t *ctx)
 {
     /* CAN1 starts on the first step, a full period after the transceiver
-       left standby in vcu_step_init(). */
+       left standby and termination was written in vcu_step_init(). */
     if (ctx->step_count == 0u) {
-        canStarted = control_bus_start();
+        canStarted = control_bus_start(ctx->now_ms);
     }
     /* The bus-off latch clears only with every mailbox VALID (spec,
        reaction table): judged on the last step's mailboxes. */

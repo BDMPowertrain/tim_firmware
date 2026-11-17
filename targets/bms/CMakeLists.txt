@@ -68,6 +68,7 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     ../../App/common/Src/reset_info.c
     ../../App/common/Src/shell.c
     ../../App/common/Src/stats.c
+    ../../App/common/Src/termination.c
     ../../App/common/Src/watchdog.c
     ../../App/bms/Src/bms_step.c
     ../../App/bms/Src/tasks.c

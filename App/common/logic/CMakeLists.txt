@@ -6,6 +6,7 @@ add_logic_library(logic_common
     SOURCES
         Src/adc_window.c
         Src/bus_recovery.c
+        Src/bus_term.c
         Src/control_rx.c
         Src/crc16.c
         Src/crc32.c

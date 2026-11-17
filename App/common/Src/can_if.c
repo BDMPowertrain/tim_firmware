@@ -34,6 +34,7 @@
 #include "fdcan_irq.h"
 #include "frame_queue.h"
 #include "main.h"
+#include "termination.h"
 
 extern FDCAN_HandleTypeDef hfdcan2;
 
@@ -76,7 +77,6 @@ static uint32_t    rxSeq; /* bumped each time canRxTask caches a new frame.
 
 static bool fdCapable;
 static bool standby = true;
-static bool terminated;
 
 static uint32_t rxCount;
 static uint32_t txCount;
@@ -150,7 +150,7 @@ static void can_if_rx_isr(FDCAN_HandleTypeDef *hfdcan, uint32_t rx_fifo)
     portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
 }
 
-bool can_if_init(const can_if_publisher_t *image_publisher)
+bool can_if_init(const can_if_publisher_t *image_publisher, bool terminate)
 {
     publisher = image_publisher;
     rxQueue = osMessageQueueNew(CAN_RX_QUEUE_DEPTH, sizeof(can_frame_t), NULL);
@@ -187,9 +187,10 @@ bool can_if_init(const can_if_publisher_t *image_publisher)
 
     /* ADM3057EBRWZ STBY: high = standby (default at boot, per CubeMX's
        generated MX_GPIO_Init), low = normal operation
-       (Documentation/adm3055e-adm3057e.pdf Table 10, p.15). Termination
-       is deliberately NOT touched here — see can_set_termination(). */
+       (Documentation/adm3055e-adm3057e.pdf Table 10, p.15). Then
+       termination from its Parameter, out of standby first (issue 52). */
     can_set_standby(false);
+    termination_write_stored(TERMINATION_DAQ_BUS, terminate);
     return true;
 }
 
@@ -269,7 +270,7 @@ bool can_get_status(can_status_t *out)
     }
 
     out->standby = standby;
-    out->terminated = terminated;
+    out->terminated = termination_relay(TERMINATION_DAQ_BUS);
     out->fd_capable = fdCapable;
     out->bus_off = (proto.BusOff != 0u);
     out->error_passive = (proto.ErrorPassive != 0u);
@@ -292,15 +293,6 @@ void can_set_standby(bool on)
 {
     HAL_GPIO_WritePin(FDCAN2_STB_GPIO_Port, FDCAN2_STB_Pin, on ? GPIO_PIN_SET : GPIO_PIN_RESET);
     standby = on;
-}
-
-/* Polarity confirmed on hardware (multimeter across CANH/CANL, both
-   buses): drive high closes the TLP172AM relay, connecting the two 59R
-   resistors in series (~120R) across the bus; drive low leaves it open. */
-void can_set_termination(bool on)
-{
-    HAL_GPIO_WritePin(Can_Term_2_GPIO_Port, Can_Term_2_Pin, on ? GPIO_PIN_SET : GPIO_PIN_RESET);
-    terminated = on;
 }
 
 void canRxTask(void *argument)

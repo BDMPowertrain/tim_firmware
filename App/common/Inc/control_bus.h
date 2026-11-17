@@ -82,16 +82,19 @@ typedef struct {
 } control_bus_status_t;
 
 /* Sets the acceptance filters for rows (the image's received frames, one
-   mailbox each, in this order), arms the receive interrupts and takes the
-   transceiver out of standby. Termination is not touched: it stays open
-   until it is set from a parameter. Does not start CAN1; the first
-   Control step does, at least one period later. Call once from
-   tasks_init(). Returns false if the filters do not fit the slots tim.ioc
-   gives or the controller refuses them. */
-bool control_bus_init(const control_bus_rx_t *rows, size_t row_count);
+   mailbox each, in this order), arms the receive interrupts, takes the
+   transceiver out of standby and then sets termination to terminate, the
+   image's CAN1 termination Parameter (termination.h). Does not start
+   CAN1; the first Control step does, one period later. Call once from
+   tasks_init(), after parameters_init(). Returns false if the filters do
+   not fit the slots tim.ioc gives or the controller refuses them. */
+bool control_bus_init(const control_bus_rx_t *rows, size_t row_count, bool terminate);
 
-/* Starts CAN1. Called by the first Control step. */
-bool control_bus_start(void);
+/* Starts CAN1. Called by the first Control step. False if the controller
+   refuses, or if termination has not settled by now_ms
+   (termination_settled()), which a step period longer than
+   BUS_TERM_SETTLE_MS rules out. */
+bool control_bus_start(uint32_t now_ms);
 
 /* The start of each step: snapshot every mailbox and update it against
    now_ms, then run the bus-off policy. latch_may_clear is the image's own
