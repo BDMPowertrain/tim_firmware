@@ -145,6 +145,9 @@ undo provisioning.
   that image with shell_register_commands() (App/vcu/Src/vcu_shell.c).
 - tools/ holds bench scripts that run on the PC against a board, such as
   tools/provision.tcl (OpenOCD). Nothing in it is built into an image.
+  tools/power_rule_windows.py is the one check of the 80 kW rule's two
+  windows (EV.3.4.1): the Power limiter's host closed-loop test, bench
+  logs and car logs are all judged by it, never by a copy.
 - targets/<image>/tim.ioc is the source of truth for that image's pin and
   peripheral config. Both projects must name the same firmware package.
 - The BMS project is minimal for now: clock, FreeRTOS, USART1, FDCAN1 (the
