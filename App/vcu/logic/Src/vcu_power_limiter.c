@@ -35,7 +35,7 @@ static uint32_t trimmed(uint32_t ceiling_w, int32_t trim_ppm)
 
 /* One integral step on one frame: a quarter of the error, as a fraction of
    the ceiling, then the bounds. */
-static int32_t trim_step(int32_t trim_ppm, uint32_t ceiling_w, const vcu_limiter_in_t *in)
+static int32_t trim_step(int32_t trim_ppm, uint32_t ceiling_w, const vcu_power_limiter_in_t *in)
 {
     if (ceiling_w == 0u) {
         return trim_ppm; /* nothing to be a fraction of */
@@ -52,8 +52,8 @@ static int32_t trim_step(int32_t trim_ppm, uint32_t ceiling_w, const vcu_limiter
     return (int32_t)t;
 }
 
-void vcu_power_limiter_step(vcu_power_limiter_t *pl, const vcu_limiter_in_t *in,
-                            vcu_limiter_out_t *out)
+void vcu_power_limiter_step(vcu_power_limiter_t *pl, const vcu_power_limiter_in_t *in,
+                            vcu_power_limiter_out_t *out)
 {
     const bool new_frame = in->power_frames != pl->frames_seen;
     pl->frames_seen = in->power_frames;

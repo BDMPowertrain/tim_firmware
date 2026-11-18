@@ -76,11 +76,11 @@ typedef struct {
     int16_t command;      /* the last torque the step sent, 0.1 N.m */
     bool    frame_due;
     uint32_t frame_at_ms;
-    vcu_limiter_in_t pending; /* the frame on its way */
+    vcu_power_limiter_in_t pending; /* the frame on its way */
     /* The step. */
     vcu_power_limiter_t pl;
-    vcu_limiter_in_t    in;
-    vcu_limiter_out_t   out;
+    vcu_power_limiter_in_t    in;
+    vcu_power_limiter_out_t   out;
     double              pedal; /* 0 to 1 */
     /* What the test judges. */
     FILE   *trace;

@@ -320,7 +320,7 @@ typedef struct {
     bool          fault_active;   /* for the heartbeat LED */
     int16_t       torque_request; /* the driver's, from the lower Pedal travel, 0.1 N.m */
     int16_t       torque;         /* in this step's 0x0C0 after the gates and the limiter, 0.1 N.m */
-    vcu_limiter_out_t limiter;    /* the Power limiter's ceilings, trim, and whether it bound */
+    vcu_power_limiter_out_t limiter;    /* the Power limiter's ceilings, trim, and whether it bound */
     uint16_t      cuts;           /* the Torque cuts active: bit (1 << vcu_cut_t) */
     vcu_cal_result_t  calibration;    /* VCU_CAL_OK: Calibrated */
     bool              pedal_check_due;

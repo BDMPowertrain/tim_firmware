@@ -76,7 +76,7 @@ typedef struct {
     int16_t  pack_current_da;    /* BMS_Power, 0.1 A, discharging positive */
     uint16_t pack_voltage_dv;    /* BMS_Power, 0.1 V */
     uint16_t discharge_limit_da; /* BMS_Power, 0.1 A */
-} vcu_limiter_in_t;
+} vcu_power_limiter_in_t;
 
 typedef struct {
     int16_t  torque;          /* sent: the lower of the request and torque_ceiling */
@@ -85,7 +85,7 @@ typedef struct {
     uint32_t power_ceiling_w; /* the Power ceiling, before the trim */
     int16_t  torque_ceiling;  /* 0.1 N.m, after the trim */
     int32_t  trim_ppm;        /* the trim used this step */
-} vcu_limiter_out_t;
+} vcu_power_limiter_out_t;
 
 /* The limiter's own state. vcu_power_limiter_init() it; touch nothing inside. */
 typedef struct {
@@ -97,7 +97,7 @@ typedef struct {
 
 void vcu_power_limiter_init(vcu_power_limiter_t *pl);
 
-void vcu_power_limiter_step(vcu_power_limiter_t *pl, const vcu_limiter_in_t *in,
-                            vcu_limiter_out_t *out);
+void vcu_power_limiter_step(vcu_power_limiter_t *pl, const vcu_power_limiter_in_t *in,
+                            vcu_power_limiter_out_t *out);
 
 #endif /* VCU_POWER_LIMITER_H */

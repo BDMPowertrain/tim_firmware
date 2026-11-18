@@ -89,7 +89,7 @@ typedef struct {
        INV_MotorPosition, or its (0 rpm): the Power limiter's. */
     uint32_t power_frames;   /* BMS_Power frames accepted: a change is a new one */
     int16_t  pack_current_da;
-    uint16_t power_pack_dv;
+    uint16_t pack_voltage_dv; /* BMS_Power's, the same sweep as its current */
     uint16_t discharge_limit_da;
     int16_t  motor_speed_rpm;
 } bus_view_t;
@@ -172,7 +172,7 @@ static void read_bus(const vcu_control_in_t *in, bus_view_t *bus)
     bus->em_violation = bus->em_status_valid && emStatus.violation != 0u;
     bus->power_frames = in->mailboxes[VCU_RX_BMS_POWER].counters.good;
     bus->pack_current_da = bmsPower.pack_current;
-    bus->power_pack_dv = bmsPower.pack_voltage;
+    bus->pack_voltage_dv = bmsPower.pack_voltage;
     bus->discharge_limit_da = bmsPower.discharge_limit;
     bus->motor_speed_rpm = invPosition.motor_speed;
 }
@@ -874,14 +874,14 @@ void vcu_control_step(vcu_control_t *vc, const vcu_control_in_t *in,
     /* 7. The Power limiter (ADR 0017): the lower of the request and its
        torque ceiling, so it only ever lowers torque (EV.3.1.3). It reads
        BMS_Power and the motor speed, never the Energy Meter. */
-    const vcu_limiter_in_t limiter_in = {
+    const vcu_power_limiter_in_t limiter_in = {
         .now_ms = in->now_ms,
         .request = gated ? 0 : out->torque_request,
         .motor_speed_rpm = bus.motor_speed_rpm,
         .power_valid = bus.bms_power_valid,
         .power_frames = bus.power_frames,
         .pack_current_da = bus.pack_current_da,
-        .pack_voltage_dv = bus.power_pack_dv,
+        .pack_voltage_dv = bus.pack_voltage_dv,
         .discharge_limit_da = bus.discharge_limit_da,
     };
     vcu_power_limiter_step(&vc->limiter, &limiter_in, &out->limiter);

@@ -19,13 +19,13 @@
 #include "vcu_power_limiter.h"
 
 static vcu_power_limiter_t pl;
-static vcu_limiter_in_t in;
-static vcu_limiter_out_t out;
+static vcu_power_limiter_in_t in;
+static vcu_power_limiter_out_t out;
 
 void setUp(void)
 {
     vcu_power_limiter_init(&pl);
-    in = (vcu_limiter_in_t){
+    in = (vcu_power_limiter_in_t){
         .now_ms = 1000u,
         .request = 3000,             /* 300 N.m: more than any ceiling below */
         .motor_speed_rpm = 3000,     /* 314.16 rad/s */
@@ -215,6 +215,19 @@ static void test_frames_in_the_first_50_ms_of_binding_leave_the_trim_alone(void)
     TEST_ASSERT_EQUAL_INT32(0, out.trim_ppm);
 }
 
+/* ADR 0002: the settle time is judged by subtraction, so it holds across
+   the 32-bit clock's wrap. */
+static void test_the_settle_time_holds_across_the_clock_wrap(void)
+{
+    in.now_ms = 0xFFFFFFF0u; /* binding from 16 ms before the wrap */
+    for (uint32_t ms = 0u; ms < VCU_TRIM_SETTLE_MS; ms += 10u) {
+        frame_with_power(0u);
+        TEST_ASSERT_EQUAL_INT32(-150000, out.trim_ppm);
+    }
+    frame_with_power(0u);
+    TEST_ASSERT_EQUAL_INT32(0, out.trim_ppm);
+}
+
 /* Lift off, coast with the pedal up, pull again: the second pull starts
    with what the first learnt. */
 static void test_the_trim_is_kept_between_pulls(void)
@@ -258,6 +271,7 @@ int main(void)
     RUN_TEST(test_the_trim_moves_only_on_a_new_frame);
     RUN_TEST(test_the_trim_moves_only_while_the_limiter_binds);
     RUN_TEST(test_frames_in_the_first_50_ms_of_binding_leave_the_trim_alone);
+    RUN_TEST(test_the_settle_time_holds_across_the_clock_wrap);
     RUN_TEST(test_the_trim_is_kept_between_pulls);
     RUN_TEST(test_the_trim_starts_at_minus_15_percent_after_bms_power_was_invalid);
     return UNITY_END();

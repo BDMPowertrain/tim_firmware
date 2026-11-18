@@ -291,11 +291,7 @@ static void to_ready_to_drive_from_ts_active(void)
 static void to_ready_to_drive(void)
 {
     to_ts_active();
-    brake_on();
-    run_ms(VCU_START_RELEASE_MS); /* the button has been released long enough */
-    in.start_pressed = true;
-    step();
-    TEST_ASSERT_EQUAL_UINT8(VCU_STATE_READY_TO_DRIVE, out.state);
+    to_ready_to_drive_from_ts_active();
 }
 
 /* A press of the start button after it has been released long enough. */
