@@ -107,6 +107,17 @@ class CommandLine(unittest.TestCase):
         self.assertEqual([prw.Violation("continuous", 10.0, 120.0, 85_000.0)],
                          prw.violations_in_csv(path))
 
+    def test_a_file_with_no_power_reading_at_all_is_not_a_pass(self):
+        # A step log from a car without the Energy Meter (issue 61): nothing
+        # was judged, so the check must not say "no Violation".
+        path = self.write_csv([(0, ""), (10, ""), (20, "")])
+        self.assertEqual(2, prw.main([path]))
+
+    def test_a_gap_at_the_end_counts_as_not_judged(self):
+        path = self.write_csv([(0, 70_000), (10, 70_000), (20, ""), (530, "")])
+        _, unknown = prw.read_stretches(path)
+        self.assertEqual(510.0, unknown)
+
     def test_a_file_with_gaps_says_how_much_was_not_judged(self):
         path = self.write_csv([(0, 70_000), (10, ""), (20, ""), (30, 70_000), (40, 70_000)])
         self.assertEqual(0, prw.main([path]))

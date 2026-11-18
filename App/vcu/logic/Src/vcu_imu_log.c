@@ -43,7 +43,16 @@ size_t vcu_imu_pair(vcu_imu_pairer_t *p, const vcu_imu_entry_t *entries, size_t 
 
     for (size_t k = 0; k < made; k++) {
         const uint32_t back = newer + (uint32_t)(made - 1u - k);
-        records[k].uptime_ms = now_ms - (back * VCU_IMU_PERIOD_US + 500u) / 1000u;
+        uint32_t t = now_ms - (back * VCU_IMU_PERIOD_US + 500u) / 1000u;
+
+        if (p->dated && (int32_t)(t - p->last_ms) < 0) {
+            t = p->last_ms; /* never before the read before */
+        }
+        records[k].uptime_ms = t;
+    }
+    if (made > 0u) {
+        p->dated = true;
+        p->last_ms = records[made - 1u].uptime_ms;
     }
     return made;
 }
