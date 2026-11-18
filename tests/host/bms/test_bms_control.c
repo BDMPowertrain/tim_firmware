@@ -1433,6 +1433,40 @@ static void test_no_charger_request_is_ever_sent_outside_charge(void)
     }
 }
 
+/* Held (FAULT_HELD) with the charger heard: never a request. */
+static void test_no_charger_request_is_sent_in_fault_held(void)
+{
+    config.held = true;
+    bms_control_init(&bc, &config);
+    hear_charger();
+    loopClosed = true;
+    for (unsigned i = 0; i < 500u; i++) {
+        step();
+        TEST_ASSERT_EQUAL_UINT8(BMS_STATE_FAULT_HELD, out.state);
+        TEST_ASSERT_NULL(sent(CHG_REQUEST_ID));
+    }
+}
+
+/* The charger timeout mid-charge: CHARGE and BMS_OK kept, a stop every
+   second; the charger back, the charge starts again after 3 s. */
+static void test_a_silent_charger_gets_stop_every_second_and_its_return_restarts_the_charge(void)
+{
+    start_charge();
+    charger.state = MAILBOX_INVALID;
+    for (unsigned s = 0; s < 10u; s++) {
+        const struct can_control_chg_request_t r = step_until_request();
+        TEST_ASSERT_EQUAL_UINT8(CAN_CONTROL_CHG_REQUEST_CONTROL_STOP_CHOICE, r.control);
+        TEST_ASSERT_EQUAL_UINT16(0u, r.max_charge_current);
+        TEST_ASSERT_EQUAL_UINT8(BMS_STATE_CHARGE, out.state);
+        TEST_ASSERT_TRUE(out.bms_ok);
+    }
+    hear_charger();
+    steps(BMS_CHARGE_START_MS / STEP_MS);
+    const struct can_control_chg_request_t r = step_until_request();
+    TEST_ASSERT_EQUAL_UINT8(CAN_CONTROL_CHG_REQUEST_CONTROL_START_CHOICE, r.control);
+    TEST_ASSERT_EQUAL_UINT16(20u, r.max_charge_current);
+}
+
 /* Waiting it asks for nothing; charging, for the Charge limit at 128 x
    the Charge target; BMS_Limits carries the Charge limit. */
 static void test_a_charge_through_the_step_asks_for_the_charge_limit(void)
@@ -1639,6 +1673,8 @@ int main(void)
     RUN_TEST(test_hearing_the_charger_is_charge_mode_until_a_power_cycle);
     RUN_TEST(test_in_charge_the_request_goes_once_a_second_in_the_0x202_slot);
     RUN_TEST(test_no_charger_request_is_ever_sent_outside_charge);
+    RUN_TEST(test_no_charger_request_is_sent_in_fault_held);
+    RUN_TEST(test_a_silent_charger_gets_stop_every_second_and_its_return_restarts_the_charge);
     RUN_TEST(test_a_charge_through_the_step_asks_for_the_charge_limit);
     RUN_TEST(test_charger_disobeys_is_a_bms_fault);
     RUN_TEST(test_no_charger_flag_is_a_bms_fault);

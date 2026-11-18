@@ -44,6 +44,20 @@ static uint16_t asked_da(const bms_charge_t *c, uint32_t now_ms)
     return c->request_da;
 }
 
+/* Whether cond has held, without a break, for hold_ms. */
+static bool held(bool cond, bool *timing, uint32_t *since_ms, uint32_t now_ms, uint32_t hold_ms)
+{
+    if (!cond) {
+        *timing = false;
+        return false;
+    }
+    if (!*timing) {
+        *timing = true;
+        *since_ms = now_ms;
+    }
+    return (uint32_t)(now_ms - *since_ms) >= hold_ms;
+}
+
 bms_charge_heard_t bms_charge_listen(bms_charge_t *c, uint32_t now_ms, const mailbox_t *charger,
                                      bms_charge_events_t *events)
 {
@@ -79,17 +93,10 @@ bms_charge_heard_t bms_charge_listen(bms_charge_t *c, uint32_t now_ms, const mai
 
     const bool over =
         (uint32_t)s.output_current > (uint32_t)asked_da(c, now_ms) + BMS_CHARGE_DISOBEY_MARGIN_DA;
-    if (over && !c->over) {
-        c->over_since_ms = now_ms;
-    }
-    c->over = over;
-
-    bms_charge_obey_t obey = BMS_CHARGE_OBEYS;
-    if (over) {
-        obey = ((uint32_t)(now_ms - c->over_since_ms) >= BMS_CHARGE_DISOBEY_MS)
-                   ? BMS_CHARGE_DISOBEYS
-                   : BMS_CHARGE_OVER;
-    }
+    const bool disobeys =
+        held(over, &c->over, &c->over_since_ms, now_ms, BMS_CHARGE_DISOBEY_MS);
+    const bms_charge_obey_t obey =
+        disobeys ? BMS_CHARGE_DISOBEYS : (over ? BMS_CHARGE_OVER : BMS_CHARGE_OBEYS);
     return (bms_charge_heard_t){
         .charge_mode = c->charge_mode,
         .obey = obey,
@@ -162,22 +169,8 @@ static void change(bms_charge_t *c, bms_charge_state_t to, bms_charge_cause_t ca
     }
 }
 
-/* Whether cond has held, without a break, for hold_ms. */
-static bool held(bool cond, bool *timing, uint32_t *since_ms, uint32_t now_ms, uint32_t hold_ms)
-{
-    if (!cond) {
-        *timing = false;
-        return false;
-    }
-    if (!*timing) {
-        *timing = true;
-        *since_ms = now_ms;
-    }
-    return (uint32_t)(now_ms - *since_ms) >= hold_ms;
-}
-
 /* Why a charge cannot go on, or BMS_CHARGE_CAUSE_NONE. */
-static bms_charge_cause_t blocked(const bms_charge_t *c, const bms_charge_in_t *in)
+static bms_charge_cause_t stop_cause(const bms_charge_t *c, const bms_charge_in_t *in)
 {
     if (!c->heard) {
         return BMS_CHARGE_CAUSE_SILENT;
@@ -212,14 +205,14 @@ uint16_t bms_charge_step(bms_charge_t *c, const bms_charge_in_t *in, bms_charge_
 
     switch (c->state) {
     case BMS_CHARGE_WAITING: {
-        const bool ready = blocked(c, in) == BMS_CHARGE_CAUSE_NONE && limit > 0u;
+        const bool ready = stop_cause(c, in) == BMS_CHARGE_CAUSE_NONE && limit > 0u;
         if (held(ready, &c->starting, &c->start_since_ms, in->now_ms, BMS_CHARGE_START_MS)) {
             change(c, BMS_CHARGE_CHARGING, BMS_CHARGE_CAUSE_NONE, in, limit, events);
         }
         break;
     }
     case BMS_CHARGE_CHARGING: {
-        const bms_charge_cause_t cause = blocked(c, in);
+        const bms_charge_cause_t cause = stop_cause(c, in);
         const bool atTarget = p->cells != 0u && p->max_mv >= k->target_mv;
         if (cause != BMS_CHARGE_CAUSE_NONE) {
             change(c, BMS_CHARGE_WAITING, cause, in, limit, events);
