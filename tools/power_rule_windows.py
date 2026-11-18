@@ -22,7 +22,9 @@ window inside the trace (none before 500 ms of data).
     python tools/power_rule_windows.py log.csv [--time-column time_ms]
         [--power-column pack_power_w] [--limit 80000]
 
-prints each Violation and exits 1 if there is one, 0 if there is none.
+prints each Violation and exits 1 if there is one, 0 if there is none, and
+2 if the file holds no power reading at all (nothing was judged: a log
+from a car without its Energy Meter is not a pass).
 Python 3.10 or later, standard library only.
 """
 from __future__ import annotations
@@ -135,6 +137,7 @@ def read_stretches(path, time_column="time_ms", power_column="pack_power_w"):
     stretches, current = [], []
     unknown = 0.0
     gap_from = None
+    t = 0.0
     with open(path, newline="") as f:
         for row in csv.DictReader(f):
             t = float(row[time_column])
@@ -153,6 +156,8 @@ def read_stretches(path, time_column="time_ms", power_column="pack_power_w"):
             current.append((t, float(cell)))
     if current:
         stretches.append(current)
+    if gap_from is not None:
+        unknown += t - gap_from  # a gap that runs to the end of the file
     return stretches, unknown
 
 
@@ -172,8 +177,11 @@ def main(argv=None) -> int:
     ap.add_argument("--limit", type=float, default=LIMIT_W, help="watts")
     args = ap.parse_args(argv)
 
-    found = violations_in_csv(args.csv, args.time_column, args.power_column, args.limit)
-    _, unknown = read_stretches(args.csv, args.time_column, args.power_column)
+    stretches, unknown = read_stretches(args.csv, args.time_column, args.power_column)
+    if not stretches:
+        print(f"{args.csv}: no power reading at all: nothing judged")
+        return 2
+    found = [v for st in stretches for v in violations(st, args.limit)]
     for v in found:
         print(f"{args.csv}: {v}")
     if unknown > 0:

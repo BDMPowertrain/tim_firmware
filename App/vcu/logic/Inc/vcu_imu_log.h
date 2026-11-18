@@ -16,6 +16,11 @@
  * is the read's delay after the newest sample in the FIFO, within one
  * period.
  *
+ * No Record is dated before the last Record of the read before: a backlog
+ * that would date further back than that (the clock stopped while the
+ * sensor ran, as in a debugger halt, or the FIFO overflowed and dropped
+ * its oldest) is held at that time, so the dates never run backwards.
+ *
  * This is logic (ADR 0002): no HAL, no RTOS, no clock.
  */
 #ifndef VCU_IMU_LOG_H
@@ -55,6 +60,8 @@ typedef struct {
     data_log_imu_t pending;
     bool           have_accel;
     bool           have_gyro;
+    bool           dated;   /* a Record has been dated */
+    uint32_t       last_ms; /* the last Record's date */
 } vcu_imu_pairer_t;
 
 void vcu_imu_pairer_init(vcu_imu_pairer_t *p);

@@ -100,6 +100,21 @@ static void test_entries_left_in_the_fifo_date_this_read_further_back(void)
     TEST_ASSERT_EQUAL_UINT32(981u, pairs[0].uptime_ms);
 }
 
+static void test_no_record_is_dated_before_the_read_before_it(void)
+{
+    const vcu_imu_entry_t one[2] = {accel(1), gyro(2)};
+    const vcu_imu_entry_t two[4] = {accel(3), gyro(4), accel(5), gyro(6)};
+
+    TEST_ASSERT_EQUAL_size_t(1u, vcu_imu_pair(&p, one, 2u, 0u, 1000u, pairs));
+    /* Seen after a debugger halt (issue 61, bench file B00035): the clock
+       stopped, the sensor did not, and 40 entries were left in the FIFO.
+       Dated back by them alone, this read would land 200 ms before the
+       last one; it is held at the last read's time instead. */
+    TEST_ASSERT_EQUAL_size_t(2u, vcu_imu_pair(&p, two, 4u, 40u, 1010u, pairs));
+    TEST_ASSERT_EQUAL_UINT32(1000u, pairs[0].uptime_ms);
+    TEST_ASSERT_EQUAL_UINT32(1000u, pairs[1].uptime_ms);
+}
+
 int main(void)
 {
     UNITY_BEGIN();
@@ -110,5 +125,6 @@ int main(void)
     RUN_TEST(test_entries_of_another_sensor_are_ignored);
     RUN_TEST(test_a_full_fifo_fits_the_pairs_array);
     RUN_TEST(test_entries_left_in_the_fifo_date_this_read_further_back);
+    RUN_TEST(test_no_record_is_dated_before_the_read_before_it);
     return UNITY_END();
 }
