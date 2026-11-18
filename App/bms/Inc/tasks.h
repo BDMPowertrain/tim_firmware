@@ -52,8 +52,9 @@
 #define DATA_LOG_TASK_STACK_SIZE  2048u
 
 /* The Control step (ADR 0010): the one Realtime task, every 20 ms. It
-   takes no mutex and blocks only on its own period (and, once the Sweep
-   exists, its own cell-monitor exchange). Measure with `tasks`. */
+   takes no mutex and blocks only on its own period and its own
+   cell-monitor exchange (cell_monitor.h). Its plan and response buffers
+   are static, not on this stack. Measure with `tasks`. */
 #define CONTROL_STEP_TASK_PRIORITY   osPriorityRealtime
 #define CONTROL_STEP_TASK_STACK_SIZE 1024u
 

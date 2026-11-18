@@ -37,6 +37,7 @@
 #include "cycle_counter.h"
 #include "main.h"
 #include "sd_proto.h"
+#include "spi_dma.h"
 
 _Static_assert(SD_SPI_SECTOR_SIZE == SD_PROTO_BLOCK_SIZE, "one sector is one card block");
 
@@ -176,11 +177,18 @@ static void use_fast_clock(void)
 
 /* ---- DMA blocks -------------------------------------------------------- */
 
-/* The HAL's weak callbacks; SPI2 is the only SPI using DMA. A later DMA
-   user on another SPI must share these, by its instance. */
+/* The HAL's weak callbacks, for every SPI: SPI2's are the SD card's, any
+   other SPI's go on to spi_dma_other_done() (spi_dma.h). */
+__attribute__((weak)) void spi_dma_other_done(SPI_HandleTypeDef *hspi, bool failed)
+{
+    (void)hspi;
+    (void)failed;
+}
+
 static void dma_finished(SPI_HandleTypeDef *hspi, bool failed)
 {
     if (hspi->Instance != SPI2) {
+        spi_dma_other_done(hspi, failed);
         return;
     }
     dmaFailed = failed;
