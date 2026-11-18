@@ -9,4 +9,9 @@ add_logic_library(logic_bms
         Src/bms_daq.c
         Src/bms_params.c
         Src/bms_tx.c
+        Src/bq_chain.c
+        Src/bq_frame.c
+        Src/bq_sweep.c
+        Src/cell_temp.c
+        Src/cell_temp_table.c
 )
