@@ -102,6 +102,7 @@ void control_step_task(void *argument)
 
         ctx.now_ms = osKernelGetTickCount();
         ctx.timing_fault = timingFault;
+        ctx.open_wire_ran = false;
         const uint32_t stepStart = cycle_counter_read();
         uint32_t phaseStart = stepStart;
 
@@ -156,7 +157,8 @@ void control_step_task(void *argument)
 
         timingFault = false;
         if (sched.last_overran) {
-            const overrun_event_t overrun = overrun_event_make(stepUs, phaseUs, phaseCount);
+            const overrun_event_t overrun = overrun_event_make(stepUs, phaseUs, phaseCount,
+                                                               ctx.open_wire_ran);
             uint8_t data[EVENT_DATA_SIZE];
 
             event_data_overrun(data, &overrun);

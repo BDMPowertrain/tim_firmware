@@ -112,7 +112,8 @@ void event_data_param_out_of_range(uint8_t data[EVENT_DATA_SIZE], uint16_t id, i
 /* 0 params_save_result_t (u8), 4 save counter (u32). */
 void event_data_param_save(uint8_t data[EVENT_DATA_SIZE], uint8_t result, uint32_t counter);
 
-/* 0 step (us, u32), 4 slowest phase (us, u32), 8 slowest phase index (u8). */
+/* 0 step (us, u32), 4 slowest phase (us, u32), 8 slowest phase index (u8),
+   9 the open-wire check ran in the step (u8, 0 or 1). */
 void event_data_overrun(uint8_t data[EVENT_DATA_SIZE], const overrun_event_t *overrun);
 
 typedef struct {
@@ -187,8 +188,22 @@ void event_data_discharge_slow(uint8_t data[EVENT_DATA_SIZE], int16_t bus_dv, ui
 
 /* Where a BMS fault was seen (byte 2 of an EVENT_BMS_FAULT Event). */
 #define EVENT_BMS_NOWHERE 0u /* no one cell or sensor: the chain brought back nothing */
-#define EVENT_BMS_CELL    1u /* a cell voltage */
+#define EVENT_BMS_CELL    1u /* a cell voltage; for the open-wire check, a cell
+                                under its threshold (reading 0) */
 #define EVENT_BMS_SENSOR  2u /* a cell temperature sensor */
+/* Issue 64. Index 0 unless said; the reading is not in millivolts. */
+#define EVENT_BMS_DEVICE       3u /* a stack device (index 1 to 16) that did
+                                     not finish the open-wire check */
+#define EVENT_BMS_NFAULT       4u /* NFAULT low; reading: the bridge's
+                                     FAULT_SUMMARY, 0 if not read */
+#define EVENT_BMS_BRIDGE       5u /* a device reported a fault; reading: the
+                                     bridge's FAULT_SUMMARY */
+#define EVENT_BMS_FEEDBACK     6u /* the BMS_OK read-back wrong; reading: bit 0
+                                     read-back, bit 1 commanded, bit 2 NFAULT */
+#define EVENT_BMS_NFAULT_CHECK 7u /* NFAULT and the bridge's FAULT_SUMMARY
+                                     disagree; reading: FAULT_SUMMARY */
+#define EVENT_BMS_SDC_SENSE    8u /* BMS_OK low with the Shutdown Circuit sense
+                                     energised; reading: ms BMS_OK was low */
 
 typedef struct {
     uint8_t  fault;        /* bms_fault_t (bms_control.h) */
@@ -196,7 +211,8 @@ typedef struct {
     uint8_t  where;        /* EVENT_BMS_... */
     uint16_t index;        /* 1 to 128: cell or sensor ((index - 1) % 8) + 1 of
                               device ((index - 1) / 8) + 1; 0 for nowhere */
-    uint16_t reading_mv;   /* its reading in the Sweep that raised it */
+    uint16_t reading_mv;   /* its reading in the Sweep that raised it (mV for
+                              a cell or sensor; see EVENT_BMS_... otherwise) */
     uint16_t devices_read; /* that Sweep's: bit d - 1 set, device d read */
 } event_bms_fault_t;
 

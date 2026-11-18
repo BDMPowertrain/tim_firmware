@@ -89,7 +89,7 @@ static void test_the_event_names_the_slowest_phase_and_its_time(void)
 {
     const uint32_t phases[3] = {900u, 11500u, 40u};
 
-    const overrun_event_t e = overrun_event_make(12440u, phases, 3u);
+    const overrun_event_t e = overrun_event_make(12440u, phases, 3u, false);
 
     TEST_ASSERT_EQUAL_UINT32(12440u, e.step_us);
     TEST_ASSERT_EQUAL_UINT8(1u, e.slowest_phase);
@@ -100,7 +100,7 @@ static void test_the_first_of_equal_phases_is_the_slowest(void)
 {
     const uint32_t phases[4] = {10u, 700u, 700u, 5u};
 
-    const overrun_event_t e = overrun_event_make(1415u, phases, 4u);
+    const overrun_event_t e = overrun_event_make(1415u, phases, 4u, false);
 
     TEST_ASSERT_EQUAL_UINT8(1u, e.slowest_phase);
     TEST_ASSERT_EQUAL_UINT32(700u, e.slowest_phase_us);
@@ -110,10 +110,21 @@ static void test_the_last_phase_can_be_the_slowest(void)
 {
     const uint32_t phases[2] = {3u, 25000u};
 
-    const overrun_event_t e = overrun_event_make(25003u, phases, 2u);
+    const overrun_event_t e = overrun_event_make(25003u, phases, 2u, false);
 
     TEST_ASSERT_EQUAL_UINT8(1u, e.slowest_phase);
     TEST_ASSERT_EQUAL_UINT32(25000u, e.slowest_phase_us);
+    TEST_ASSERT_FALSE(e.open_wire);
+}
+
+/* Spec #36: "An overrun Event carries ... whether the open-wire check
+   ran" (issue 64). */
+static void test_the_event_says_whether_the_open_wire_check_ran(void)
+{
+    const uint32_t phases[2] = {7600u, 12600u};
+
+    TEST_ASSERT_TRUE(overrun_event_make(20200u, phases, 2u, true).open_wire);
+    TEST_ASSERT_FALSE(overrun_event_make(20200u, phases, 2u, false).open_wire);
 }
 
 int main(void)
@@ -128,5 +139,6 @@ int main(void)
     RUN_TEST(test_the_event_names_the_slowest_phase_and_its_time);
     RUN_TEST(test_the_first_of_equal_phases_is_the_slowest);
     RUN_TEST(test_the_last_phase_can_be_the_slowest);
+    RUN_TEST(test_the_event_says_whether_the_open_wire_check_ran);
     return UNITY_END();
 }

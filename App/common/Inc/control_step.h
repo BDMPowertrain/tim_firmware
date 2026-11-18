@@ -51,6 +51,10 @@ typedef struct {
        (overrun_watch.h). True for this one step; the image's logic decides
        what to latch: a BMS fault on the BMS, a Torque cut on the VCU. */
     bool     timing_fault;
+    /* Cleared before the first phase; a phase sets it when the BMS's
+       open-wire check ran in this step, for the overrun Event (spec #36).
+       The VCU never sets it. */
+    bool     open_wire_ran;
     uint8_t  state;
     /* Any fault is active: the heartbeat LED blinks at 5 Hz (heartbeat.h). */
     bool     fault_active;
