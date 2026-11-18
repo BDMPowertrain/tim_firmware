@@ -211,6 +211,61 @@ static void test_the_data_log_card_event(void)
     TEST_ASSERT_EQUAL_HEX8_ARRAY(want, data, EVENT_DATA_SIZE);
 }
 
+/* Issue 67: a charge state change, with the highest and lowest cell and
+   the Charge limit at the time. */
+static void test_the_charge_event(void)
+{
+    const event_charge_t charge = {
+        .from = 1u, .to = 2u, .cause = 0u,
+        .cells = { .highest_mv = 0x1004u, .highest = 0x0080u, .lowest_mv = 0x0F05u, .lowest = 1u },
+        .limit_da = 0x0102u,
+    };
+    const uint8_t want[EVENT_DATA_SIZE] = {
+        1, 2, 0, 0, 0x04, 0x10, 0x80, 0x00, 0x05, 0x0F, 0x01, 0x00, 0x02, 0x01, 0, 0,
+    };
+    uint8_t data[EVENT_DATA_SIZE];
+
+    memset(data, 0xAA, sizeof data);
+    event_data_charge(data, &charge);
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(want, data, EVENT_DATA_SIZE);
+    TEST_ASSERT_EQUAL_STRING("charge", event_code_name(EVENT_CHARGE));
+}
+
+/* Issue 67, ADR 0019: the rested cells after Charge complete. */
+static void test_the_charge_rested_event(void)
+{
+    const event_charge_cells_t cells = {
+        .highest_mv = 0x1004u, .highest = 0x0080u, .lowest_mv = 0x0F05u, .lowest = 1u,
+    };
+    const uint8_t want[EVENT_DATA_SIZE] = {
+        0x04, 0x10, 0x80, 0x00, 0x05, 0x0F, 0x01, 0x00, 0x60, 0xEA, 0x00, 0x00, 0, 0, 0, 0,
+    };
+    uint8_t data[EVENT_DATA_SIZE];
+
+    memset(data, 0xAA, sizeof data);
+    event_data_charge_rested(data, &cells, 60000u);
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(want, data, EVENT_DATA_SIZE);
+    TEST_ASSERT_EQUAL_STRING("charge rested cells", event_code_name(EVENT_CHARGE_RESTED));
+}
+
+/* Issue 67: the charger's status flags changed. */
+static void test_the_charger_flags_event(void)
+{
+    const event_charger_flags_t f = {
+        .from = 0x02u, .to = 0x1Bu, .charge_state = 3u,
+        .output_dv = 0x1314u, .output_da = 0x0015u,
+    };
+    const uint8_t want[EVENT_DATA_SIZE] = {
+        0x02, 0x1B, 3, 0, 0x14, 0x13, 0x15, 0x00, 0, 0, 0, 0, 0, 0, 0, 0,
+    };
+    uint8_t data[EVENT_DATA_SIZE];
+
+    memset(data, 0xAA, sizeof data);
+    event_data_charger_flags(data, &f);
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(want, data, EVENT_DATA_SIZE);
+    TEST_ASSERT_EQUAL_STRING("charger flags", event_code_name(EVENT_CHARGER_FLAGS));
+}
+
 static void test_names(void)
 {
     TEST_ASSERT_EQUAL_STRING("data log card", event_code_name(EVENT_DATA_LOG_CARD));
@@ -240,6 +295,9 @@ int main(void)
     RUN_TEST(test_the_energy_meter_violation_event);
     RUN_TEST(test_the_bms_fault_event);
     RUN_TEST(test_the_data_log_card_event);
+    RUN_TEST(test_the_charge_event);
+    RUN_TEST(test_the_charge_rested_event);
+    RUN_TEST(test_the_charger_flags_event);
     RUN_TEST(test_names);
     return UNITY_END();
 }

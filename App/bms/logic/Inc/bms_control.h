@@ -15,7 +15,9 @@
  *               fault. A start-up that is blocked (a task or queue
  *               missing) never leaves STARTUP.
  *   DRIVE       BMS_OK high. To FAULT on any BMS fault.
- *   CHARGE      as DRIVE, in Charge mode (in.charge_mode, #67).
+ *   CHARGE      as DRIVE, in Charge mode: from the first good charger
+ *               status frame until a power cycle (bms_charge.h). A silent
+ *               charger does not end it.
  *   FAULT       BMS_OK low. Ends by itself after BMS_RECOVER_SWEEPS clean
  *               Sweeps in a row (1 s) with no fault active and the last
  *               open-wire check passed: every value has been in range for
@@ -78,7 +80,10 @@
  *                      within one second (overrun_watch.h), raised on the
  *                      step after the third. The Overrun Events say which
  *                      steps ran long and in which phase.
- * Charger disobeys is #67; overcurrent is reserved and never set.
+ *   charger disobeys   the charger's reported current over its request
+ *                      for 5 s (bms_charge.h), raised on the step that
+ *                      makes it 5 s; clean while within it (issue 67).
+ * Overcurrent is reserved and never set.
  *
  * The minimum cell under the Low-voltage limit (the voltage taper's 100%
  * point, a parameter; bms_derate.h) at the latest Sweep is a BMS_Status
@@ -86,8 +91,9 @@
  *
  * Derating (issue 66, ADR 0018): the Discharge limit, from the lowest cell
  * and the hottest sensor of each Sweep and the pack current, by
- * bms_derate.h, and 0 A while BMS_OK is low. The charge limit is 0 A out
- * of Charge mode (#67 adds the rest). A step with no Sweep, or a Sweep
+ * bms_derate.h, and 0 A while BMS_OK is low. The Charge limit and the
+ * charge itself are bms_charge.h's (issue 67): 0 A out of Charge mode. A
+ * step with no Sweep, or a Sweep
  * with no valid cell or no valid sensor, holds the limit: the measurement
  * fault takes BMS_OK, and so the limit, to zero within 150 ms.
  *
@@ -97,9 +103,11 @@
  * validly; pack voltage is the sum of the cells read. Pack current goes as
  * 0 A while it is invalid (issue 29 decides how to mark it).
  *
- * The BMS makes no decision from any received frame (spec #36, user story
- * 26): the Control bus only fills BMS_Status bits, and a bus failure never
- * takes BMS_OK low (ADR 0005).
+ * The BMS makes no decision from any received frame except the charger's
+ * presence (spec #36, user story 26): the Control bus only fills
+ * BMS_Status bits, and a bus failure never takes BMS_OK low (ADR 0005).
+ * The charger's status frame starts Charge mode and is judged for charger
+ * disobeys; a silent charger only pauses a charge.
  *
  * Time is a 32-bit millisecond count compared only by subtraction.
  *
@@ -112,6 +120,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "bms_charge.h"
 #include "bms_derate.h"
 #include "bms_tx.h"
 #include "bq_chain.h"
@@ -119,6 +128,7 @@
 #include "can_control.h"
 #include "e2e_p11.h"
 #include "event_log.h"
+#include "mailbox.h"
 #include "reset_cause.h"
 
 #define BMS_STATE_STARTUP    CAN_CONTROL_BMS_STATUS_STATE_STARTUP_CHOICE
@@ -173,6 +183,7 @@ typedef struct {
     bool not_dual_bank;
     bool last_reset_not_power_on;
     bms_derate_config_t derate;   /* from the BMS parameters */
+    bms_charge_config_t charge;   /* from the BMS parameters */
 } bms_control_config_t;
 
 
@@ -183,7 +194,7 @@ typedef struct {
     bool              can_running; /* CAN1 started: only the heartbeat shows it */
     bool              swept;       /* this step took a Sweep */
     const bq_sweep_t *sweep;       /* it, when swept */
-    bool              charge_mode; /* Charge mode (#67) */
+    const mailbox_t  *charger;     /* CHG_Status's, after this step's update */
     bool              sdc_closed;  /* the Shutdown Circuit sense reads energised */
     bool              nfault_ok;   /* FB.NFAULT reads high: no fault */
     bool              bms_ok_fb;   /* FB.BMS_OK reads high */
@@ -202,8 +213,8 @@ typedef struct {
     uint8_t  data[EVENT_DATA_SIZE];
 } bms_event_t;
 
-/* One per fault, all raised in one step at most. */
-#define BMS_CONTROL_EVENTS_MAX ((size_t)BMS_FAULT_COUNT)
+/* One per fault, all raised in one step at most, and charge control's. */
+#define BMS_CONTROL_EVENTS_MAX ((size_t)BMS_FAULT_COUNT + BMS_CHARGE_EVENTS_MAX)
 
 typedef struct {
     uint8_t  state;
@@ -222,6 +233,8 @@ typedef struct {
     bms_tx_frame_t frames[BMS_TX_FRAMES_MAX];
 
     uint16_t discharge_limit_da; /* the Discharge limit sent, 0.1 A */
+    uint16_t charge_limit_da;    /* the Charge limit sent, 0.1 A */
+    bms_charge_state_t charge;   /* the charge (bms_charge.h) */
     bms_pack_summary_t summary;  /* the last Sweep's, for the snapshot */
 
     size_t      event_count;
@@ -241,6 +254,7 @@ typedef struct {
     uint16_t     seen;
     bms_tx_e2e_t e2e;
     bms_derate_t derate;
+    bms_charge_t charge;
     bms_pack_summary_t summary;    /* the last Sweep's */
     /* The self-checks. */
     bool         commanded;        /* BMS_OK as last written; low from reset */

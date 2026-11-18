@@ -7,7 +7,9 @@
  * points, the cell resistance and the full discharge limit are Derating
  * points (ADR 0018, bms_derate.h), each bounded so no setting puts a
  * taper's end past its fault threshold and every full point stays clear of
- * its floor. The charge taper points join with charge control (#67).
+ * its floor. The charge taper points (issue 67, ADR 0019; bms_charge.h)
+ * are bounded the same way: no taper's zero past its fault threshold, no
+ * full point meeting its zero.
  *
  * This is logic (ADR 0002): no HAL, no RTOS, no clock.
  */
@@ -32,6 +34,12 @@ typedef enum {
                                     at most BMS_DERATE_SAG_MAX_MV back at the
                                     largest full discharge limit */
     BMS_PARAM_FULL_DISCHARGE_LIMIT, /* 0.1 A: the Discharge limit at 100% */
+    BMS_PARAM_CHARGE_V_BAND,     /* mV: the voltage taper starts this far
+                                    under the Charge target */
+    BMS_PARAM_CHARGE_T_HOT_FULL, /* 0.1 C: the hot taper's 100% point */
+    BMS_PARAM_CHARGE_T_HOT_ZERO, /* 0.1 C: its zero */
+    BMS_PARAM_CHARGE_T_COLD_FULL, /* 0.1 C: the cold taper's 100% point */
+    BMS_PARAM_CHARGE_T_COLD_ZERO, /* 0.1 C: its zero */
     BMS_PARAM_COUNT
 } bms_param_t;
 

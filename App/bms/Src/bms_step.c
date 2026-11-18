@@ -5,6 +5,7 @@
 #include <stddef.h>
 #include <string.h>
 
+#include "bms_charge.h"
 #include "bms_control.h"
 #include "bms_params.h"
 #include "bus_term.h"
@@ -35,10 +36,11 @@ _Static_assert(BMS_STEP_PERIOD_MS > BUS_TERM_SETTLE_MS,
 
 /* The BMS makes no decision from a received frame except the charger's
    presence (spec, user story 26), so this is its only mailbox: one exact-
-   match extended filter. */
+   match extended filter. It is row CHARGER_ROW. */
 static const control_bus_rx_t bmsRx[] = {
     { CONTROL_RX_CHG_STATUS, CONTROL_BUS_FIFO0 },
 };
+#define CHARGER_ROW 0u
 
 /* Owned by the step; nothing else touches them. Static, not on the step's
    stack: the output holds the Events. */
@@ -83,6 +85,16 @@ bool bms_step_init(void)
             .t_floor_dc = (int16_t)parameters_value(BMS_PARAM_DISCHARGE_T_FLOOR),
             .cell_res_uohm = (uint16_t)parameters_value(BMS_PARAM_CELL_RESISTANCE),
             .full_limit_da = (uint16_t)parameters_value(BMS_PARAM_FULL_DISCHARGE_LIMIT),
+        },
+        /* Charge control (ADR 0019): each bounded by bms_params.c. */
+        .charge = {
+            .target_mv = (uint16_t)parameters_value(BMS_PARAM_CHARGE_TARGET),
+            .full_limit_da = (uint16_t)parameters_value(BMS_PARAM_FULL_CHARGE_LIMIT),
+            .v_band_mv = (uint16_t)parameters_value(BMS_PARAM_CHARGE_V_BAND),
+            .hot_full_dc = (int16_t)parameters_value(BMS_PARAM_CHARGE_T_HOT_FULL),
+            .hot_zero_dc = (int16_t)parameters_value(BMS_PARAM_CHARGE_T_HOT_ZERO),
+            .cold_full_dc = (int16_t)parameters_value(BMS_PARAM_CHARGE_T_COLD_FULL),
+            .cold_zero_dc = (int16_t)parameters_value(BMS_PARAM_CHARGE_T_COLD_ZERO),
         },
     };
     bms_control_init(&control, &config);
@@ -132,7 +144,8 @@ static void phase_input(control_step_ctx_t *ctx)
     }
     /* Bus-off never stops this step or touches BMS_OK (ADR 0005): sends
        are skipped until the restart and the Sweep carries on. The latch
-       needs no mailbox to clear, since the charger is absent in the car. */
+       needs no mailbox to clear, since the charger is absent in the car. The
+       charger's mailbox is updated here, and charge control reads it. */
     control_bus_update(ctx->now_ms, true);
 
     const control_bus_health_t bus = control_bus_health();
@@ -143,7 +156,9 @@ static void phase_input(control_step_ctx_t *ctx)
     in.can_running = canStarted;
     in.swept = swept;
     in.sweep = &pack.sweep;
-    in.charge_mode = false; /* #67 */
+    /* Charge mode and the charger (bms_charge.h); the CHG_MODE pin is not
+       read (ADR 0009). */
+    in.charger = control_bus_mailbox(CHARGER_ROW);
     /* Active low, like the VCU's SDC_MON_N (issue 19: SDC_OK_N taps the
        end of the shutdown loop). The feedback inputs are read once per
        step, with no debounce (issue 19): FB.NFAULT follows the bridge's
@@ -198,6 +213,9 @@ static void phase_output(control_step_ctx_t *ctx)
     pack.faults_seen = out.seen;
     pack.under_low_voltage_limit = out.under_low_voltage_limit;
     pack.discharge_limit_da = out.discharge_limit_da;
+    pack.charge_limit_da = out.charge_limit_da;
+    pack.charge = out.charge;
+    pack.charger_heard = in.charger->state == MAILBOX_VALID;
     pack.pack_current = in.pack_current;
     pack.summary = out.summary;
     pack.nfault_ok = in.nfault_ok;

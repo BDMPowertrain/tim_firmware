@@ -53,6 +53,40 @@ static void test_a_startup_bms_status_says_startup_bms_ok_low_and_passes_its_e2e
     }
 }
 
+/* Issue 67: the charger request takes the 0x202 slot (step 1 of the five)
+   on one step in fifty: step 1 of each second. */
+static void test_the_charger_request_is_due_in_the_0x202_slot_once_in_fifty_steps(void)
+{
+    unsigned due = 0u;
+    for (uint32_t n = 0u; n < 500u; n++) {
+        if (bms_tx_charger_request_due(n)) {
+            due++;
+            TEST_ASSERT_EQUAL_UINT32(1u, n % 50u);
+            TEST_ASSERT_EQUAL(BMS_TX_SLOW_INVERTER_LIMITS, bms_tx_slow_due(n));
+        }
+    }
+    TEST_ASSERT_EQUAL_UINT(10u, due);
+}
+
+/* Elcon CAN Specification p.2, Message 1: 29-bit 0x1806E5F4, big-endian;
+   BYTE1-2 voltage 0.1 V, BYTE3-4 current 0.1 A, BYTE5 control. */
+static void test_the_charger_request_is_the_elcon_message_1_layout(void)
+{
+    const struct can_control_chg_request_t r = {
+        .max_charge_voltage = 5248u, /* 524.8 V */
+        .max_charge_current = 20u,   /* 2.0 A */
+        .control = 0u,
+    };
+    const uint8_t want[8] = { 0x14, 0x80, 0x00, 0x14, 0x00, 0, 0, 0 };
+    bms_tx_frame_t f;
+
+    bms_tx_build_charger_request(&r, &f);
+    TEST_ASSERT_EQUAL_HEX32(0x1806E5F4u, f.id);
+    TEST_ASSERT_TRUE(f.extended);
+    TEST_ASSERT_EQUAL_UINT8(8u, f.len);
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(want, f.data, 8u);
+}
+
 static unsigned due_on(uint32_t n)
 {
     return (bms_tx_status_due(n) ? 1u : 0u) + (bms_tx_power_due(n) ? 1u : 0u) +
@@ -126,6 +160,8 @@ static void test_the_energy_meter_temperatures_go_every_100_ms(void)
 int main(void)
 {
     UNITY_BEGIN();
+    RUN_TEST(test_the_charger_request_is_due_in_the_0x202_slot_once_in_fifty_steps);
+    RUN_TEST(test_the_charger_request_is_the_elcon_message_1_layout);
     RUN_TEST(test_bms_status_is_due_on_every_step);
     RUN_TEST(test_a_startup_bms_status_says_startup_bms_ok_low_and_passes_its_e2e_check);
     RUN_TEST(test_bms_power_is_due_on_every_step);

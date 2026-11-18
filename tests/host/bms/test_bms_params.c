@@ -124,6 +124,55 @@ static void test_the_discharge_parameters_are_found_by_their_names(void)
     TEST_ASSERT_EQUAL(BMS_PARAM_FULL_DISCHARGE_LIMIT, params_find(&p, "full_discharge_limit"));
 }
 
+/* Issue 67, ADR 0019: the charge taper points, unset at the spec's 50 mV
+   under the Charge target, 50 to 55 C and 10 to 5 C. */
+static void test_the_charge_tapers_default_to_the_spec(void)
+{
+    TEST_ASSERT_EQUAL_INT32(50, params_value(&p, BMS_PARAM_CHARGE_V_BAND));
+    TEST_ASSERT_EQUAL_INT32(500, params_value(&p, BMS_PARAM_CHARGE_T_HOT_FULL));
+    TEST_ASSERT_EQUAL_INT32(550, params_value(&p, BMS_PARAM_CHARGE_T_HOT_ZERO));
+    TEST_ASSERT_EQUAL_INT32(100, params_value(&p, BMS_PARAM_CHARGE_T_COLD_FULL));
+    TEST_ASSERT_EQUAL_INT32(50, params_value(&p, BMS_PARAM_CHARGE_T_COLD_ZERO));
+}
+
+/* No setting puts a charge taper's zero past its fault threshold: the hot
+   zero under the over-temperature fault (58 C), the cold zero above the
+   Charge-mode under-temperature fault (2 C). The Charge target's own
+   bound keeps the voltage taper's zero under over-voltage. */
+static void test_no_setting_puts_a_charge_tapers_zero_past_its_fault_threshold(void)
+{
+    int16_t otDeciC = 0;
+    int16_t utDeciC = 0;
+    TEST_ASSERT_TRUE(cell_temp_from_mv(BMS_OT_MV, &otDeciC));
+    TEST_ASSERT_TRUE(cell_temp_from_mv(BMS_UT_MV, &utDeciC));
+
+    TEST_ASSERT_LESS_THAN_INT32(otDeciC, def(BMS_PARAM_CHARGE_T_HOT_ZERO)->max);
+    TEST_ASSERT_GREATER_THAN_INT32(utDeciC, def(BMS_PARAM_CHARGE_T_COLD_ZERO)->min);
+    TEST_ASSERT_LESS_THAN_INT32((int32_t)BMS_OV_MV, def(BMS_PARAM_CHARGE_TARGET)->max);
+    TEST_ASSERT_EQUAL(PARAMS_SET_OUT_OF_RANGE, params_set(&p, BMS_PARAM_CHARGE_T_HOT_ZERO, otDeciC));
+    TEST_ASSERT_EQUAL(PARAMS_SET_OUT_OF_RANGE, params_set(&p, BMS_PARAM_CHARGE_T_COLD_ZERO, utDeciC));
+}
+
+/* Each charge taper's full point is clear of its zero, and the voltage
+   band is never zero wide. */
+static void test_a_charge_tapers_full_point_is_always_clear_of_its_zero(void)
+{
+    TEST_ASSERT_LESS_THAN_INT32(def(BMS_PARAM_CHARGE_T_HOT_ZERO)->min,
+                                def(BMS_PARAM_CHARGE_T_HOT_FULL)->max);
+    TEST_ASSERT_GREATER_THAN_INT32(def(BMS_PARAM_CHARGE_T_COLD_ZERO)->max,
+                                   def(BMS_PARAM_CHARGE_T_COLD_FULL)->min);
+    TEST_ASSERT_GREATER_THAN_INT32(0, def(BMS_PARAM_CHARGE_V_BAND)->min);
+}
+
+static void test_the_charge_parameters_are_found_by_their_names(void)
+{
+    TEST_ASSERT_EQUAL(BMS_PARAM_CHARGE_V_BAND, params_find(&p, "charge_v_band"));
+    TEST_ASSERT_EQUAL(BMS_PARAM_CHARGE_T_HOT_FULL, params_find(&p, "charge_t_hot_full"));
+    TEST_ASSERT_EQUAL(BMS_PARAM_CHARGE_T_HOT_ZERO, params_find(&p, "charge_t_hot_zero"));
+    TEST_ASSERT_EQUAL(BMS_PARAM_CHARGE_T_COLD_FULL, params_find(&p, "charge_t_cold_full"));
+    TEST_ASSERT_EQUAL(BMS_PARAM_CHARGE_T_COLD_ZERO, params_find(&p, "charge_t_cold_zero"));
+}
+
 int main(void)
 {
     UNITY_BEGIN();
@@ -137,5 +186,9 @@ int main(void)
     RUN_TEST(test_cell_resistance);
     RUN_TEST(test_full_discharge_limit);
     RUN_TEST(test_the_discharge_parameters_are_found_by_their_names);
+    RUN_TEST(test_the_charge_tapers_default_to_the_spec);
+    RUN_TEST(test_no_setting_puts_a_charge_tapers_zero_past_its_fault_threshold);
+    RUN_TEST(test_a_charge_tapers_full_point_is_always_clear_of_its_zero);
+    RUN_TEST(test_the_charge_parameters_are_found_by_their_names);
     return UNITY_END();
 }

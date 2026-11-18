@@ -23,6 +23,18 @@ bms_tx_slow_t bms_tx_slow_due(uint32_t step_count)
     return (bms_tx_slow_t)(step_count % (uint32_t)BMS_TX_SLOW_COUNT);
 }
 
+#define CHARGER_REQUEST_PERIOD 50u /* steps: 1 s */
+#define CHARGER_REQUEST_STEP   1u  /* a BMS_TX_SLOW_INVERTER_LIMITS step */
+_Static_assert(CHARGER_REQUEST_STEP % BMS_TX_SLOW_COUNT == BMS_TX_SLOW_INVERTER_LIMITS,
+               "the charger request takes a 0x202 slot");
+_Static_assert(CHARGER_REQUEST_PERIOD % BMS_TX_SLOW_COUNT == 0u,
+               "the charger request keeps to the 0x202 slot each second");
+
+bool bms_tx_charger_request_due(uint32_t step_count)
+{
+    return step_count % CHARGER_REQUEST_PERIOD == CHARGER_REQUEST_STEP;
+}
+
 /* The lowest and highest of a run of readings, and where they are. */
 typedef struct {
     uint16_t n;
@@ -144,6 +156,14 @@ void bms_tx_build_power(const bms_tx_values_t *v, bms_tx_e2e_t *e2e, bms_tx_fram
     uint8_t *d = start(f, CAN_CONTROL_BMS_POWER_FRAME_ID, CAN_CONTROL_BMS_POWER_LENGTH);
     (void)can_control_bms_power_pack(d, &p, f->len);
     protect(&e2e->power, f);
+}
+
+void bms_tx_build_charger_request(const struct can_control_chg_request_t *r,
+                                  bms_tx_frame_t *f)
+{
+    uint8_t *d = start(f, CAN_CONTROL_CHG_REQUEST_FRAME_ID, CAN_CONTROL_CHG_REQUEST_LENGTH);
+    f->extended = true;
+    (void)can_control_chg_request_pack(d, r, f->len);
 }
 
 void bms_tx_build_slow(bms_tx_slow_t slow, const bms_tx_values_t *v, bms_tx_e2e_t *e2e,

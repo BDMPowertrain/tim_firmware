@@ -52,6 +52,16 @@
  * - Pack voltage is the sum of the cell voltages of the same Sweep; pack
  *   current enters with a validity flag.
  * - The under-voltage fault stays on the raw loaded voltage.
+ *
+ * Issue 67 (ADR 0009, 0019): charge control through the step. The charge
+ * logic itself is test_bms_charge.c's.
+ * - Charge mode begins when the charger status frame is first heard and
+ *   lasts until a power cycle; the state is CHARGE, and a silent charger
+ *   never takes BMS_OK low.
+ * - The request (0x1806E5F4) every 1 s in CHARGE only, in the 0x202 slot
+ *   on one step in fifty; no request is ever sent outside CHARGE.
+ * - Charger disobeys is a BMS fault. No charger flag is one.
+ * - Charge complete is a BMS_Status bit.
  */
 #include <string.h>
 
@@ -62,6 +72,7 @@
 #include "cell_temp.h"
 #include "e2e_p11.h"
 #include "event_codes.h"
+#include "mailbox.h"
 #include "reset_cause.h"
 #include "unity.h"
 
@@ -75,6 +86,11 @@ static bms_control_config_t config;
 static bms_control_in_t in;
 static bms_control_out_t out;
 static bq_sweep_t sweep;
+/* The charger's mailbox as control_bus_update() left it: NODATA, no
+   charger, unless a test hears one. */
+static mailbox_t charger;
+static uint16_t chargerDa; /* its reported output current, 0.1 A */
+static uint8_t chargerFlags;
 
 /* What the open-wire check finds whenever a step runs it. */
 static bq_open_wire_t found;
@@ -82,6 +98,9 @@ static bq_open_wire_t found;
    with NFAULT unless a test holds the read-back itself. */
 static bool commanded;
 static bool holdReadBack;
+/* The Charging Shutdown Circuit closed but for BMS_OK, which is in its
+   loop: the sense reads closed only while BMS_OK is high. */
+static bool loopClosed;
 
 static void good_sweep(void)
 {
@@ -99,16 +118,26 @@ void setUp(void)
     memset(&config, 0, sizeof config);
     memset(&in, 0, sizeof in);
     memset(&out, 0, sizeof out);
+    memset(&charger, 0, sizeof charger);
+    chargerDa = 0u;
+    chargerFlags = 0u;
     good_sweep();
     found = (bq_open_wire_t){ .verdict = BQ_OPEN_WIRE_PASS, .devices_read = 0xFFFFu };
     commanded = false;
     holdReadBack = false;
+    loopClosed = false;
     in.now_ms = 1000u;
     in.startup_ok = true;
     in.can_running = true;
     in.swept = true;
     in.sweep = &sweep;
     in.nfault_ok = true;
+    in.charger = &charger;
+    /* The unset parameters: 4.10 V, 2.0 A, 50 mV, 50-55 C, 10-5 C. */
+    config.charge = (bms_charge_config_t){
+        .target_mv = 4100u, .full_limit_da = 20u, .v_band_mv = 50u,
+        .hot_full_dc = 500, .hot_zero_dc = 550, .cold_full_dc = 100, .cold_zero_dc = 50,
+    };
     /* The unset parameters: the spec's tapers, 20.0 A, no compensation. */
     config.derate = (bms_derate_config_t){
         .v_full_mv = 3000u, .v_floor_mv = 2700u, .t_full_dc = 500, .t_floor_dc = 570,
@@ -123,6 +152,18 @@ void tearDown(void) {}
    open-wire check if it is due, its result for the next step. */
 static void step(void)
 {
+    if (charger.state == MAILBOX_VALID) {
+        /* A fresh frame from the charger each step it is heard. */
+        const struct can_control_chg_status_t s = {
+            .output_voltage = 4736u,
+            .output_current = chargerDa,
+            .over_temperature = (chargerFlags >> 1) & 1u,
+        };
+        TEST_ASSERT_EQUAL_INT(8, can_control_chg_status_pack(charger.data, &s, 8u));
+    }
+    if (loopClosed) {
+        in.sdc_closed = commanded;
+    }
     if (!holdReadBack) {
         in.bms_ok_fb = commanded && in.nfault_ok;
     }
@@ -284,11 +325,18 @@ static void test_a_reading_of_1527_mv_is_not_over_temperature(void)
     TEST_ASSERT_EQUAL_UINT8(BMS_STATE_DRIVE, out.state);
 }
 
+/* The charger heard: its mailbox VALID with a good frame. */
+static void hear_charger(void)
+{
+    charger.state = MAILBOX_VALID;
+    charger.counters.good++;
+}
+
 /* Under-temperature (2 C, a reading at or above 2146 mV) is a fault in
    Charge mode only. */
 static void test_under_temperature_is_raised_on_the_25th_sweep_in_charge_mode(void)
 {
-    in.charge_mode = true;
+    hear_charger();
     steps(BMS_POWERUP_SWEEPS);
     TEST_ASSERT_EQUAL_UINT8(BMS_STATE_CHARGE, out.state);
     TEST_ASSERT_TRUE(out.bms_ok);
@@ -1259,6 +1307,236 @@ static void test_bms_limits_says_no_charge_in_drive(void)
     TEST_ASSERT_EQUAL_UINT16(4736u, lim.pack_voltage);
 }
 
+/* ---- issue 67: charge control ------------------------------------------ */
+
+#define CHG_REQUEST_ID   0x1806E5F4u
+#define CHG_PERIOD_STEPS 50u
+
+static struct can_control_chg_request_t chg_request(void)
+{
+    const bms_tx_frame_t *f = sent(CHG_REQUEST_ID);
+    TEST_ASSERT_NOT_NULL_MESSAGE(f, "no charger request on this step");
+    TEST_ASSERT_TRUE(f->extended);
+    TEST_ASSERT_EQUAL_UINT8(8u, f->len);
+    struct can_control_chg_request_t r;
+    TEST_ASSERT_EQUAL_INT(0, can_control_chg_request_unpack(&r, f->data, 8u));
+    return r;
+}
+
+/* Steps until the charger request goes, which must be within a second. */
+static struct can_control_chg_request_t step_until_request(void)
+{
+    for (unsigned i = 0; i < CHG_PERIOD_STEPS; i++) {
+        step();
+        if (sent(CHG_REQUEST_ID) != NULL) {
+            return chg_request();
+        }
+    }
+    TEST_FAIL_MESSAGE("no charger request within a second");
+    return chg_request();
+}
+
+/* On the hand cart: the charger heard and the Charging Shutdown Circuit
+   closed. */
+static void power_up_charge(void)
+{
+    hear_charger();
+    loopClosed = true;
+    steps(BMS_POWERUP_SWEEPS);
+    TEST_ASSERT_EQUAL_UINT8(BMS_STATE_CHARGE, out.state);
+}
+
+/* Past the 3 s start, to the first request that asks for current. */
+static struct can_control_chg_request_t start_charge(void)
+{
+    power_up_charge();
+    steps(BMS_CHARGE_START_MS / STEP_MS);
+    const struct can_control_chg_request_t r = step_until_request();
+    TEST_ASSERT_EQUAL_UINT8(CAN_CONTROL_CHG_REQUEST_CONTROL_START_CHOICE, r.control);
+    return r;
+}
+
+static bool any_event(uint16_t code)
+{
+    for (size_t i = 0; i < out.event_count; i++) {
+        if (out.events[i].code == code) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static void test_hearing_the_charger_is_charge_mode_until_a_power_cycle(void)
+{
+    power_up_charge();
+    TEST_ASSERT_EQUAL_UINT8(BMS_STATE_CHARGE, status().state);
+    TEST_ASSERT_TRUE(out.bms_ok);
+
+    /* The charger timeout: still CHARGE, BMS_OK high, no fault. */
+    charger.state = MAILBOX_INVALID;
+    steps(1000u);
+    TEST_ASSERT_EQUAL_UINT8(BMS_STATE_CHARGE, out.state);
+    TEST_ASSERT_TRUE(out.bms_ok);
+    TEST_ASSERT_EQUAL_HEX16(0u, out.seen);
+}
+
+/* Once a second, on step 1 of the second, in place of 0x202; the other
+   nine 0x202 slots keep it; never more than three frames a step. */
+static void test_in_charge_the_request_goes_once_a_second_in_the_0x202_slot(void)
+{
+    power_up_charge();
+    unsigned requests = 0u;
+    unsigned inverter = 0u;
+    for (unsigned i = 0; i < 3u * CHG_PERIOD_STEPS; i++) {
+        const uint32_t n = in.step_count;
+        step();
+        TEST_ASSERT_LESS_OR_EQUAL_size_t(3u, out.frame_count);
+        if (sent(CHG_REQUEST_ID) != NULL) {
+            requests++;
+            TEST_ASSERT_EQUAL_UINT32(1u, n % CHG_PERIOD_STEPS);
+            TEST_ASSERT_NULL(sent(0x202u));
+        }
+        inverter += (sent(0x202u) != NULL) ? 1u : 0u;
+    }
+    TEST_ASSERT_EQUAL_UINT(3u, requests);
+    TEST_ASSERT_EQUAL_UINT(27u, inverter);
+}
+
+/* "No request is ever sent outside CHARGE": in DRIVE, in STARTUP with the
+   charger heard, and in FAULT in Charge mode. */
+static void test_no_charger_request_is_ever_sent_outside_charge(void)
+{
+    power_up();
+    for (unsigned i = 0; i < 500u; i++) {
+        step();
+        TEST_ASSERT_NULL(sent(CHG_REQUEST_ID));
+    }
+
+    setUp();
+    hear_charger();
+    loopClosed = true;
+    for (unsigned i = 0; i < BMS_POWERUP_SWEEPS - 1u; i++) {
+        step(); /* step 1, the request's slot, is in STARTUP */
+        TEST_ASSERT_EQUAL_UINT8(BMS_STATE_STARTUP, out.state);
+        TEST_ASSERT_NULL(sent(CHG_REQUEST_ID));
+    }
+
+    setUp();
+    start_charge();
+    sweep.cell_mv[3] = BMS_OV_MV;
+    steps(BMS_OV_SWEEPS);
+    TEST_ASSERT_EQUAL_UINT8(BMS_STATE_FAULT, out.state);
+    for (unsigned i = 0; i < 500u; i++) {
+        step();
+        TEST_ASSERT_EQUAL_UINT8(BMS_STATE_FAULT, out.state);
+        TEST_ASSERT_NULL(sent(CHG_REQUEST_ID));
+    }
+}
+
+/* Held (FAULT_HELD) with the charger heard: never a request. */
+static void test_no_charger_request_is_sent_in_fault_held(void)
+{
+    config.held = true;
+    bms_control_init(&bc, &config);
+    hear_charger();
+    loopClosed = true;
+    for (unsigned i = 0; i < 500u; i++) {
+        step();
+        TEST_ASSERT_EQUAL_UINT8(BMS_STATE_FAULT_HELD, out.state);
+        TEST_ASSERT_NULL(sent(CHG_REQUEST_ID));
+    }
+}
+
+/* The charger timeout mid-charge: CHARGE and BMS_OK kept, a stop every
+   second; the charger back, the charge starts again after 3 s. */
+static void test_a_silent_charger_gets_stop_every_second_and_its_return_restarts_the_charge(void)
+{
+    start_charge();
+    charger.state = MAILBOX_INVALID;
+    for (unsigned s = 0; s < 10u; s++) {
+        const struct can_control_chg_request_t r = step_until_request();
+        TEST_ASSERT_EQUAL_UINT8(CAN_CONTROL_CHG_REQUEST_CONTROL_STOP_CHOICE, r.control);
+        TEST_ASSERT_EQUAL_UINT16(0u, r.max_charge_current);
+        TEST_ASSERT_EQUAL_UINT8(BMS_STATE_CHARGE, out.state);
+        TEST_ASSERT_TRUE(out.bms_ok);
+    }
+    hear_charger();
+    steps(BMS_CHARGE_START_MS / STEP_MS);
+    const struct can_control_chg_request_t r = step_until_request();
+    TEST_ASSERT_EQUAL_UINT8(CAN_CONTROL_CHG_REQUEST_CONTROL_START_CHOICE, r.control);
+    TEST_ASSERT_EQUAL_UINT16(20u, r.max_charge_current);
+}
+
+/* Waiting it asks for nothing; charging, for the Charge limit at 128 x
+   the Charge target; BMS_Limits carries the Charge limit. */
+static void test_a_charge_through_the_step_asks_for_the_charge_limit(void)
+{
+    power_up_charge();
+    struct can_control_chg_request_t r = step_until_request();
+    TEST_ASSERT_EQUAL_UINT8(CAN_CONTROL_CHG_REQUEST_CONTROL_STOP_CHOICE, r.control);
+    TEST_ASSERT_EQUAL_UINT16(0u, r.max_charge_voltage);
+    TEST_ASSERT_EQUAL_UINT16(0u, r.max_charge_current);
+
+    setUp();
+    r = start_charge();
+    TEST_ASSERT_EQUAL_UINT16(5248u, r.max_charge_voltage); /* 524.8 V */
+    TEST_ASSERT_EQUAL_UINT16(20u, r.max_charge_current);   /* 2.0 A */
+
+    struct can_control_bms_limits_t lim;
+    TEST_ASSERT_EQUAL_INT(0, can_control_bms_limits_unpack(&lim, step_until(0x081u), 8u));
+    TEST_ASSERT_EQUAL_UINT16(20u, lim.charge_limit);
+}
+
+/* 1.1 A over the 2.0 A asked for, for 5 s: a BMS fault, BMS_OK low. */
+static void test_charger_disobeys_is_a_bms_fault(void)
+{
+    start_charge();
+    chargerDa = 31u;
+    steps(BMS_CHARGE_DISOBEY_MS / STEP_MS);
+    TEST_ASSERT_EQUAL_UINT8(BMS_STATE_CHARGE, out.state);
+    step();
+    TEST_ASSERT_EQUAL_UINT8(BMS_STATE_FAULT, out.state);
+    TEST_ASSERT_FALSE(out.bms_ok);
+    TEST_ASSERT_EQUAL_HEX16(1u << BMS_FAULT_CHARGER_DISOBEYS, out.active);
+    TEST_ASSERT_EQUAL_UINT8(1u, status().charger_disobeys_active);
+
+    TEST_ASSERT_EQUAL_UINT16(EVENT_BMS_FAULT, out.events[0].code);
+    const uint8_t *d = out.events[0].data;
+    TEST_ASSERT_EQUAL_UINT8(BMS_FAULT_CHARGER_DISOBEYS, d[0]);
+    TEST_ASSERT_EQUAL_UINT8(EVENT_BMS_CHARGER, d[2]);
+    TEST_ASSERT_EQUAL_UINT16(31u, (uint16_t)(d[6] | (d[7] << 8)));
+    TEST_ASSERT_TRUE(any_event(EVENT_CHARGE)); /* the charge stopped */
+}
+
+static void test_no_charger_flag_is_a_bms_fault(void)
+{
+    start_charge();
+    chargerFlags = 0x02u; /* over-temperature */
+    step();
+    TEST_ASSERT_TRUE(any_event(EVENT_CHARGER_FLAGS));
+    steps(500u);
+    TEST_ASSERT_EQUAL_UINT8(BMS_STATE_CHARGE, out.state);
+    TEST_ASSERT_TRUE(out.bms_ok);
+    TEST_ASSERT_EQUAL_HEX16(0u, out.seen);
+}
+
+/* Every cell at the target: the limit falls to 0 and 10 s later the
+   charge is complete, a BMS_Status bit, with the request stop. */
+static void test_charge_complete_is_a_bms_status_bit(void)
+{
+    start_charge();
+    TEST_ASSERT_EQUAL_UINT8(0u, status().charge_complete);
+    for (size_t i = 0; i < BQ_SWEEP_CELLS; i++) {
+        sweep.cell_mv[i] = 4100u;
+    }
+    steps((BMS_CHARGE_END_MS + 1000u) / STEP_MS);
+    TEST_ASSERT_EQUAL_UINT8(1u, status().charge_complete);
+    TEST_ASSERT_EQUAL_UINT8(BMS_STATE_CHARGE, out.state);
+    TEST_ASSERT_TRUE(out.bms_ok);
+    TEST_ASSERT_EQUAL_UINT8(CAN_CONTROL_CHG_REQUEST_CONTROL_STOP_CHOICE,
+                            step_until_request().control);
+}
+
 /* Module and cell count from 0; voltages in 0.1 mV. */
 static void test_bms_pack_voltages_names_the_highest_and_lowest_cell(void)
 {
@@ -1392,6 +1670,15 @@ int main(void)
     RUN_TEST(test_a_further_timing_fault_starts_the_clean_second_again);
     RUN_TEST(test_every_five_steps_send_status_and_power_each_step_and_each_slow_frame_once);
     RUN_TEST(test_the_discharge_limit_is_zero_until_bms_ok_is_up);
+    RUN_TEST(test_hearing_the_charger_is_charge_mode_until_a_power_cycle);
+    RUN_TEST(test_in_charge_the_request_goes_once_a_second_in_the_0x202_slot);
+    RUN_TEST(test_no_charger_request_is_ever_sent_outside_charge);
+    RUN_TEST(test_no_charger_request_is_sent_in_fault_held);
+    RUN_TEST(test_a_silent_charger_gets_stop_every_second_and_its_return_restarts_the_charge);
+    RUN_TEST(test_a_charge_through_the_step_asks_for_the_charge_limit);
+    RUN_TEST(test_charger_disobeys_is_a_bms_fault);
+    RUN_TEST(test_no_charger_flag_is_a_bms_fault);
+    RUN_TEST(test_charge_complete_is_a_bms_status_bit);
     RUN_TEST(test_bms_power_carries_the_limit_the_current_and_the_pack_voltage);
     RUN_TEST(test_an_invalid_pack_current_goes_as_zero);
     RUN_TEST(test_a_weak_cell_lowers_the_limit_in_bms_power);
