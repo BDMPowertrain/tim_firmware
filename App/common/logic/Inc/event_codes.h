@@ -204,6 +204,11 @@ void event_data_discharge_slow(uint8_t data[EVENT_DATA_SIZE], int16_t bus_dv, ui
                                      disagree; reading: FAULT_SUMMARY */
 #define EVENT_BMS_SDC_SENSE    8u /* BMS_OK low with the Shutdown Circuit sense
                                      energised; reading: ms BMS_OK was low */
+/* Issue 65. */
+#define EVENT_BMS_TIMING       9u /* three Overruns within one second; the
+                                     Overrun Events before it say which steps */
+#define EVENT_BMS_HELD        10u /* the Held fault; the boot Event says which
+                                     reset */
 
 typedef struct {
     uint8_t  fault;        /* bms_fault_t (bms_control.h) */

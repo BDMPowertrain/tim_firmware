@@ -20,8 +20,9 @@
  *               Sweeps in a row (1 s) with no fault active and the last
  *               open-wire check passed: every value has been in range for
  *               1 s (ADR 0007).
- *   FAULT_HELD  the Held fault (config.held, decided by #65): BMS_OK low
- *               until the next Power-on reset, with the internal fault active.
+ *   FAULT_HELD  the Held fault (config.held, from bms_control_held()):
+ *               BMS_OK low from the first step until the next Power-on
+ *               reset, with the internal fault active (ADR 0007, 0011).
  * Firmware latches nothing else: the shutdown board's latch keeps the
  * Tractive System off until a person resets it (ADR 0007, EV.8.2.3).
  *
@@ -73,7 +74,10 @@
  *                        Sweeps in a row, judged only with a Sweep;
  *                      - the BMS_OK read-back low for BMS_SDC_SENSE_MS with
  *                        the Shutdown Circuit sense energised throughout.
- *                      The Held fault and the timing fault are #65.
+ *                      And (issue 65) the timing fault: three Overruns
+ *                      within one second (overrun_watch.h), raised on the
+ *                      step after the third. The Overrun Events say which
+ *                      steps ran long and in which phase.
  * Charger disobeys is #67; overcurrent is reserved and never set.
  *
  * A cell under the Low-voltage limit (BMS_LOW_VOLTAGE_MV) in the latest
@@ -99,6 +103,7 @@
 #include "can_control.h"
 #include "e2e_p11.h"
 #include "event_log.h"
+#include "reset_cause.h"
 
 #define BMS_STATE_STARTUP    CAN_CONTROL_BMS_STATUS_STATE_STARTUP_CHOICE
 #define BMS_STATE_DRIVE      CAN_CONTROL_BMS_STATUS_STATE_DRIVE_CHOICE
@@ -148,7 +153,7 @@ typedef enum {
 
 /* Fixed from start-up to the next reset. */
 typedef struct {
-    bool held;                    /* the Held fault (#65) */
+    bool held;                    /* the Held fault: bms_control_held() */
     bool params_defaulted;
     bool not_dual_bank;
     bool last_reset_not_power_on;
@@ -165,6 +170,8 @@ typedef struct {
     bool              sdc_closed;  /* the Shutdown Circuit sense reads energised */
     bool              nfault_ok;   /* FB.NFAULT reads high: no fault */
     bool              bms_ok_fb;   /* FB.BMS_OK reads high */
+    bool              timing_fault;  /* the last step was the third Overrun
+                                        within one second (control_step.h) */
     bool              open_wire_ran; /* the last step ran the open-wire check */
     bq_open_wire_t    open_wire;     /* its result, when it did */
     bool              bus_off_latched;
@@ -224,6 +231,17 @@ typedef struct {
     bool         ow_passed;        /* the last that judged passed */
     bq_open_wire_t ow_failed;      /* the last that failed */
 } bms_control_t;
+
+/*
+ * The Held fault (ADR 0007, 0011): true after any reset that was not a
+ * Power-on reset (the BOR flag set, a brown-out included), so the step
+ * holds BMS_OK low until the next one. A reset with the core debug enable
+ * bit set (debugger: DHCSR.C_DEBUGEN as start-up found it) is a Power-on
+ * reset, in every build: the bit cannot be set without a probe on the SWD
+ * header and stays set until a power cycle. A reset that left no flag is
+ * not shown to be a Power-on reset, so it holds too.
+ */
+bool bms_control_held(reset_cause_t cause, bool debugger);
 
 void bms_control_init(bms_control_t *bc, const bms_control_config_t *config);
 

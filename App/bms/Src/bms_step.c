@@ -65,15 +65,17 @@ static bms_pack_t published;
 bool bms_step_init(void)
 {
     /* Fixed until the next reset (ADR 0015). Static: this runs on
-       initTask's small stack (tasks.c). The Held fault is decided by #65:
-       until then no reset holds BMS_OK low. */
+       initTask's small stack (tasks.c). The Held fault (ADR 0007, 0011):
+       BMS_OK stays low until the next Power-on reset after any reset that
+       was not one, unless a debugger had set the debug enable bit. */
     static bms_control_config_t config;
+    const reset_report_t *reset = reset_info_report();
 
     config = (bms_control_config_t){
-        .held = false,
+        .held = bms_control_held(reset->cause, reset_info_debugger()),
         .params_defaulted = parameters_defaulted(),
         .not_dual_bank = flash_bank2_get() == NULL,
-        .last_reset_not_power_on = !reset_cause_is_power_on(reset_info_report()->cause),
+        .last_reset_not_power_on = !reset_cause_is_power_on(reset->cause),
     };
     bms_control_init(&control, &config);
     bq_chain_init(&chain);
@@ -133,6 +135,7 @@ static void phase_input(control_step_ctx_t *ctx)
     in.sdc_closed = HAL_GPIO_ReadPin(SDC_OK_N_GPIO_Port, SDC_OK_N_Pin) == GPIO_PIN_RESET;
     in.nfault_ok = HAL_GPIO_ReadPin(FB_NFAULT_GPIO_Port, FB_NFAULT_Pin) == GPIO_PIN_SET;
     in.bms_ok_fb = HAL_GPIO_ReadPin(FB_BMS_OK_GPIO_Port, FB_BMS_OK_Pin) == GPIO_PIN_SET;
+    in.timing_fault = ctx->timing_fault;
     in.open_wire_ran = openWireRan;
     in.open_wire = openWire;
     openWireRan = false;
