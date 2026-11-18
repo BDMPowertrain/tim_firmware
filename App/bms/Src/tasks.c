@@ -4,9 +4,9 @@
 
    The BMS image so far: it boots, runs Housekeeping (the heartbeat LED
    and VBAT), answers the shell on USART1, runs its control step, which
-   wakes the cell monitors and takes one Sweep every 20 ms, on the Control
-   bus, and publishes its status on the DAQ bus. No BMS fault is judged
-   yet, so BMS_OK stays low. */
+   wakes the cell monitors, takes one Sweep every 20 ms and judges the
+   BMS faults on it to drive BMS_OK, on the Control bus, and publishes its
+   status on the DAQ bus. */
 
 #include "tasks.h"
 
@@ -66,9 +66,7 @@ static uint32_t stepRecords[RECORD_RING_STORAGE_SIZE(STEP_RECORDS, DATA_LOG_STEP
                             sizeof(uint32_t)];
 
 /* Read by the Data log for as long as it runs. Logging starts when the
-   step leaves STARTUP, which the BMS step does not do until the Sweep and
-   its states exist (#63, #65): until then the logger waits and mounts
-   nothing. */
+   step leaves STARTUP: BMS_OK has first risen, or a BMS fault came first. */
 static const data_log_def_t dataLogDef = {
     .image = PARAMS_IMAGE_BMS,
     .startup_state = CAN_CONTROL_BMS_STATUS_STATE_STARTUP_CHOICE,

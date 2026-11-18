@@ -174,6 +174,25 @@ static void test_the_energy_meter_violation_event(void)
     TEST_ASSERT_EQUAL_HEX8_ARRAY(want, data, EVENT_DATA_SIZE);
 }
 
+/* A BMS fault raised (issue 63): the fault, the state after, where it was
+   seen, which cell or sensor, its reading and the devices read. */
+static void test_the_bms_fault_event(void)
+{
+    const event_bms_fault_t fault = {
+        .fault = 4u, .state = 3u, .where = EVENT_BMS_SENSOR, .index = 0x0102u,
+        .reading_mv = 0x0A0Bu, .devices_read = 0xFFF7u,
+    };
+    const uint8_t want[EVENT_DATA_SIZE] = {
+        4, 3, 2, 0, 0x02, 0x01, 0x0B, 0x0A, 0xF7, 0xFF, 0, 0, 0, 0, 0, 0,
+    };
+    uint8_t data[EVENT_DATA_SIZE];
+
+    memset(data, 0xAA, sizeof data);
+    event_data_bms_fault(data, &fault);
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(want, data, EVENT_DATA_SIZE);
+    TEST_ASSERT_EQUAL_STRING("BMS fault", event_code_name(EVENT_BMS_FAULT));
+}
+
 /* A Data log card failure (issue 53): the state it went to, the FatFS
    result, Records written and dropped so far. */
 static void test_the_data_log_card_event(void)
@@ -218,6 +237,7 @@ int main(void)
     RUN_TEST(test_the_inverter_fault_clear_event);
     RUN_TEST(test_the_discharge_slow_event);
     RUN_TEST(test_the_energy_meter_violation_event);
+    RUN_TEST(test_the_bms_fault_event);
     RUN_TEST(test_the_data_log_card_event);
     RUN_TEST(test_names);
     return UNITY_END();

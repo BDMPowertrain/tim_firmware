@@ -66,6 +66,10 @@ static int cmd_cells(int argc, char **argv)
                  chain_state_name(pack.chain_state), (unsigned long)pack.wake_attempts,
                  (unsigned long)pack.sweeps, (unsigned long)pack.sweeps_missing,
                  (unsigned long)pack.link_timeouts, (unsigned long)pack.step_count);
+    /* bit (1 << bms_fault_t) in BMS_Status order (bms_control.h). */
+    shell_printf("faults active 0x%03x, seen 0x%03x, a cell under the Low-voltage limit: %s\r\n",
+                 (unsigned)pack.faults_active, (unsigned)pack.faults_seen,
+                 pack.under_low_voltage_limit ? "yes" : "no");
     if (pack.chain_state != BQ_CHAIN_RUNNING) {
         shell_printf("no Sweep: the chain is not awake\r\n");
         return 0;

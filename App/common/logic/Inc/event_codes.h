@@ -4,8 +4,8 @@
  * A code is never reused for another meaning once an image has written
  * it: a stored Event outlives the image that wrote it.
  *
- * Codes for Events whose source is not built yet (BMS fault
- * trip, charger, balancing and the rest of the spec's list)
+ * Codes for Events whose source is not built yet (charger,
+ * balancing and the rest of the spec's list)
  * are added here when their source is.
  *
  * This is logic (ADR 0002): no HAL, no RTOS, no clock.
@@ -60,6 +60,9 @@ typedef enum {
 
     /* The Data log (ADR 0021, data_log.h). */
     EVENT_DATA_LOG_CARD = 80, /* event_data_data_log_card(): no card, or a card error */
+
+    /* The BMS's faults (ADR 0007, bms_control.h). */
+    EVENT_BMS_FAULT = 96, /* event_data_bms_fault(): a BMS fault raised */
 } event_code_t;
 
 /* "boot", "overrun" and so on, for the shell; "?" for a code not here. */
@@ -181,6 +184,25 @@ void event_data_fault_clear(uint8_t data[EVENT_DATA_SIZE], const event_fault_cle
 /* 0 bus voltage (i16, 0.1 V), 4 ms since the Shutdown Circuit input
    opened (u32). */
 void event_data_discharge_slow(uint8_t data[EVENT_DATA_SIZE], int16_t bus_dv, uint32_t open_ms);
+
+/* Where a BMS fault was seen (byte 2 of an EVENT_BMS_FAULT Event). */
+#define EVENT_BMS_NOWHERE 0u /* no one cell or sensor: the chain brought back nothing */
+#define EVENT_BMS_CELL    1u /* a cell voltage */
+#define EVENT_BMS_SENSOR  2u /* a cell temperature sensor */
+
+typedef struct {
+    uint8_t  fault;        /* bms_fault_t (bms_control.h) */
+    uint8_t  state;        /* BMS_Status State value once it is raised */
+    uint8_t  where;        /* EVENT_BMS_... */
+    uint16_t index;        /* 1 to 128: cell or sensor ((index - 1) % 8) + 1 of
+                              device ((index - 1) / 8) + 1; 0 for nowhere */
+    uint16_t reading_mv;   /* its reading in the Sweep that raised it */
+    uint16_t devices_read; /* that Sweep's: bit d - 1 set, device d read */
+} event_bms_fault_t;
+
+/* 0 fault (u8), 1 state (u8), 2 where (u8), 4 index (u16), 6 reading
+   (u16, mV), 8 devices read (u16). */
+void event_data_bms_fault(uint8_t data[EVENT_DATA_SIZE], const event_bms_fault_t *fault);
 
 /* 0 VCU state (u8). */
 void event_data_em_violation(uint8_t data[EVENT_DATA_SIZE], uint8_t state);
