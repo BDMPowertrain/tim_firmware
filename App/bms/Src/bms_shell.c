@@ -72,6 +72,19 @@ static int cmd_cells(int argc, char **argv)
     shell_printf("faults active 0x%03x, seen 0x%03x, a cell under the Low-voltage limit: %s\r\n",
                  (unsigned)pack.faults_active, (unsigned)pack.faults_seen,
                  pack.under_low_voltage_limit ? "yes" : "no");
+    /* Derating (issue 66, ADR 0018). */
+    shell_printf("discharge limit %u.%u A, pack %lu.%lu V, pack current ",
+                 (unsigned)(pack.discharge_limit_da / 10u),
+                 (unsigned)(pack.discharge_limit_da % 10u),
+                 (unsigned long)(pack.summary.sum_mv / 1000u),
+                 (unsigned long)((pack.summary.sum_mv % 1000u) / 100u));
+    if (pack.pack_current.valid) {
+        const int a = pack.pack_current.deci_a;
+        shell_printf("%s%d.%d A\r\n", (a < 0) ? "-" : "", ((a < 0) ? -a : a) / 10,
+                     ((a < 0) ? -a : a) % 10);
+    } else {
+        shell_printf("invalid\r\n");
+    }
     /* The second layers (issue 64). */
     shell_printf("NFAULT %s, BMS_OK read-back %s, shutdown sense %s, bridge FAULT_SUMMARY ",
                  pack.nfault_ok ? "high" : "LOW", pack.bms_ok_fb ? "high" : "low",

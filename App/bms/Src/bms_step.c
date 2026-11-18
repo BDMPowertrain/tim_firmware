@@ -8,7 +8,6 @@
 #include "bms_control.h"
 #include "bms_params.h"
 #include "bus_term.h"
-#include "can_control.h"
 #include "cell_monitor.h"
 #include "control_bus.h"
 #include "events.h"
@@ -76,6 +75,15 @@ bool bms_step_init(void)
         .params_defaulted = parameters_defaulted(),
         .not_dual_bank = flash_bank2_get() == NULL,
         .last_reset_not_power_on = !reset_cause_is_power_on(reset->cause),
+        /* Derating (ADR 0018): each bounded by bms_params.c. */
+        .derate = {
+            .v_full_mv = (uint16_t)parameters_value(BMS_PARAM_DISCHARGE_V_FULL),
+            .v_floor_mv = (uint16_t)parameters_value(BMS_PARAM_DISCHARGE_V_FLOOR),
+            .t_full_dc = (int16_t)parameters_value(BMS_PARAM_DISCHARGE_T_FULL),
+            .t_floor_dc = (int16_t)parameters_value(BMS_PARAM_DISCHARGE_T_FLOOR),
+            .cell_res_uohm = (uint16_t)parameters_value(BMS_PARAM_CELL_RESISTANCE),
+            .full_limit_da = (uint16_t)parameters_value(BMS_PARAM_FULL_DISCHARGE_LIMIT),
+        },
     };
     bms_control_init(&control, &config);
     bq_chain_init(&chain);
@@ -102,6 +110,15 @@ static void phase_sweep(control_step_ctx_t *ctx)
         }
     }
     bms_adc_read(&pack.adc);
+}
+
+/* Pack current: the one input that gives it (issue 66). Pack current
+   sensing is #29, still open, so it is invalid: the voltage taper runs on
+   the raw voltage and BMS_Power carries 0 A. #29 replaces this function's
+   body and nothing else. */
+static bms_current_t read_pack_current(void)
+{
+    return (bms_current_t){ .deci_a = 0, .valid = false };
 }
 
 static void phase_input(control_step_ctx_t *ctx)
@@ -142,6 +159,7 @@ static void phase_input(control_step_ctx_t *ctx)
     in.bus_off_latched = bus.latched;
     in.error_passive = bus.error_passive;
     in.rx_overflowed = bus.rx_overflowed;
+    in.pack_current = read_pack_current();
 }
 
 /* Judge (bms_control.h): the state, BMS_OK and BMS_Status from this
@@ -160,10 +178,10 @@ static void phase_output(control_step_ctx_t *ctx)
     HAL_GPIO_WritePin(MCU_BMS_OK_GPIO_Port, MCU_BMS_OK_Pin,
                       out.bms_ok ? GPIO_PIN_SET : GPIO_PIN_RESET);
 
-    if (out.send_status) {
-        (void)control_bus_send(CAN_CONTROL_BMS_STATUS_FRAME_ID,
-                               CAN_CONTROL_BMS_STATUS_IS_EXTENDED != 0, out.status,
-                               (uint8_t)sizeof(out.status));
+    /* At most three, one per hardware send slot (bms_tx.h). */
+    for (size_t i = 0; i < out.frame_count; i++) {
+        const bms_tx_frame_t *f = &out.frames[i];
+        (void)control_bus_send(f->id, f->extended, f->data, f->len);
     }
     /* The Event queue never waits; a full one drops and counts (events.h). */
     for (size_t i = 0; i < out.event_count; i++) {
@@ -179,6 +197,9 @@ static void phase_output(control_step_ctx_t *ctx)
     pack.faults_active = out.active;
     pack.faults_seen = out.seen;
     pack.under_low_voltage_limit = out.under_low_voltage_limit;
+    pack.discharge_limit_da = out.discharge_limit_da;
+    pack.pack_current = in.pack_current;
+    pack.summary = out.summary;
     pack.nfault_ok = in.nfault_ok;
     pack.bms_ok_fb = in.bms_ok_fb;
     pack.sdc_closed = in.sdc_closed;

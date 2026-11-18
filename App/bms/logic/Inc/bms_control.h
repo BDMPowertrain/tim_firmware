@@ -83,6 +83,19 @@
  * A cell under the Low-voltage limit (BMS_LOW_VOLTAGE_MV) in the latest
  * Sweep is a BMS_Status bit and never a BMS fault.
  *
+ * Derating (issue 66, ADR 0018): the Discharge limit, from the lowest cell
+ * and the hottest sensor of each Sweep and the pack current, by
+ * bms_derate.h, and 0 A while BMS_OK is low. The charge limit is 0 A out
+ * of Charge mode (#67 adds the rest). A step with no Sweep, or a Sweep
+ * with no valid cell or no valid sensor, holds the limit: the measurement
+ * fault takes BMS_OK, and so the limit, to zero within 150 ms.
+ *
+ * The frames (bms_tx.h: the send table): BMS_Status and BMS_Power every
+ * step, one slower frame a step. BMS_Power, BMS_Limits and the summaries
+ * carry the last Sweep's readings, over the cells and sensors it read
+ * validly; pack voltage is the sum of the cells read. Pack current goes as
+ * 0 A while it is invalid (issue 29 decides how to mark it).
+ *
  * The BMS makes no decision from any received frame (spec #36, user story
  * 26): the Control bus only fills BMS_Status bits, and a bus failure never
  * takes BMS_OK low (ADR 0005).
@@ -98,6 +111,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "bms_derate.h"
+#include "bms_tx.h"
 #include "bq_chain.h"
 #include "bq_sweep.h"
 #include "can_control.h"
@@ -157,7 +172,26 @@ typedef struct {
     bool params_defaulted;
     bool not_dual_bank;
     bool last_reset_not_power_on;
+    bms_derate_config_t derate;   /* from the BMS parameters */
 } bms_control_config_t;
+
+/* One Sweep's readings in brief, over the cells and sensors it read
+   validly. A cell or sensor index runs 0 to 127: module index / 8, number
+   index % 8. */
+typedef struct {
+    uint16_t cells;     /* cells read; 0: none, the rest of the cell fields 0 */
+    uint32_t sum_mv;
+    uint16_t min_mv;
+    uint16_t max_mv;
+    uint8_t  min_cell;
+    uint8_t  max_cell;
+    uint16_t temps;     /* sensors read in range; 0: none */
+    int32_t  sum_dc;    /* 0.1 C */
+    int16_t  min_dc;
+    int16_t  max_dc;
+    uint8_t  min_temp;
+    uint8_t  max_temp;
+} bms_pack_summary_t;
 
 typedef struct {
     uint32_t          now_ms;
@@ -177,6 +211,7 @@ typedef struct {
     bool              bus_off_latched;
     bool              error_passive;
     bool              rx_overflowed;
+    bms_current_t     pack_current;  /* positive discharging, with its validity */
 } bms_control_in_t;
 
 typedef struct {
@@ -198,8 +233,13 @@ typedef struct {
        in on the next step. */
     bool     open_wire_due;
 
-    bool     send_status;       /* status holds a BMS_Status (0x080): bms_tx.h says when */
-    uint8_t  status[CAN_CONTROL_BMS_STATUS_LENGTH];
+    /* The frames due on this step, built (bms_tx.h says which), to send in
+       this order. */
+    size_t         frame_count;
+    bms_tx_frame_t frames[BMS_TX_FRAMES_MAX];
+
+    uint16_t discharge_limit_da; /* the Discharge limit sent, 0.1 A */
+    bms_pack_summary_t summary;  /* the last Sweep's, for the snapshot */
 
     size_t      event_count;
     bms_event_t events[BMS_CONTROL_EVENTS_MAX];
@@ -218,6 +258,10 @@ typedef struct {
     uint16_t     seen;
     bool         under_low_voltage_limit;
     e2e_p11_tx_t status_tx;
+    e2e_p11_tx_t power_tx;
+    e2e_p11_tx_t limits_tx;
+    bms_derate_t derate;
+    bms_pack_summary_t summary;    /* the last Sweep's */
     /* The self-checks. */
     bool         commanded;        /* BMS_OK as last written; low from reset */
     uint16_t     feedback_bad;     /* read-back wrong, Sweeps in a row */

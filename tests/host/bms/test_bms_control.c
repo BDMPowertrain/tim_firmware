@@ -43,12 +43,23 @@
  *   rises and FAULT_HELD never ends.
  * - Three Overruns within one second are the BMS internal fault, ending
  *   after 1 s clean.
+ *
+ * Issue 66 (ADR 0018; spec #36, the Control bus table):
+ * - The five-step send cycle: BMS_Status and BMS_Power every step, plus one
+ *   of BMS_Limits, 0x202, 0x60D, BMS_PackVoltages, BMS_PackTemps.
+ * - The Discharge limit in BMS_Power (0.1 A) and unscaled in 0x202 (whole
+ *   amps); the charge limit 0 A in DRIVE; both 0 until BMS_OK is up.
+ * - Pack voltage is the sum of the cell voltages of the same Sweep; pack
+ *   current enters with a validity flag.
+ * - The under-voltage fault stays on the raw loaded voltage.
  */
 #include <string.h>
 
 #include "bms_control.h"
+#include "bms_tx.h"
 #include "bq_sweep.h"
 #include "can_control.h"
+#include "cell_temp.h"
 #include "e2e_p11.h"
 #include "event_codes.h"
 #include "reset_cause.h"
@@ -115,6 +126,7 @@ static void step(void)
     in.open_wire_ran = out.open_wire_due;
     in.open_wire = found;
     in.now_ms += STEP_MS;
+    in.step_count++;
 }
 
 static void steps(unsigned n)
@@ -124,11 +136,31 @@ static void steps(unsigned n)
     }
 }
 
+/* This step's frame with that ID, or NULL. */
+static const bms_tx_frame_t *sent(uint32_t id)
+{
+    for (size_t i = 0; i < out.frame_count; i++) {
+        if (out.frames[i].id == id) {
+            return &out.frames[i];
+        }
+    }
+    return NULL;
+}
+
+/* This step's frame with that ID, which must be there. */
+static const uint8_t *frame(uint32_t id)
+{
+    const bms_tx_frame_t *f = sent(id);
+    TEST_ASSERT_NOT_NULL_MESSAGE(f, "frame not sent on this step");
+    TEST_ASSERT_FALSE(f->extended);
+    TEST_ASSERT_EQUAL_UINT8(8u, f->len);
+    return f->data;
+}
+
 static struct can_control_bms_status_t status(void)
 {
     struct can_control_bms_status_t s;
-    TEST_ASSERT_TRUE(out.send_status);
-    TEST_ASSERT_EQUAL_INT(0, can_control_bms_status_unpack(&s, out.status, sizeof out.status));
+    TEST_ASSERT_EQUAL_INT(0, can_control_bms_status_unpack(&s, frame(0x080u), 8u));
     return s;
 }
 
@@ -631,8 +663,7 @@ static void test_bms_status_goes_every_step_and_passes_its_e2e_check(void)
 
     for (unsigned i = 0; i < 20u; i++) {
         step();
-        TEST_ASSERT_TRUE(out.send_status);
-        TEST_ASSERT_EQUAL(E2E_P11_OK, e2e_p11_check(&rx, 0x0080u, out.status, sizeof out.status));
+        TEST_ASSERT_EQUAL(E2E_P11_OK, e2e_p11_check(&rx, 0x0080u, frame(0x080u), 8u));
     }
     TEST_ASSERT_EQUAL_UINT8(1u, status().parameters_defaulted);
     TEST_ASSERT_EQUAL_UINT8(1u, status().last_reset_not_power_on);
@@ -1058,6 +1089,216 @@ static void test_a_further_timing_fault_starts_the_clean_second_again(void)
     TEST_ASSERT_EQUAL_UINT8(BMS_STATE_DRIVE, out.state);
 }
 
+/* ---- issue 66: the Discharge limit and the send table ------------------ */
+
+/* The spec's tapers with a full limit of 20.0 A, the unset default. */
+static void spec_derating(uint16_t cell_res_uohm)
+{
+    config.derate = (bms_derate_config_t){
+        .v_full_mv = 3000u, .v_floor_mv = 2700u, .t_full_dc = 500, .t_floor_dc = 570,
+        .cell_res_uohm = cell_res_uohm, .full_limit_da = 200u,
+    };
+    bms_control_init(&bc, &config);
+}
+
+static struct can_control_bms_power_t power(void)
+{
+    struct can_control_bms_power_t p;
+    TEST_ASSERT_EQUAL_INT(0, can_control_bms_power_unpack(&p, frame(0x082u), 8u));
+    return p;
+}
+
+/* Steps until the slower frame with that ID goes, which must be within
+   five steps. */
+static const uint8_t *step_until(uint32_t id)
+{
+    for (unsigned i = 0; i < 5u; i++) {
+        step();
+        if (sent(id) != NULL) {
+            return frame(id);
+        }
+    }
+    TEST_FAIL_MESSAGE("not sent within five steps");
+    return NULL;
+}
+
+static void test_every_five_steps_send_status_and_power_each_step_and_each_slow_frame_once(void)
+{
+    static const uint32_t slow[] = { 0x081u, 0x202u, 0x60Du, 0x210u, 0x211u };
+    for (unsigned cycle = 0; cycle < 3u; cycle++) {
+        unsigned seen[5] = {0};
+        for (unsigned i = 0; i < 5u; i++) {
+            step();
+            TEST_ASSERT_EQUAL_size_t(3u, out.frame_count);
+            TEST_ASSERT_NOT_NULL(sent(0x080u));
+            TEST_ASSERT_NOT_NULL(sent(0x082u));
+            for (unsigned f = 0; f < 5u; f++) {
+                seen[f] += (sent(slow[f]) != NULL) ? 1u : 0u;
+            }
+        }
+        for (unsigned f = 0; f < 5u; f++) {
+            TEST_ASSERT_EQUAL_UINT(1u, seen[f]);
+        }
+    }
+}
+
+static void test_the_discharge_limit_is_zero_until_bms_ok_is_up(void)
+{
+    spec_derating(0u);
+    for (unsigned i = 0; i < BMS_POWERUP_SWEEPS - 1u; i++) {
+        step();
+        TEST_ASSERT_FALSE(out.bms_ok);
+        TEST_ASSERT_EQUAL_UINT16(0u, power().discharge_limit);
+    }
+    step();
+    TEST_ASSERT_TRUE(out.bms_ok);
+    TEST_ASSERT_EQUAL_UINT16(200u, power().discharge_limit); /* 20.0 A */
+}
+
+/* BMS_Power carries the Discharge limit, pack current and pack voltage of
+   one Sweep, protected by E2E Profile 11 (Data ID 0x0082). */
+static void test_bms_power_carries_the_limit_the_current_and_the_pack_voltage(void)
+{
+    spec_derating(0u);
+    in.pack_current = (bms_current_t){ .deci_a = 1234, .valid = true };
+    e2e_p11_rx_t rx = {0};
+    for (unsigned i = 0; i < 10u; i++) {
+        step();
+        TEST_ASSERT_EQUAL(E2E_P11_OK, e2e_p11_check(&rx, 0x0082u, frame(0x082u), 8u));
+    }
+    TEST_ASSERT_EQUAL_UINT16(200u, power().discharge_limit);
+    TEST_ASSERT_EQUAL_INT16(1234, power().pack_current);
+    TEST_ASSERT_EQUAL_UINT16(4736u, power().pack_voltage); /* 128 x 3.700 V */
+}
+
+/* Issue 29 decides how an invalid current is marked; until then it goes
+   as 0 A. */
+static void test_an_invalid_pack_current_goes_as_zero(void)
+{
+    in.pack_current = (bms_current_t){ .deci_a = 1234, .valid = false };
+    step();
+    TEST_ASSERT_EQUAL_INT16(0, power().pack_current);
+}
+
+/* A weak cell lowers the limit, by no more than 4% a step. */
+static void test_a_weak_cell_lowers_the_limit_in_bms_power(void)
+{
+    spec_derating(0u);
+    power_up();
+    sweep.cell_mv[50] = 2850u; /* 60% */
+    step();
+    TEST_ASSERT_EQUAL_UINT16(192u, power().discharge_limit); /* 96% of 20 A */
+    steps(20u);
+    TEST_ASSERT_EQUAL_UINT16(120u, power().discharge_limit); /* 60% */
+}
+
+/* 0x202 carries the same limit in whole amps (ADR 0017: unscaled), and
+   0 A to charge in DRIVE. */
+static void test_the_inverter_gets_the_limit_in_whole_amps_and_no_charge(void)
+{
+    spec_derating(0u);
+    power_up();
+    sweep.cell_mv[50] = 2850u;
+    steps(30u);
+    struct can_control_inv_bms_limits_t inv;
+    TEST_ASSERT_EQUAL_INT(0, can_control_inv_bms_limits_unpack(&inv, step_until(0x202u), 8u));
+    TEST_ASSERT_EQUAL_UINT16(12u, inv.discharge_limit);
+    TEST_ASSERT_EQUAL_UINT16(0u, inv.charge_limit);
+}
+
+static void test_the_inverter_limit_is_zero_until_bms_ok_is_up(void)
+{
+    spec_derating(0u);
+    struct can_control_inv_bms_limits_t inv;
+    TEST_ASSERT_EQUAL_INT(0, can_control_inv_bms_limits_unpack(&inv, step_until(0x202u), 8u));
+    TEST_ASSERT_FALSE(out.bms_ok);
+    TEST_ASSERT_EQUAL_UINT16(0u, inv.discharge_limit);
+}
+
+/* BMS_Limits: the charge limit, 0 A in DRIVE, and the pack voltage,
+   protected by E2E Profile 11 (Data ID 0x0081). */
+static void test_bms_limits_says_no_charge_in_drive(void)
+{
+    spec_derating(0u);
+    power_up();
+    e2e_p11_rx_t rx = {0};
+    struct can_control_bms_limits_t lim;
+    const uint8_t *f = step_until(0x081u);
+    TEST_ASSERT_EQUAL(E2E_P11_OK, e2e_p11_check(&rx, 0x0081u, f, 8u));
+    TEST_ASSERT_EQUAL_INT(0, can_control_bms_limits_unpack(&lim, f, 8u));
+    TEST_ASSERT_EQUAL_UINT16(0u, lim.charge_limit);
+    TEST_ASSERT_EQUAL_UINT16(4736u, lim.pack_voltage);
+}
+
+/* Module and cell count from 0; voltages in 0.1 mV. */
+static void test_bms_pack_voltages_names_the_highest_and_lowest_cell(void)
+{
+    sweep.cell_mv[9] = 3800u;   /* module 1, cell 1 */
+    sweep.cell_mv[127] = 3600u; /* module 15, cell 7 */
+    struct can_control_bms_pack_voltages_t v;
+    TEST_ASSERT_EQUAL_INT(0, can_control_bms_pack_voltages_unpack(&v, step_until(0x210u), 8u));
+    TEST_ASSERT_EQUAL_UINT16(38000u, v.max_cell_voltage);
+    TEST_ASSERT_EQUAL_UINT16(36000u, v.min_cell_voltage);
+    TEST_ASSERT_EQUAL_UINT16(37000u, v.avg_cell_voltage);
+    TEST_ASSERT_EQUAL_UINT8(1u, v.max_cell_module);
+    TEST_ASSERT_EQUAL_UINT8(1u, v.max_cell_number);
+    TEST_ASSERT_EQUAL_UINT8(15u, v.min_cell_module);
+    TEST_ASSERT_EQUAL_UINT8(7u, v.min_cell_number);
+}
+
+/* Temperatures in 0.1 C through the sensor table; the Energy Meter's
+   0x60D cannot carry below 0 C, so a colder cell goes as 0. */
+static void test_the_temperature_frames_name_the_hottest_and_coldest_sensor(void)
+{
+    int16_t hot = 0;
+    int16_t cold = 0;
+    TEST_ASSERT_TRUE(cell_temp_from_mv(1700u, &hot));
+    TEST_ASSERT_TRUE(cell_temp_from_mv(2400u, &cold));
+    TEST_ASSERT_LESS_THAN_INT16(0, cold);
+    sweep.temp_mv[20] = 1700u; /* module 2, sensor 4 */
+    sweep.temp_mv[3] = 2400u;  /* module 0, sensor 3 */
+
+    struct can_control_bms_pack_temps_t t;
+    TEST_ASSERT_EQUAL_INT(0, can_control_bms_pack_temps_unpack(&t, step_until(0x211u), 8u));
+    TEST_ASSERT_EQUAL_INT16(hot, t.max_temp);
+    TEST_ASSERT_EQUAL_INT16(cold, t.min_temp);
+    TEST_ASSERT_EQUAL_UINT8(2u, t.max_temp_module);
+    TEST_ASSERT_EQUAL_UINT8(4u, t.max_temp_sensor);
+    TEST_ASSERT_EQUAL_UINT8(0u, t.min_temp_module);
+    TEST_ASSERT_EQUAL_UINT8(3u, t.min_temp_sensor);
+
+    struct can_control_em_cell_temps_t em;
+    TEST_ASSERT_EQUAL_INT(0, can_control_em_cell_temps_unpack(&em, step_until(0x60Du), 8u));
+    TEST_ASSERT_EQUAL_UINT16((uint16_t)hot, em.max_cell_temp);
+    TEST_ASSERT_EQUAL_UINT16(0u, em.min_cell_temp);
+}
+
+static void test_a_uniform_pack_averages_to_its_one_temperature(void)
+{
+    int16_t ok = 0;
+    TEST_ASSERT_TRUE(cell_temp_from_mv(TEMP_OK_MV, &ok));
+    struct can_control_bms_pack_temps_t t;
+    TEST_ASSERT_EQUAL_INT(0, can_control_bms_pack_temps_unpack(&t, step_until(0x211u), 8u));
+    TEST_ASSERT_EQUAL_INT16(ok, t.avg_temp);
+    struct can_control_em_cell_temps_t em;
+    TEST_ASSERT_EQUAL_INT(0, can_control_em_cell_temps_unpack(&em, step_until(0x60Du), 8u));
+    TEST_ASSERT_EQUAL_UINT16((uint16_t)ok, em.avg_cell_temp);
+}
+
+/* ADR 0018: "The under-voltage fault stays on raw loaded voltage at
+   2.505 V, so a wrong resistance parameter cannot hide a low cell." 300 A
+   and the largest resistance put 2.505 V back to over 3 V for the taper,
+   and the fault still comes on the tenth Sweep. */
+static void test_the_under_voltage_fault_stays_on_the_raw_voltage(void)
+{
+    spec_derating(10000u);
+    in.pack_current = (bms_current_t){ .deci_a = 3000, .valid = true };
+    power_up();
+    sweep.cell_mv[36] = BMS_UV_MV;
+    assert_raised_on_sweep(BMS_UV_SWEEPS, BMS_FAULT_UNDER_VOLTAGE);
+    TEST_ASSERT_EQUAL_UINT16(0u, power().discharge_limit);
+}
+
 int main(void)
 {
     UNITY_BEGIN();
@@ -1119,5 +1360,17 @@ int main(void)
     RUN_TEST(test_a_timing_fault_is_the_internal_fault_at_once);
     RUN_TEST(test_a_timing_fault_recovers_after_exactly_1_s_clean);
     RUN_TEST(test_a_further_timing_fault_starts_the_clean_second_again);
+    RUN_TEST(test_every_five_steps_send_status_and_power_each_step_and_each_slow_frame_once);
+    RUN_TEST(test_the_discharge_limit_is_zero_until_bms_ok_is_up);
+    RUN_TEST(test_bms_power_carries_the_limit_the_current_and_the_pack_voltage);
+    RUN_TEST(test_an_invalid_pack_current_goes_as_zero);
+    RUN_TEST(test_a_weak_cell_lowers_the_limit_in_bms_power);
+    RUN_TEST(test_the_inverter_gets_the_limit_in_whole_amps_and_no_charge);
+    RUN_TEST(test_the_inverter_limit_is_zero_until_bms_ok_is_up);
+    RUN_TEST(test_bms_limits_says_no_charge_in_drive);
+    RUN_TEST(test_bms_pack_voltages_names_the_highest_and_lowest_cell);
+    RUN_TEST(test_the_temperature_frames_name_the_hottest_and_coldest_sensor);
+    RUN_TEST(test_a_uniform_pack_averages_to_its_one_temperature);
+    RUN_TEST(test_the_under_voltage_fault_stays_on_the_raw_voltage);
     return UNITY_END();
 }

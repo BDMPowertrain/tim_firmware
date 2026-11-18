@@ -48,6 +48,7 @@ void bms_control_init(bms_control_t *bc, const bms_control_config_t *config)
     memset(bc, 0, sizeof *bc);
     bc->config = *config;
     bc->state = BMS_STATE_STARTUP;
+    bms_derate_init(&bc->derate, &config->derate);
 }
 
 static uint16_t bit(bms_fault_t f)
@@ -312,6 +313,162 @@ static uint8_t has(uint16_t bits, bms_fault_t f)
     return (bits & bit(f)) != 0u ? 1u : 0u;
 }
 
+/* One Sweep in brief (bms_pack_summary_t). */
+static void summarise(const bq_sweep_t *s, bms_pack_summary_t *p)
+{
+    memset(p, 0, sizeof *p);
+    for (size_t i = 0; i < BQ_SWEEP_CELLS; i++) {
+        if ((s->devices_read & (1u << (i / BQ_SWEEP_CELLS_PER_DEVICE))) == 0u) {
+            continue;
+        }
+        const uint16_t v = s->cell_mv[i];
+        if (v != 0u) {
+            if (p->cells == 0u || v < p->min_mv) {
+                p->min_mv = v;
+                p->min_cell = (uint8_t)i;
+            }
+            if (p->cells == 0u || v > p->max_mv) {
+                p->max_mv = v;
+                p->max_cell = (uint8_t)i;
+            }
+            p->sum_mv += v;
+            p->cells++;
+        }
+        int16_t dc;
+        if (cell_temp_from_mv(s->temp_mv[i], &dc)) {
+            if (p->temps == 0u || dc < p->min_dc) {
+                p->min_dc = dc;
+                p->min_temp = (uint8_t)i;
+            }
+            if (p->temps == 0u || dc > p->max_dc) {
+                p->max_dc = dc;
+                p->max_temp = (uint8_t)i;
+            }
+            p->sum_dc += dc;
+            p->temps++;
+        }
+    }
+}
+
+static uint16_t clamp_u16(uint32_t v)
+{
+    return (v > UINT16_MAX) ? UINT16_MAX : (uint16_t)v;
+}
+
+/* Pack voltage in 0.1 V: the sum of the cells read. */
+static uint16_t pack_voltage_dv(const bms_pack_summary_t *p)
+{
+    return clamp_u16(p->sum_mv / 100u);
+}
+
+static int16_t avg_dc(const bms_pack_summary_t *p)
+{
+    return (p->temps == 0u) ? 0 : (int16_t)(p->sum_dc / (int32_t)p->temps);
+}
+
+/* The Energy Meter's 0x60D cannot carry below 0 C (can/control.dbc). */
+static uint16_t em_dc(int16_t dc)
+{
+    return (dc < 0) ? 0u : (uint16_t)dc;
+}
+
+static bms_tx_frame_t *add_frame(bms_control_out_t *out, uint32_t id, uint8_t len)
+{
+    bms_tx_frame_t *f = &out->frames[out->frame_count++];
+    memset(f, 0, sizeof *f);
+    f->id = id;
+    f->extended = false;
+    f->len = len;
+    return f;
+}
+
+static void build_power(bms_control_t *bc, const bms_control_in_t *in, bms_control_out_t *out)
+{
+    const struct can_control_bms_power_t p = {
+        .pack_current = in->pack_current.valid ? in->pack_current.deci_a : 0,
+        .pack_voltage = pack_voltage_dv(&bc->summary),
+        .discharge_limit = out->discharge_limit_da,
+    };
+    bms_tx_build_power(&p, &bc->power_tx,
+                       add_frame(out, CAN_CONTROL_BMS_POWER_FRAME_ID,
+                                 CAN_CONTROL_BMS_POWER_LENGTH)->data);
+}
+
+/* The one slower frame due on this step. */
+static void build_slow(bms_control_t *bc, bms_tx_slow_t slow, bms_control_out_t *out)
+{
+    const bms_pack_summary_t *p = &bc->summary;
+    bms_tx_frame_t *f;
+
+    switch (slow) {
+    case BMS_TX_SLOW_LIMITS: {
+        const struct can_control_bms_limits_t l = {
+            .charge_limit = 0u, /* 0 A out of Charge mode (#67) */
+            .pack_voltage = pack_voltage_dv(p),
+        };
+        f = add_frame(out, CAN_CONTROL_BMS_LIMITS_FRAME_ID, CAN_CONTROL_BMS_LIMITS_LENGTH);
+        bms_tx_build_limits(&l, &bc->limits_tx, f->data);
+        break;
+    }
+    case BMS_TX_SLOW_INVERTER_LIMITS: {
+        /* Whole amps, rounded down: the inverter's backup never sits above
+           the limit the VCU obeys (ADR 0017). */
+        const struct can_control_inv_bms_limits_t l = {
+            .discharge_limit = (uint16_t)(out->discharge_limit_da / 10u),
+            .charge_limit = 0u,
+        };
+        f = add_frame(out, CAN_CONTROL_INV_BMS_LIMITS_FRAME_ID,
+                      CAN_CONTROL_INV_BMS_LIMITS_LENGTH);
+        (void)can_control_inv_bms_limits_pack(f->data, &l, f->len);
+        break;
+    }
+    case BMS_TX_SLOW_EM_CELL_TEMPS: {
+        const struct can_control_em_cell_temps_t t = {
+            .max_cell_temp = em_dc(p->max_dc),
+            .min_cell_temp = em_dc(p->min_dc),
+            .avg_cell_temp = em_dc(avg_dc(p)),
+        };
+        f = add_frame(out, CAN_CONTROL_EM_CELL_TEMPS_FRAME_ID, CAN_CONTROL_EM_CELL_TEMPS_LENGTH);
+        (void)can_control_em_cell_temps_pack(f->data, &t, f->len);
+        break;
+    }
+    case BMS_TX_SLOW_PACK_VOLTAGES: {
+        /* 0.1 mV */
+        const struct can_control_bms_pack_voltages_t v = {
+            .max_cell_voltage = clamp_u16((uint32_t)p->max_mv * 10u),
+            .min_cell_voltage = clamp_u16((uint32_t)p->min_mv * 10u),
+            .avg_cell_voltage =
+                (p->cells == 0u) ? 0u : clamp_u16((p->sum_mv * 10u) / p->cells),
+            .max_cell_module = (uint8_t)(p->max_cell / BQ_SWEEP_CELLS_PER_DEVICE),
+            .max_cell_number = (uint8_t)(p->max_cell % BQ_SWEEP_CELLS_PER_DEVICE),
+            .min_cell_module = (uint8_t)(p->min_cell / BQ_SWEEP_CELLS_PER_DEVICE),
+            .min_cell_number = (uint8_t)(p->min_cell % BQ_SWEEP_CELLS_PER_DEVICE),
+        };
+        f = add_frame(out, CAN_CONTROL_BMS_PACK_VOLTAGES_FRAME_ID,
+                      CAN_CONTROL_BMS_PACK_VOLTAGES_LENGTH);
+        (void)can_control_bms_pack_voltages_pack(f->data, &v, f->len);
+        break;
+    }
+    case BMS_TX_SLOW_PACK_TEMPS: {
+        const struct can_control_bms_pack_temps_t t = {
+            .max_temp = p->max_dc,
+            .min_temp = p->min_dc,
+            .avg_temp = avg_dc(p),
+            .max_temp_module = (uint8_t)(p->max_temp / BQ_SWEEP_CELLS_PER_DEVICE),
+            .max_temp_sensor = (uint8_t)(p->max_temp % BQ_SWEEP_CELLS_PER_DEVICE),
+            .min_temp_module = (uint8_t)(p->min_temp / BQ_SWEEP_CELLS_PER_DEVICE),
+            .min_temp_sensor = (uint8_t)(p->min_temp % BQ_SWEEP_CELLS_PER_DEVICE),
+        };
+        f = add_frame(out, CAN_CONTROL_BMS_PACK_TEMPS_FRAME_ID,
+                      CAN_CONTROL_BMS_PACK_TEMPS_LENGTH);
+        (void)can_control_bms_pack_temps_pack(f->data, &t, f->len);
+        break;
+    }
+    default:
+        break;
+    }
+}
+
 static void build_status(bms_control_t *bc, const bms_control_in_t *in, bms_control_out_t *out)
 {
     const uint16_t a = out->active;
@@ -349,8 +506,9 @@ static void build_status(bms_control_t *bc, const bms_control_in_t *in, bms_cont
         .receive_overflow = in->rx_overflowed ? 1u : 0u,
     };
 
-    bms_tx_build_status(&st, &bc->status_tx, out->status);
-    out->send_status = true;
+    bms_tx_build_status(&st, &bc->status_tx,
+                        add_frame(out, CAN_CONTROL_BMS_STATUS_FRAME_ID,
+                                  CAN_CONTROL_BMS_STATUS_LENGTH)->data);
 }
 
 void bms_control_step(bms_control_t *bc, const bms_control_in_t *in, bms_control_out_t *out)
@@ -466,10 +624,27 @@ void bms_control_step(bms_control_t *bc, const bms_control_in_t *in, bms_control
     /* The heartbeat's 5 Hz (issue 47): a BMS fault, or a blocked start-up. */
     out->fault_active = bc->active != 0u || bc->state == BMS_STATE_FAULT ||
                         bc->state == BMS_STATE_FAULT_HELD || !in->startup_ok || !in->can_running;
-    /* Built only when it goes, so its E2E counter counts frames sent. */
+
+    /* Derating (bms_derate.h), on this Sweep's lowest cell and hottest
+       sensor; 0 A while BMS_OK is low. */
+    if (in->swept) {
+        summarise(in->sweep, &bc->summary);
+    }
+    const bool measured = in->swept && bc->summary.cells != 0u && bc->summary.temps != 0u;
+    out->discharge_limit_da = bms_derate_step(&bc->derate, in->now_ms, measured,
+                                              bc->summary.min_mv, bc->summary.max_dc,
+                                              in->pack_current, out->bms_ok);
+    out->summary = bc->summary;
+
+    /* Each built only when it goes, so its E2E counter counts frames
+       sent. */
     if (bms_tx_status_due(in->step_count)) {
         build_status(bc, in, out);
     }
+    if (bms_tx_power_due(in->step_count)) {
+        build_power(bc, in, out);
+    }
+    build_slow(bc, bms_tx_slow_due(in->step_count), out);
 }
 
 const char *bms_control_state_name(uint8_t state)
