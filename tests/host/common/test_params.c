@@ -12,9 +12,9 @@
 enum { ALPHA, BETA, FLAG, TABLE_COUNT };
 
 static const param_def_t DEFS[TABLE_COUNT] = {
-    [ALPHA] = { 1u, "alpha", PARAM_I32,  10, -100,  100 },
-    [BETA]  = { 2u, "beta",  PARAM_U16, 500,    0, 1000 },
-    [FLAG]  = { 3u, "flag",  PARAM_BOOL,  0,    0,    1 },
+    [ALPHA] = { 1u, "alpha", PARAM_I32,  10, -100,  100, false },
+    [BETA]  = { 2u, "beta",  PARAM_U16, 500,    0, 1000, false },
+    [FLAG]  = { 3u, "flag",  PARAM_BOOL,  0,    0,    1, false },
 };
 
 static const param_table_t TABLE = { PARAMS_IMAGE_VCU, DEFS, TABLE_COUNT };
@@ -250,9 +250,9 @@ static void test_our_copy_is_loaded_beside_the_other_images(void)
 enum { OLD_ALPHA, OLD_BETA, OLD_GONE, OLD_COUNT };
 
 static const param_def_t OLD_DEFS[OLD_COUNT] = {
-    [OLD_ALPHA] = { 1u, "alpha", PARAM_I32,  0, -1000, 1000 },
-    [OLD_BETA]  = { 2u, "beta",  PARAM_U16,  0,     0, 1000 },
-    [OLD_GONE]  = { 9u, "gone",  PARAM_U8,   0,     0,  255 },
+    [OLD_ALPHA] = { 1u, "alpha", PARAM_I32,  0, -1000, 1000, false },
+    [OLD_BETA]  = { 2u, "beta",  PARAM_U16,  0,     0, 1000, false },
+    [OLD_GONE]  = { 9u, "gone",  PARAM_U8,   0,     0,  255, false },
 };
 
 static const param_table_t OLD_TABLE = { PARAMS_IMAGE_VCU, OLD_DEFS, OLD_COUNT };
@@ -330,12 +330,12 @@ static void test_a_parameter_is_found_by_name(void)
 static void test_a_bad_table_is_refused(void)
 {
     static const param_def_t dupId[] = {
-        { 1u, "a", PARAM_U8, 0, 0, 1 },
-        { 1u, "b", PARAM_U8, 0, 0, 1 },
+        { 1u, "a", PARAM_U8, 0, 0, 1, false },
+        { 1u, "b", PARAM_U8, 0, 0, 1, false },
     };
-    static const param_def_t defaultOutside[] = { { 1u, "a", PARAM_U8, 5, 0, 4 } };
-    static const param_def_t outsideType[] = { { 1u, "a", PARAM_U8, 0, 0, 256 } };
-    static const param_def_t boolTooWide[] = { { 1u, "a", PARAM_BOOL, 0, 0, 2 } };
+    static const param_def_t defaultOutside[] = { { 1u, "a", PARAM_U8, 5, 0, 4, false } };
+    static const param_def_t outsideType[] = { { 1u, "a", PARAM_U8, 0, 0, 256, false } };
+    static const param_def_t boolTooWide[] = { { 1u, "a", PARAM_BOOL, 0, 0, 2, false } };
     const param_table_t bad[] = {
         { PARAMS_IMAGE_VCU, dupId, 2u },
         { PARAMS_IMAGE_VCU, defaultOutside, 1u },

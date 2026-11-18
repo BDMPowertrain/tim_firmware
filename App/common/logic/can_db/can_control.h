@@ -267,6 +267,8 @@ extern "C" {
 #define CAN_CONTROL_VCU_STATUS_BUS_OFF_LATCHED_NAME "BusOffLatched"
 #define CAN_CONTROL_VCU_STATUS_PARAMETERS_DEFAULTED_NAME "ParametersDefaulted"
 #define CAN_CONTROL_VCU_STATUS_STARTUP_BLOCKED_NAME "StartupBlocked"
+#define CAN_CONTROL_VCU_STATUS_NOT_CALIBRATED_NAME "NotCalibrated"
+#define CAN_CONTROL_VCU_STATUS_PEDAL_CHECK_DUE_NAME "PedalCheckDue"
 #define CAN_CONTROL_VCU_STATUS_ENERGY_METER_TIMEOUT_NAME "EnergyMeterTimeout"
 #define CAN_CONTROL_VCU_STATUS_ERROR_PASSIVE_NAME "ErrorPassive"
 #define CAN_CONTROL_VCU_STATUS_RECEIVE_OVERFLOW_NAME "ReceiveOverflow"
@@ -883,6 +885,24 @@ struct can_control_vcu_status_t {
      * Offset: 0
      */
     uint8_t startup_blocked;
+
+    /**
+     * The pedal and brake calibration is not Calibrated (ADR 0016): APPS implausible, no torque, Start procedure refused.
+     *
+     * Range: 0..1 (0..1 -)
+     * Scale: 1
+     * Offset: 0
+     */
+    uint8_t not_calibrated;
+
+    /**
+     * No Pedal check has passed for this image and these parameters (ADR 0016): Start procedure refused.
+     *
+     * Range: 0..1 (0..1 -)
+     * Scale: 1
+     * Offset: 0
+     */
+    uint8_t pedal_check_due;
 
     /**
      * The EM_Measurement or EM_Status mailbox is not VALID. Cuts nothing.
@@ -3106,6 +3126,50 @@ bool can_control_vcu_status_startup_blocked_is_in_range(uint8_t value);
  * @return true if in range, false otherwise.
  */
 bool can_control_vcu_status_startup_blocked_is_in_phys_range(float value);
+
+/**
+ * Check that given signal is in allowed range.
+ *
+ * @param[in] value Signal to check.
+ *
+ * @return true if in range, false otherwise.
+ */
+bool can_control_vcu_status_not_calibrated_is_in_range(uint8_t value);
+
+/**
+ * Check that given physical value is in allowed range before encoding.
+ *
+ * Use this BEFORE calling _encode() to avoid silent integer overflow:
+ *   encode(-1.0) on a [0,100] signal wraps to 255 and passes is_in_range().
+ *   is_in_phys_range(-1.0) correctly returns false.
+ *
+ * @param[in] value Physical signal value to check.
+ *
+ * @return true if in range, false otherwise.
+ */
+bool can_control_vcu_status_not_calibrated_is_in_phys_range(float value);
+
+/**
+ * Check that given signal is in allowed range.
+ *
+ * @param[in] value Signal to check.
+ *
+ * @return true if in range, false otherwise.
+ */
+bool can_control_vcu_status_pedal_check_due_is_in_range(uint8_t value);
+
+/**
+ * Check that given physical value is in allowed range before encoding.
+ *
+ * Use this BEFORE calling _encode() to avoid silent integer overflow:
+ *   encode(-1.0) on a [0,100] signal wraps to 255 and passes is_in_range().
+ *   is_in_phys_range(-1.0) correctly returns false.
+ *
+ * @param[in] value Physical signal value to check.
+ *
+ * @return true if in range, false otherwise.
+ */
+bool can_control_vcu_status_pedal_check_due_is_in_phys_range(float value);
 
 /**
  * Check that given signal is in allowed range.

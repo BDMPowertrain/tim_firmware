@@ -41,7 +41,23 @@ int32_t parameters_value(size_t index);
    missing or out of range (params_defaulted()). */
 bool parameters_defaulted(void);
 
-/* The shell's `param` command: param [dump] | set <name> <value> | save. */
+/* The value in force came from the copy loaded, not a default. */
+bool parameters_from_copy(size_t index);
+
+/* The save counter of the copy loaded, 0 if none was (ADR 0016: a Pedal
+   check pass is for these Parameters). */
+uint32_t parameters_save_counter(void);
+
+/* Sets the pending values of count Parameters, calibrations included, and
+   saves, through the save hook: the image's guided capture saves a
+   calibration this way, as `param set` refuses one. Anything else pending
+   is saved with them. NULL once saved, otherwise why not, for the shell.
+   Shell task only. */
+const char *parameters_save_values(const size_t *index, const int32_t *value, size_t count);
+
+/* The shell's `param` command: param [dump] | set <name> <value> | save.
+   A calibration Parameter is never set by hand, and `param dump` prints
+   the calibration as one record after the rest. */
 int parameters_cmd(int argc, char **argv);
 
 #endif /* APP_INC_PARAMETERS_H */

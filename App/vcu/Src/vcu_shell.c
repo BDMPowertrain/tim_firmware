@@ -1,6 +1,6 @@
 /* vcu_shell.c — the shell commands only the VCU image has: the IMU, the
-   pedal and brake inputs, and the Data log, CAN and VBAT modules the BMS
-   image does not link yet. shell.c is common code and knows none of them; they reach it
+   pedal and brake inputs and their calibration, and the CAN and VBAT
+   modules the BMS image does not link yet. shell.c is common code and knows none of them; they reach it
    through shell_register_commands() (ADR 0001). */
 
 #include "vcu_shell.h"
@@ -15,9 +15,12 @@
 #include "control_bus.h"
 #include "adc_window.h"
 #include "imu.h"
+#include "parameters.h"
 #include "print.h"
 #include "shell.h"
 #include "vbat.h"
+#include "vcu_calibration.h"
+#include "vcu_params.h"
 #include "vcu_sensors.h"
 #include "vcu_step.h"
 
@@ -387,6 +390,8 @@ static void print_start_blockers(uint16_t blockers)
         { VCU_START_BUS_VOLTAGE,      "bus voltage" },
         { VCU_START_TIMING_FAULT,     "timing fault" },
         { VCU_START_TORQUE_CUT,       "torque cut" },
+        { VCU_START_NOT_CALIBRATED,   "not calibrated" },
+        { VCU_START_PEDAL_CHECK_DUE,  "pedal check due" },
     };
 
     if (blockers == 0u) {
@@ -430,6 +435,39 @@ static void print_torque(const vcu_inputs_t *in)
     shell_printf("\r\n");
 }
 
+/* What the Pedal check (ADR 0016) waits for next. */
+static const char *pedal_check_next(const vcu_pedal_check_t *pc)
+{
+    switch (pc->phase) {
+    case VCU_PEDAL_CHECK_RELEASE:       return "release the accelerator";
+    case VCU_PEDAL_CHECK_FLOOR_IT:      return "press the accelerator to the floor";
+    case VCU_PEDAL_CHECK_RELEASE_AGAIN: return "release the accelerator";
+    default:
+        return pc->brake_released ? "press the brake" : "release the brake";
+    }
+}
+
+/* "not calibrated", "parameters defaulted" and "pedal check due", each
+   on when it applies (ADR 0015, 0016). Provisional (#28). */
+static void print_calibration(const vcu_inputs_t *in)
+{
+    const vcu_cal_result_t cal = vcu_step_calibration();
+
+    if (cal.reason == VCU_CAL_OK) {
+        shell_printf("calibration: calibrated");
+    } else {
+        shell_printf("calibration: not calibrated: %s%s%s", vcu_cal_sensor_name(cal.sensor),
+                     cal.sensor != VCU_CAL_SENSOR_NONE ? " " : "", vcu_cal_reason_name(cal.reason));
+    }
+    if (parameters_defaulted()) {
+        shell_printf("; parameters defaulted");
+    }
+    if (in->pedal_check_due) {
+        shell_printf("; pedal check due: %s (in GLV_ON)", pedal_check_next(&in->pedal_check));
+    }
+    shell_printf("\r\n");
+}
+
 static void print_inputs(const vcu_inputs_t *in)
 {
     static const char *const appsName[VCU_APPS_COUNT] = { "APPS1", "APPS2" };
@@ -461,6 +499,7 @@ static void print_inputs(const vcu_inputs_t *in)
     shell_printf("brake %s; start procedure ", in->brake_engaged ? "engaged" : "released");
     print_start_blockers(in->start_blockers);
     print_torque(in);
+    print_calibration(in);
 }
 
 #define CMD_INPUTS_USAGE "usage: inputs [stream]\r\n"
@@ -494,12 +533,130 @@ static int cmd_inputs(int argc, char **argv)
     return 0;
 }
 
+/* ---- calibrate (ADR 0016) ---------------------------------------------- */
+
+#define CAL_HOLD_MS  500u   /* each position is sampled this long */
+#define CAL_WAIT_MS  60000u /* time to get into a position */
+#define CAL_USAGE    "usage: calibrate [status]\r\n"
+
+/* Asks for a position, waits for a key, then samples it while it is held.
+   False, with the reason printed, if no key came or one came while
+   sampling. */
+static bool cal_hold(const char *position, vcu_cal_capture_t *c)
+{
+    shell_printf("%s, hold it, then press a key\r\n", position);
+    if (!shell_wait_key(CAL_WAIT_MS)) {
+        shell_printf("calibrate: no key in %lu s, nothing saved\r\n",
+                     (unsigned long)(CAL_WAIT_MS / 1000u));
+        return false;
+    }
+    vcu_cal_capture_init(c);
+    for (uint32_t t = 0; t < CAL_HOLD_MS; t += 10u) {
+        vcu_inputs_t in;
+
+        if (!vcu_step_read_inputs(&in)) {
+            shell_printf("calibrate: control step not running, nothing saved\r\n");
+            return false;
+        }
+        vcu_cal_capture_add(c, &in.raw);
+        if (shell_wait_key(10u)) { /* one step's period between samples */
+            shell_printf("calibrate: stopped, nothing saved\r\n");
+            return false;
+        }
+    }
+    return true;
+}
+
+static void cal_print(const vcu_cal_values_t *v)
+{
+    shell_printf("APPS1 %ld..%ld, APPS2 %ld..%ld, brake zero %ld front %ld rear, "
+                 "brake engaged at %ld above zero\r\n",
+                 (long)v->apps_min[0], (long)v->apps_max[0], (long)v->apps_min[1],
+                 (long)v->apps_max[1], (long)v->brake_zero[0], (long)v->brake_zero[1],
+                 (long)v->brake_engaged);
+}
+
+/* The guided capture: three held positions, refused with the reason
+   unless the result is Calibrated (vcu_calibration.h), saved through the
+   save hook (GLV_ON only) and in force after a reset. End points are
+   never typed. */
+static int cmd_calibrate(int argc, char **argv)
+{
+    static vcu_cal_capture_t released; /* static: the shell task's stack is small */
+    static vcu_cal_capture_t floored;
+    static vcu_cal_capture_t braked;
+
+    if (argc == 2 && strcmp(argv[1], "status") == 0) {
+        vcu_inputs_t in;
+
+        if (!vcu_step_read_inputs(&in)) {
+            shell_printf("calibrate: control step not running\r\n");
+            return 0;
+        }
+        print_calibration(&in);
+        return 0;
+    }
+    if (argc != 1) {
+        shell_printf(CAL_USAGE);
+        return 0;
+    }
+
+    const char *refusal = vcu_step_save_refusal();
+    if (refusal != NULL) {
+        shell_printf("calibrate: refused: %s\r\n", refusal);
+        return 0;
+    }
+    shell_printf("calibrate: three positions, %u ms each; a key while sampling stops\r\n",
+                 (unsigned)CAL_HOLD_MS);
+    if (!cal_hold("1/3 release the accelerator and the brake", &released) ||
+        !cal_hold("2/3 press the accelerator to the floor", &floored) ||
+        !cal_hold("3/3 release the accelerator, press the brake firmly", &braked)) {
+        return 0;
+    }
+
+    vcu_cal_values_t v;
+    const vcu_cal_result_t r = vcu_cal_from_captures(&released, &floored, &braked, &v);
+
+    /* The capture's own refusals come before any value is worked out. */
+    if (r.reason != VCU_CAL_NO_SAMPLE && r.reason != VCU_CAL_NOT_STEADY &&
+        r.reason != VCU_CAL_APPS_DIRECTION) {
+        cal_print(&v);
+    }
+    if (r.reason != VCU_CAL_OK) {
+        shell_printf("calibrate: refused: %s%s%s; nothing saved\r\n",
+                     vcu_cal_sensor_name(r.sensor), r.sensor != VCU_CAL_SENSOR_NONE ? " " : "",
+                     vcu_cal_reason_name(r.reason));
+        return 0;
+    }
+
+    static const size_t index[] = {
+        VCU_PARAM_APPS1_MIN,   VCU_PARAM_APPS1_MAX,   VCU_PARAM_APPS2_MIN,
+        VCU_PARAM_APPS2_MAX,   VCU_PARAM_BRAKE1_ZERO, VCU_PARAM_BRAKE2_ZERO,
+        VCU_PARAM_BRAKE_ENGAGED, VCU_PARAM_CAL_REVISION,
+    };
+    const int32_t value[] = {
+        v.apps_min[0],   v.apps_max[0],   v.apps_min[1], v.apps_max[1],
+        v.brake_zero[0], v.brake_zero[1], v.brake_engaged, v.revision,
+    };
+    _Static_assert(sizeof(index) / sizeof(index[0]) == sizeof(value) / sizeof(value[0]),
+                   "one value per calibration Parameter");
+
+    const char *failure = parameters_save_values(index, value, sizeof(index) / sizeof(index[0]));
+    if (failure != NULL) {
+        shell_printf("calibrate: save %s\r\n", failure);
+        return 0;
+    }
+    shell_printf("calibrate: saved, in force after a reset; then do the pedal check\r\n");
+    return 0;
+}
+
 static const shell_cmd_t vcuCommands[] = {
     { "imu",       cmd_imu,       "latest accel/gyro sample" },
     { "imustream", cmd_imustream, "live accel/gyro stream, any key to stop" },
     { "can",       cmd_can,       "can status[1|2]|stby2 on|off|send2 <id> <hex> [fd] [brs]|stream2" },
     { "vbat",      cmd_vbat,      "battery voltage" },
     { "inputs",    cmd_inputs,    "pedal, brake and supply readings [stream]" },
+    { "calibrate", cmd_calibrate, "capture pedal and brake end points [status]" },
 };
 
 void vcu_shell_register(void)

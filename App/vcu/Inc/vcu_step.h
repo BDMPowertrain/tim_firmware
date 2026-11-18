@@ -31,12 +31,25 @@ typedef struct {
     uint16_t cuts;              /* Torque cuts active: bit (1 << vcu_cut_t) */
     int16_t  torque_request;    /* the driver's, 0.1 N.m */
     int16_t  torque;            /* in the 0x0C0 sent, 0.1 N.m */
+    bool     pedal_check_due;   /* ADR 0016 */
+    vcu_pedal_check_t pedal_check; /* how far it has got */
 } vcu_inputs_t;
 
 /* Reads the Parameters the step needs and sets up the Control bus for the
    frames the VCU reads. Call from tasks_init() after parameters_init() and
    before the step is created. False if CAN1 refused. */
 bool vcu_step_init(void);
+
+/* Whether the calibration in force is Calibrated, and if not why
+   (vcu_calibration.h). Fixed by vcu_step_init() until the next reset.
+   Any task. */
+vcu_cal_result_t vcu_step_calibration(void);
+
+/* Searches the Event log for a Pedal check pass for this build and the
+   loaded Parameters (ADR 0016) and hands the step what it found. Runs on
+   the Event writer's task once the log is open (events_task_args_t
+   after_open); until then the step counts the check as due. */
+void vcu_step_find_pedal_check(void);
 
 /* The step itself, for control_step_task(). */
 extern const control_step_def_t vcu_step_def;

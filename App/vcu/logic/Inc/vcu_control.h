@@ -121,6 +121,25 @@
  *
  * Every state transition is an EVENT_VCU_STATE Event with its cause.
  *
+ * Calibrated (ADR 0015, 0016; vcu_calibration.h), judged once at init from
+ * the config. Not calibrated, or the Parameters defaulted, the VCU still
+ * reaches GLV_ON (the shell is needed to calibrate) but both APPS read
+ * NOT_CALIBRATED, so the APPS Torque cut is on and the Start procedure
+ * refused (VCU_START_NOT_CALIBRATED, VCU_START_PARAMS_DEFAULTED); the
+ * fault LED is on, and VCU_Status carries NotCalibrated or
+ * ParametersDefaulted. Not calibrated is an EVENT_NOT_CALIBRATED Event on
+ * the step that leaves STARTUP (parameters.c writes the defaulted one).
+ *
+ * Pedal check (ADR 0016; vcu_pedal_check.h): due unless the Event log holds
+ * a pass for this image and these Parameters (in.pedal_check_record) or
+ * one passed since reset; due refuses the Start procedure
+ * (VCU_START_PEDAL_CHECK_DUE) and sets PedalCheckDue. The sequence runs
+ * only while due, in GLV_ON (the Tractive System off), Calibrated and with
+ * the Parameters loaded; anything else starts it over. A pass is an
+ * EVENT_PEDAL_CHECK Event with the build ID, the Parameters' save counter
+ * and the calibration's fingerprint; a fail under way is an
+ * EVENT_PEDAL_CHECK_FAILED Event.
+ *
  * Time is a 32-bit millisecond count compared only by subtraction.
  *
  * This is logic (ADR 0002): no HAL, no RTOS, no clock.
@@ -137,6 +156,8 @@
 #include "e2e_p11.h"
 #include "event_log.h"
 #include "mailbox.h"
+#include "vcu_calibration.h"
+#include "vcu_pedal_check.h"
 #include "vcu_sensors.h"
 
 #define VCU_STATE_STARTUP        CAN_CONTROL_VCU_STATUS_STATE_STARTUP_CHOICE
@@ -188,6 +209,13 @@ extern const control_rx_t vcu_rx_frames[VCU_RX_COUNT];
 #define VCU_START_BUS_VOLTAGE      0x0800u /* bus below 60 V or below 90% of pack */
 #define VCU_START_TIMING_FAULT     0x1000u /* the timing-fault Torque cut is active */
 #define VCU_START_TORQUE_CUT       0x2000u /* any Torque cut is active */
+#define VCU_START_NOT_CALIBRATED   0x4000u /* the calibration is not Calibrated */
+#define VCU_START_PEDAL_CHECK_DUE  0x8000u /* no Pedal check for this image and Parameters */
+
+/* What the search of the Event log found (in.pedal_check_record). */
+#define VCU_PEDAL_CHECK_UNKNOWN 0u /* not searched yet: due */
+#define VCU_PEDAL_CHECK_FOUND   1u /* a pass for this image and these Parameters */
+#define VCU_PEDAL_CHECK_ABSENT  2u /* none: due */
 
 /* An EVENT_VCU_STATE Event's cause (event_codes.h). */
 typedef enum {
@@ -237,7 +265,12 @@ typedef enum {
 typedef struct {
     vcu_sensor_cal_t cal;
     uint16_t brake_engaged;  /* the brake_engaged Parameter, counts above zero */
+    uint16_t cal_revision;   /* the cal_revision Parameter */
+    bool     cal_present;    /* every calibration Parameter came from a valid copy */
     uint16_t max_torque;     /* the max_torque Parameter, 0.1 N.m */
+    uint32_t build_id;       /* the image's, for a Pedal check pass */
+    bool     build_dirty;    /* built from a tree with uncommitted changes */
+    uint32_t param_save_counter; /* the loaded copy's, 0 if none */
     bool     params_defaulted;
     bool     not_dual_bank;
     bool     last_reset_not_power_on;
@@ -257,6 +290,7 @@ typedef struct {
     bool             error_passive;
     bool             rx_overflowed;
     bool             timing_fault; /* control_step_ctx_t.timing_fault */
+    uint8_t          pedal_check_record; /* VCU_PEDAL_CHECK_... */
 } vcu_control_in_t;
 
 typedef struct {
@@ -280,6 +314,9 @@ typedef struct {
     int16_t       torque_request; /* the driver's, from the lower Pedal travel, 0.1 N.m */
     int16_t       torque;         /* in this step's 0x0C0 after the gates, 0.1 N.m */
     uint16_t      cuts;           /* the Torque cuts active: bit (1 << vcu_cut_t) */
+    vcu_cal_result_t  calibration;    /* VCU_CAL_OK: Calibrated */
+    bool              pedal_check_due;
+    vcu_pedal_check_t pedal_check;    /* how far the sequence has got */
 
     /* Pin levels, true = on. */
     bool          brake_light;
@@ -333,6 +370,11 @@ typedef struct {
     uint8_t      rolling_counter;  /* the next 0x0C0's */
     bool         enable_sent;      /* the last 0x0C0 carried Enable = 1 */
     e2e_p11_tx_t status_tx;
+    vcu_cal_values_t  cal_values;     /* the config's, as the rule takes them */
+    vcu_cal_result_t  calibration;    /* judged at init */
+    uint32_t          cal_fingerprint; /* vcu_cal_fingerprint() of the config's */
+    vcu_pedal_check_t pedal_check;
+    bool         pedal_check_passed; /* since reset */
 } vcu_control_t;
 
 void vcu_control_init(vcu_control_t *vc, const vcu_control_config_t *config);

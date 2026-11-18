@@ -439,3 +439,18 @@ event_read_t event_log_read(const event_log_t *log, event_pos_t pos, event_t *ou
     decode(b, out);
     return EVENT_READ_OK;
 }
+
+bool event_log_find(const event_log_t *log, bool (*match)(const event_t *ev, const void *ctx),
+                    const void *ctx, event_t *out)
+{
+    event_pos_t pos;
+    bool more = event_log_newest(log, &pos);
+
+    while (more) {
+        if (event_log_read(log, pos, out) == EVENT_READ_OK && match(out, ctx)) {
+            return true;
+        }
+        more = event_log_older(log, &pos);
+    }
+    return false;
+}

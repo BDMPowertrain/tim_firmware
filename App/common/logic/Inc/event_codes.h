@@ -5,7 +5,7 @@
  * it: a stored Event outlives the image that wrote it.
  *
  * Codes for Events whose source is not built yet (BMS fault
- * trip, charger, balancing, pedal check and the rest of the spec's list)
+ * trip, charger, balancing and the rest of the spec's list)
  * are added here when their source is.
  *
  * This is logic (ADR 0002): no HAL, no RTOS, no clock.
@@ -52,6 +52,11 @@ typedef enum {
     EVENT_INVERTER_FAULT_CLEAR = 67, /* event_data_fault_clear(): a 0x0C1 sent, or its result */
     EVENT_DISCHARGE_SLOW       = 68, /* event_data_discharge_slow() */
     EVENT_EM_VIOLATION         = 69, /* event_data_em_violation(): the Violation bit set */
+
+    /* Calibration and the Pedal check (ADR 0016, vcu_control.h). */
+    EVENT_PEDAL_CHECK        = 70, /* event_data_pedal_check(): a pass */
+    EVENT_PEDAL_CHECK_FAILED = 71, /* event_data_pedal_check_failed() */
+    EVENT_NOT_CALIBRATED     = 72, /* event_data_not_calibrated() */
 
     /* The Data log (ADR 0021, data_log.h). */
     EVENT_DATA_LOG_CARD = 80, /* event_data_data_log_card(): no card, or a card error */
@@ -179,6 +184,37 @@ void event_data_discharge_slow(uint8_t data[EVENT_DATA_SIZE], int16_t bus_dv, ui
 
 /* 0 VCU state (u8). */
 void event_data_em_violation(uint8_t data[EVENT_DATA_SIZE], uint8_t state);
+
+/* 0 build ID (u32), 4 parameter save counter (u32), 8 flags (u8): bit 0,
+   a dirty build; 12 the calibration's fingerprint (u32,
+   vcu_cal_fingerprint()). */
+void event_data_pedal_check(uint8_t data[EVENT_DATA_SIZE], uint32_t build_id,
+                            uint32_t save_counter, uint32_t calibration, bool dirty);
+
+/* The running image and the loaded Parameters, for a Pedal check search. */
+typedef struct {
+    uint32_t build_id;
+    uint32_t save_counter; /* the loaded copy's */
+    uint32_t calibration;  /* the loaded calibration's fingerprint: the save
+                              counter starts again at 1 when no copy is good */
+    bool     dirty;        /* the running image is a dirty build */
+} event_pedal_check_key_t;
+
+/* ADR 0016: ev is a Pedal check pass for key (an event_pedal_check_key_t),
+   in the form event_log_find() takes. A dirty build, or one with no build
+   ID (0), never matches, nor does a pass a dirty build wrote: two
+   uncommitted images share an ID (cmake/build_id_write.cmake). */
+bool event_pedal_check_matches(const event_t *ev, const void *key);
+
+/* 0 vcu_pedal_check_result_t (u8, vcu_pedal_check.h), 1 phase reached
+   (u8), 4 APPS1 travel (u16), 6 APPS2 travel (u16). */
+void event_data_pedal_check_failed(uint8_t data[EVENT_DATA_SIZE], uint8_t reason, uint8_t phase,
+                                   const uint16_t travel[2]);
+
+/* 0 vcu_cal_reason_t (u8, vcu_calibration.h), 1 vcu_cal_sensor_t (u8),
+   2 stored calibration revision (u16), 4 the image's (u16). */
+void event_data_not_calibrated(uint8_t data[EVENT_DATA_SIZE], uint8_t reason, uint8_t sensor,
+                               uint16_t stored_revision, uint16_t image_revision);
 
 typedef struct {
     uint8_t  state;   /* data_log_state_t (data_log_card.h): MISSING or ERROR */

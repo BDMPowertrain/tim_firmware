@@ -4,7 +4,15 @@
 
 #include "adc_window.h"
 #include "event_codes.h"
+#include "vcu_params.h"
 #include "vcu_tx.h"
+
+/* A calibrated threshold always clears its own hysteresis. */
+_Static_assert(VCU_BRAKE_ENGAGED_MIN > VCU_BRAKE_HYSTERESIS,
+               "brake_engaged must exceed the Brake engaged hysteresis");
+_Static_assert(VCU_PEDAL_CHECK_AGREE == VCU_APPS_AGREE,
+               "the Pedal check holds the sensors to the plausibility rule's 10 points");
+_Static_assert(VCU_PEDAL_CHECK_REST == VCU_TRAVEL_RELEASED, "released is below 5% everywhere");
 
 const control_rx_t vcu_rx_frames[VCU_RX_COUNT] = {
     [VCU_RX_BMS_STATUS]            = CONTROL_RX_BMS_STATUS,
@@ -25,6 +33,30 @@ void vcu_control_init(vcu_control_t *vc, const vcu_control_config_t *config)
     memset(vc, 0, sizeof(*vc));
     vc->config = *config;
     vc->state = VCU_STATE_STARTUP;
+
+    /* Kept in vc, not on the stack: this runs on initTask's 512 bytes. */
+    vc->cal_values = (vcu_cal_values_t){
+        .apps_min = { config->cal.apps_min[0], config->cal.apps_min[1] },
+        .apps_max = { config->cal.apps_max[0], config->cal.apps_max[1] },
+        .brake_zero = { config->cal.brake_zero[0], config->cal.brake_zero[1] },
+        .brake_engaged = config->brake_engaged,
+        .revision = config->cal_revision,
+    };
+    vc->calibration = vcu_cal_check(&vc->cal_values, config->cal_present);
+    vc->cal_fingerprint = vcu_cal_fingerprint(&vc->cal_values);
+    vcu_pedal_check_reset(&vc->pedal_check);
+}
+
+static bool calibrated(const vcu_control_t *vc)
+{
+    return vc->calibration.reason == VCU_CAL_OK;
+}
+
+/* ADR 0015: not calibrated or the Parameters defaulted, the pedals are
+   implausible, the Start procedure refused and the fault LED on. */
+static bool pedals_unusable(const vcu_control_t *vc)
+{
+    return !calibrated(vc) || vc->config.params_defaulted;
 }
 
 /* ------------------------------------------------------------------ */
@@ -284,6 +316,12 @@ static uint16_t start_blockers(const vcu_control_t *vc, const vcu_control_in_t *
     }
     if (out->cuts != 0u) {
         b |= VCU_START_TORQUE_CUT;
+    }
+    if (!calibrated(vc)) {
+        b |= VCU_START_NOT_CALIBRATED;
+    }
+    if (out->pedal_check_due) {
+        b |= VCU_START_PEDAL_CHECK_DUE;
     }
     return b;
 }
@@ -595,6 +633,52 @@ static vcu_cause_t first_cause(uint16_t causes)
 }
 
 /* ------------------------------------------------------------------ */
+/* Calibrated and the Pedal check (ADR 0016)                          */
+/* ------------------------------------------------------------------ */
+
+static void post_not_calibrated(const vcu_control_t *vc, vcu_control_out_t *out)
+{
+    uint8_t data[EVENT_DATA_SIZE];
+
+    event_data_not_calibrated(data, (uint8_t)vc->calibration.reason,
+                              (uint8_t)vc->calibration.sensor, vc->config.cal_revision,
+                              (uint16_t)VCU_CALIBRATION_REVISION);
+    post_event(out, EVENT_NOT_CALIBRATED, data);
+}
+
+/* The Pedal check: due until a pass is found in the Event log or passes
+   here. It runs while due in GLV_ON with the pedals usable; anything else
+   starts it over. */
+static void run_pedal_check(vcu_control_t *vc, const vcu_control_in_t *in,
+                            vcu_control_out_t *out)
+{
+    const bool due = !vc->pedal_check_passed && in->pedal_check_record != VCU_PEDAL_CHECK_FOUND;
+    uint8_t data[EVENT_DATA_SIZE];
+
+    if (!due || vc->state != VCU_STATE_GLV_ON || pedals_unusable(vc)) {
+        vcu_pedal_check_reset(&vc->pedal_check);
+    } else {
+        const uint8_t phase = vc->pedal_check.phase;
+        const vcu_pedal_check_result_t r =
+            vcu_pedal_check_step(&vc->pedal_check, &out->sensors, out->brake_engaged);
+
+        if (r == VCU_PEDAL_CHECK_PASS) {
+            vc->pedal_check_passed = true;
+            event_data_pedal_check(data, vc->config.build_id, vc->config.param_save_counter,
+                                   vc->cal_fingerprint, vc->config.build_dirty);
+            post_event(out, EVENT_PEDAL_CHECK, data);
+        } else if (r != VCU_PEDAL_CHECK_NONE) {
+            const uint16_t travel[2] = { out->sensors.apps[0].travel,
+                                         out->sensors.apps[1].travel };
+            event_data_pedal_check_failed(data, (uint8_t)r, phase, travel);
+            post_event(out, EVENT_PEDAL_CHECK_FAILED, data);
+        }
+    }
+    out->pedal_check_due = due && !vc->pedal_check_passed;
+    out->pedal_check = vc->pedal_check;
+}
+
+/* ------------------------------------------------------------------ */
 /* Frames                                                             */
 /* ------------------------------------------------------------------ */
 
@@ -645,6 +729,8 @@ static void send_status(vcu_control_t *vc, const vcu_control_in_t *in,
         .bus_off_latched = in->bus_off_latched ? 1u : 0u,
         .parameters_defaulted = vc->config.params_defaulted ? 1u : 0u,
         .startup_blocked = out->startup_blocked ? 1u : 0u,
+        .not_calibrated = calibrated(vc) ? 0u : 1u,
+        .pedal_check_due = out->pedal_check_due ? 1u : 0u,
         .energy_meter_timeout = bus->em_valid ? 0u : 1u,
         .error_passive = in->error_passive ? 1u : 0u,
         .receive_overflow = in->rx_overflowed ? 1u : 0u,
@@ -680,6 +766,12 @@ void vcu_control_step(vcu_control_t *vc, const vcu_control_in_t *in,
 
     /* 2. The pedal and brake sensors. */
     vcu_sensors_compute(&in->raw, &vc->config.cal, &out->sensors);
+    out->calibration = vc->calibration;
+    if (pedals_unusable(vc)) {
+        for (size_t i = 0; i < VCU_APPS_COUNT; i++) {
+            out->sensors.apps[i] = (vcu_apps_reading_t){ 0u, VCU_SENSOR_NOT_CALIBRATED };
+        }
+    }
     out->samples_ready = all_sampled(&in->raw);
     run_cut(vc, in, out, VCU_CUT_APPS, apps_implausible(&out->sensors), VCU_CUT_PERSIST_MS);
     run_cut(vc, in, out, VCU_CUT_BRAKE_SENSOR, brake_sensor_failed(&out->sensors),
@@ -697,6 +789,7 @@ void vcu_control_step(vcu_control_t *vc, const vcu_control_in_t *in,
     run_cut(vc, in, out, VCU_CUT_BRAKE_PEDAL,
             out->brake_engaged && higher_travel(&out->sensors) > VCU_TRAVEL_BRAKE_CUT, 0u);
     const bool press = start_press(vc, in);
+    run_pedal_check(vc, in, out);
 
     /* 4. The state transitions, at most one per step. */
     const uint8_t state_before = vc->state;
@@ -704,6 +797,9 @@ void vcu_control_step(vcu_control_t *vc, const vcu_control_in_t *in,
     case VCU_STATE_STARTUP:
         if (in->startup_ok && in->can_running && out->samples_ready) {
             enter(vc, in, out, &bus, VCU_STATE_GLV_ON, VCU_CAUSE_STARTUP_DONE, 0u);
+            if (!calibrated(vc)) {
+                post_not_calibrated(vc, out);
+            }
         } else {
             out->startup_blocked = true;
         }
@@ -776,10 +872,11 @@ void vcu_control_step(vcu_control_t *vc, const vcu_control_in_t *in,
        restart is needed, blinking while a Torque cut lasts, from its first
        step (ADR 0006). Solid also, after STARTUP, while the bus-off latch
        is set or a device reports a fault, and in TS_ACTIVE while any cause
-       of Leaving Ready to Drive is present (issue 58). An open Shutdown
+       of Leaving Ready to Drive is present (issue 58), and while not
+       Calibrated or the Parameters defaulted (ADR 0015). An open Shutdown
        Circuit in GLV_ON is the parked car, not a fault. */
     const bool fault_led_solid =
-        vc->restart_needed ||
+        vc->restart_needed || pedals_unusable(vc) ||
         (vc->state != VCU_STATE_STARTUP &&
          (in->bus_off_latched || bus.bms_fault || bus.inverter_fault)) ||
         (vc->state == VCU_STATE_TS_ACTIVE && leave_causes(in, &bus) != 0u);

@@ -102,6 +102,8 @@ BO_ 144 VCU_Status: 8 VCU
  SG_ BusOffLatched : 27|1@1+ (1,0) [0|1] "" Vector__XXX
  SG_ ParametersDefaulted : 28|1@1+ (1,0) [0|1] "" Vector__XXX
  SG_ StartupBlocked : 29|1@1+ (1,0) [0|1] "" Vector__XXX
+ SG_ NotCalibrated : 30|1@1+ (1,0) [0|1] "" Vector__XXX
+ SG_ PedalCheckDue : 31|1@1+ (1,0) [0|1] "" Vector__XXX
  SG_ EnergyMeterTimeout : 32|1@1+ (1,0) [0|1] "" Vector__XXX
  SG_ ErrorPassive : 33|1@1+ (1,0) [0|1] "" Vector__XXX
  SG_ ReceiveOverflow : 34|1@1+ (1,0) [0|1] "" Vector__XXX
@@ -300,6 +302,8 @@ CM_ SG_ 144 ShutdownCircuitOpen "The Shutdown Circuit input reads open.";
 CM_ SG_ 144 BusOffLatched "Third bus-off without 1 s clean; clears after 5 s clean.";
 CM_ SG_ 144 ParametersDefaulted "No valid stored parameters: not calibrated, no torque, Start procedure refused.";
 CM_ SG_ 144 StartupBlocked "A start-up check has not passed and the VCU is staying in STARTUP.";
+CM_ SG_ 144 NotCalibrated "The pedal and brake calibration is not Calibrated (ADR 0016): APPS implausible, no torque, Start procedure refused.";
+CM_ SG_ 144 PedalCheckDue "No Pedal check has passed for this image and these parameters (ADR 0016): Start procedure refused.";
 CM_ SG_ 144 EnergyMeterTimeout "The EM_Measurement or EM_Status mailbox is not VALID. Cuts nothing.";
 CM_ SG_ 144 ErrorPassive "The CAN1 controller is error-passive.";
 CM_ SG_ 144 ReceiveOverflow "A CAN1 receive FIFO has overflowed since power-up.";

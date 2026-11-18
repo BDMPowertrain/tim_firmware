@@ -14,16 +14,16 @@
  *   SUPPLY_FAULT    its sensor supply is outside its window, or unmeasured
  *   NOT_CALIBRATED  its end points cannot scale it (APPS: min not below max;
  *                   brake: zero outside the electrical window)
- *   OUT_OF_RANGE    APPS: more than 10% of its span below its min or above
- *                   its max. Brake: outside the electrical window. An open
- *                   wire or a short to ground or supply lands here
- *                   (T.4.2.10, T.4.3.4).
+ *   OUT_OF_RANGE    APPS: outside the electrical window, or more than 10%
+ *                   of its span below its min or above its max. Brake:
+ *                   outside the electrical window. An open wire or a short
+ *                   to ground or supply lands here (T.4.2.10, T.4.3.4).
  *   OK
  * A reading that is not OK has travel and pressure 0. What a failed
  * sensor does to torque is the torque path's (issue 57).
  *
- * The full Calibrated rule (span, revision, window) is issue 59's; this
- * module only refuses end points it cannot scale with.
+ * The full Calibrated rule (span, revision, window) is vcu_calibration.h;
+ * this module only refuses end points it cannot scale with.
  *
  * Every threshold here is a constant (ADR 0015). The divider, the supply
  * window and the brake window are provisional until the daughterboard
@@ -44,6 +44,11 @@
 /* A sensor supply is good inside 4.75-5.25 V. */
 #define VCU_SUPPLY_MIN_COUNTS VCU_SENSOR_MV_TO_COUNTS(4750u)
 #define VCU_SUPPLY_MAX_COUNTS VCU_SENSOR_MV_TO_COUNTS(5250u)
+
+/* An APPS's output is valid inside 0.25-4.75 V, whatever its end points
+   (issue 59), so a short to either rail is out of range. */
+#define VCU_APPS_MIN_COUNTS VCU_SENSOR_MV_TO_COUNTS(250u)
+#define VCU_APPS_MAX_COUNTS VCU_SENSOR_MV_TO_COUNTS(4750u)
 
 /* A brake pressure sensor's output is valid inside 0.25-4.75 V. */
 #define VCU_BRAKE_MIN_COUNTS VCU_SENSOR_MV_TO_COUNTS(250u)
