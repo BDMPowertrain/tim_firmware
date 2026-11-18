@@ -61,6 +61,10 @@ extern SPI_HandleTypeDef hspi3;
    period. Split across FIFO_CTRL1 (low 8 bits) / FIFO_CTRL2 (bit 0). */
 #define IMU_FIFO_WATERMARK       20u
 
+/* imuTask reads the FIFO at least this often even with no IMU_INT edge:
+   about two watermarks, so a normal 100 ms burst is never read early. */
+#define IMU_WAKE_TIMEOUT_MS      250u
+
 /* FIFO_CTRL4 (0Ah): FIFO_MODE[2:0]=110, continuous mode — newest sample
    overwrites the oldest if we ever fall behind, instead of the FIFO
    just stopping (Table 32). */
@@ -233,15 +237,15 @@ static bool imu_hw_init(void)
     return true;
 }
 
-/* Runs once per IMU_INT watermark interrupt. Bounded to a 100 ms wait
-   for spi3Mutex rather than blocking forever: if the mezzanine bus is
-   held longer than that, skipping this cycle and catching up next
-   watermark is better than stalling imuTask (osPriorityAboveNormal)
-   indefinitely behind it. */
-static void imu_drain_fifo(void)
+/* One read of at most IMU_FIFO_BURST_MAX_WORDS entries. Returns the
+   entries it left in the FIFO. Bounded to a 100 ms wait for spi3Mutex
+   rather than blocking forever: if the mezzanine bus is held longer than
+   that, skipping this cycle and catching up next time is better than
+   stalling imuTask (osPriorityAboveNormal) indefinitely behind it. */
+static uint16_t imu_drain_fifo(void)
 {
     if (!spi3_bus_lock(100)) {
-        return;
+        return 0u;
     }
 
     const uint16_t inFifo = imu_fifo_pending();
@@ -257,7 +261,7 @@ static void imu_drain_fifo(void)
     spi3_bus_unlock();
 
     if (pending == 0) {
-        return;
+        return 0u;
     }
 
     osMutexAcquire(imuDataMutex, osWaitForever);
@@ -295,6 +299,7 @@ static void imu_drain_fifo(void)
         (void)data_log_push(DATA_LOG_RING_IMU, DATA_LOG_IMU, records[i].uptime_ms, record,
                             sizeof record);
     }
+    return (uint16_t)(inFifo - pending);
 }
 
 /* Deliberately minimal: no SPI3 access (that's spi3_bus_lock(), which
@@ -330,9 +335,16 @@ void imuTask(void *argument)
         vTaskSuspend(NULL);
     }
 
+    /* IMU_INT is the watermark flag, an EXTI on its rising edge. A FIFO
+       left at or above the watermark keeps the line high and no edge
+       comes again (seen on the bench, issue 61, after a debugger halt; a
+       skipped read does the same). So each wake reads until the FIFO is
+       below the watermark, and the wait times out, so a missed edge
+       costs IMU_WAKE_TIMEOUT_MS of latency, never the IMU. */
     for (;;) {
-        ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
-        imu_drain_fifo();
+        (void)ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(IMU_WAKE_TIMEOUT_MS));
+        while (imu_drain_fifo() >= IMU_FIFO_WATERMARK) {
+        }
     }
 }
 
