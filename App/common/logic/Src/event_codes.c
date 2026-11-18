@@ -52,6 +52,7 @@ const char *event_code_name(uint16_t code)
     case EVENT_PEDAL_CHECK_FAILED: return "pedal check failed";
     case EVENT_NOT_CALIBRATED:     return "not calibrated";
     case EVENT_DATA_LOG_CARD:      return "data log card";
+    case EVENT_BMS_FAULT:          return "BMS fault";
     default:                       return "?";
     }
 }
@@ -230,6 +231,17 @@ void event_data_em_violation(uint8_t data[EVENT_DATA_SIZE], uint8_t state)
 {
     memset(data, 0, EVENT_DATA_SIZE);
     data[0] = state;
+}
+
+void event_data_bms_fault(uint8_t data[EVENT_DATA_SIZE], const event_bms_fault_t *fault)
+{
+    memset(data, 0, EVENT_DATA_SIZE);
+    data[0] = fault->fault;
+    data[1] = fault->state;
+    data[2] = fault->where;
+    put_u16(&data[4], fault->index);
+    put_u16(&data[6], fault->reading_mv);
+    put_u16(&data[8], fault->devices_read);
 }
 
 void event_data_data_log_card(uint8_t data[EVENT_DATA_SIZE], const event_data_log_card_t *card)
