@@ -212,7 +212,7 @@ static void build_status(bms_control_t *bc, const bms_control_in_t *in, bms_cont
         .charger_disobeys_seen = has(s, BMS_FAULT_CHARGER_DISOBEYS),
         .overcurrent_seen = has(s, BMS_FAULT_OVERCURRENT),
         .bms_ok = out->bms_ok ? 1u : 0u,
-        .low_voltage_limit = out->low_voltage_limit ? 1u : 0u,
+        .low_voltage_limit = out->under_low_voltage_limit ? 1u : 0u,
         .shutdown_circuit_closed = in->sdc_closed ? 1u : 0u,
         .parameters_defaulted = bc->config.params_defaulted ? 1u : 0u,
         .not_dual_bank = bc->config.not_dual_bank ? 1u : 0u,
@@ -239,9 +239,9 @@ void bms_control_step(bms_control_t *bc, const bms_control_in_t *in, bms_control
     }
     bc->started = true;
 
-    bool lv = bc->low_voltage_limit; /* held over a step with no Sweep */
+    bool lv = bc->under_low_voltage_limit; /* held over a step with no Sweep */
     judge(in, bc->state != BMS_STATE_STARTUP, j, &lv);
-    bc->low_voltage_limit = lv;
+    bc->under_low_voltage_limit = lv;
 
     /* A chain that has brought back no Sweep for 2 s in STARTUP: the
        measurement fault at once (spec #36). */
@@ -315,7 +315,7 @@ void bms_control_step(bms_control_t *bc, const bms_control_in_t *in, bms_control
     out->bms_ok = bc->state == BMS_STATE_DRIVE || bc->state == BMS_STATE_CHARGE;
     out->active = bc->active;
     out->seen = bc->seen;
-    out->low_voltage_limit = bc->low_voltage_limit;
+    out->under_low_voltage_limit = bc->under_low_voltage_limit;
     /* The heartbeat's 5 Hz (issue 47): a BMS fault, or a blocked start-up. */
     out->fault_active = bc->active != 0u || bc->state == BMS_STATE_FAULT ||
                         bc->state == BMS_STATE_FAULT_HELD || !in->startup_ok || !in->can_running;

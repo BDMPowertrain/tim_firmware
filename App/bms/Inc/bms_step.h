@@ -33,7 +33,7 @@ typedef struct {
     bms_adc_counts_t adc;            /* the newest analog counts */
     uint16_t         faults_active;  /* bit (1 << bms_fault_t), bms_control.h */
     uint16_t         faults_seen;    /* since power-on */
-    bool             low_voltage_limit;
+    bool             under_low_voltage_limit;
 } bms_pack_t;
 
 /* Sets up the Control bus for the one frame the BMS reads, the charger's

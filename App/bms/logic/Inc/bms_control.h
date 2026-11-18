@@ -47,8 +47,8 @@
  * Open sense wire, cell monitor and the internal fault's other causes are
  * #64 and #65; charger disobeys #67; overcurrent is reserved and never set.
  *
- * The Low-voltage limit (a cell below BMS_LOW_VOLTAGE_MV in the latest
- * Sweep) is a BMS_Status bit and never a fault.
+ * A cell under the Low-voltage limit (BMS_LOW_VOLTAGE_MV) in the latest
+ * Sweep is a BMS_Status bit and never a BMS fault.
  *
  * The BMS makes no decision from any received frame (spec #36, user story
  * 26): the Control bus only fills BMS_Status bits, and a bus failure never
@@ -146,7 +146,7 @@ typedef struct {
     bool     fault_active;      /* for the heartbeat LED */
     uint16_t active;            /* bit (1 << bms_fault_t) */
     uint16_t seen;
-    bool     low_voltage_limit;
+    bool     under_low_voltage_limit;
 
     bool     send_status;       /* status holds a BMS_Status (0x080): bms_tx.h says when */
     uint8_t  status[CAN_CONTROL_BMS_STATUS_LENGTH];
@@ -166,7 +166,7 @@ typedef struct {
     uint16_t     all_clean;        /* Sweeps clean of every fault in a row */
     uint16_t     active;
     uint16_t     seen;
-    bool         low_voltage_limit;
+    bool         under_low_voltage_limit;
     e2e_p11_tx_t status_tx;
 } bms_control_t;
 

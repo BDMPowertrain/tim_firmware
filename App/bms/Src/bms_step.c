@@ -160,7 +160,7 @@ static void phase_output(control_step_ctx_t *ctx)
     pack.link_timeouts = cell_monitor_timeouts();
     pack.faults_active = out.active;
     pack.faults_seen = out.seen;
-    pack.low_voltage_limit = out.low_voltage_limit;
+    pack.under_low_voltage_limit = out.under_low_voltage_limit;
     masked_copy(&published, &pack, sizeof published);
 }
 

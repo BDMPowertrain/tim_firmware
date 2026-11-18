@@ -17,7 +17,8 @@
  * - FAULT ends by itself after 50 clean Sweeps (1 s). BMS_OK first rises
  *   after the chain is awake and 5 clean Sweeps. A chain silent for 2 s
  *   in STARTUP is FAULT with "measurement missing or invalid".
- * - The Low-voltage limit (3.0 V) is a status bit, never a fault.
+ * - A cell under the Low-voltage limit (3.0 V) is a status bit, never a
+ *   BMS fault.
  * - Active and seen bits; overcurrent reserved and never set.
  * - No decision from a received frame; a Control bus failure never takes
  *   BMS_OK low (ADR 0005).
@@ -419,22 +420,22 @@ static void test_a_blocked_startup_never_raises_bms_ok(void)
     TEST_ASSERT_TRUE(out.fault_active);
 }
 
-/* The Low-voltage limit (3.0 V) sets a status bit and never takes BMS_OK
-   low. */
-static void test_the_low_voltage_limit_is_a_status_bit_and_no_fault(void)
+/* A cell under the Low-voltage limit (3.0 V) sets a status bit and never
+   takes BMS_OK low. */
+static void test_a_cell_under_the_low_voltage_limit_is_a_status_bit_and_no_fault(void)
 {
     power_up();
     sweep.cell_mv[50] = 2999u;
     steps(200u);
     TEST_ASSERT_EQUAL_UINT8(BMS_STATE_DRIVE, out.state);
     TEST_ASSERT_TRUE(out.bms_ok);
-    TEST_ASSERT_TRUE(out.low_voltage_limit);
+    TEST_ASSERT_TRUE(out.under_low_voltage_limit);
     TEST_ASSERT_EQUAL_UINT8(1u, status().low_voltage_limit);
     TEST_ASSERT_EQUAL_HEX16(0u, out.seen);
 
     sweep.cell_mv[50] = 3000u;
     step();
-    TEST_ASSERT_FALSE(out.low_voltage_limit);
+    TEST_ASSERT_FALSE(out.under_low_voltage_limit);
 }
 
 /* The BMS makes no decision from a received frame, and a Control bus
@@ -560,7 +561,7 @@ int main(void)
     RUN_TEST(test_a_chain_silent_for_2_s_in_startup_is_the_measurement_fault);
     RUN_TEST(test_the_silent_chain_time_survives_the_wrap);
     RUN_TEST(test_a_blocked_startup_never_raises_bms_ok);
-    RUN_TEST(test_the_low_voltage_limit_is_a_status_bit_and_no_fault);
+    RUN_TEST(test_a_cell_under_the_low_voltage_limit_is_a_status_bit_and_no_fault);
     RUN_TEST(test_a_control_bus_failure_never_takes_bms_ok_low);
     RUN_TEST(test_overcurrent_is_never_set);
     RUN_TEST(test_each_fault_is_one_event_on_the_step_it_is_raised);
