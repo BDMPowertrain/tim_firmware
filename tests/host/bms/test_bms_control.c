@@ -22,6 +22,19 @@
  * - Active and seen bits; overcurrent reserved and never set.
  * - No decision from a received frame; a Control bus failure never takes
  *   BMS_OK low (ADR 0005).
+ *
+ * Issue 64, the second layers:
+ * - The open-wire check runs once before BMS_OK first rises and then once
+ *   per second, after the step's work; two failed checks in a row are the
+ *   open sense wire fault (EV.8.3.4 b: "voltage sense Overcurrent
+ *   Protection device(s) blown or tripped"; 2.5 s budget).
+ * - NFAULT low, or a device reporting its own fault (the bridge's
+ *   FAULT_SUMMARY), is the cell monitor fault.
+ * - The BMS_OK read-back must equal the commanded level AND the NFAULT
+ *   read-back: 5 Sweeps of mismatch are the BMS internal fault. The NFAULT
+ *   read-back must agree with the bridge's fault register. BMS_OK low for
+ *   500 ms with the Shutdown Circuit sense still energised raises the
+ *   internal fault (EV.8.3.4 e, "a fault in the BMS").
  */
 #include <string.h>
 
@@ -43,6 +56,13 @@ static bms_control_in_t in;
 static bms_control_out_t out;
 static bq_sweep_t sweep;
 
+/* What the open-wire check finds whenever a step runs it. */
+static bq_open_wire_t found;
+/* BMS_OK as last written; the read-back follows it through the AND gate
+   with NFAULT unless a test holds the read-back itself. */
+static bool commanded;
+static bool holdReadBack;
+
 static void good_sweep(void)
 {
     for (size_t i = 0; i < BQ_SWEEP_CELLS; i++) {
@@ -50,6 +70,8 @@ static void good_sweep(void)
         sweep.temp_mv[i] = TEMP_OK_MV;
     }
     sweep.devices_read = 0xFFFFu;
+    sweep.bridge_read = true;
+    sweep.bridge_fault = 0u;
 }
 
 void setUp(void)
@@ -58,20 +80,31 @@ void setUp(void)
     memset(&in, 0, sizeof in);
     memset(&out, 0, sizeof out);
     good_sweep();
+    found = (bq_open_wire_t){ .verdict = BQ_OPEN_WIRE_PASS, .devices_read = 0xFFFFu };
+    commanded = false;
+    holdReadBack = false;
     in.now_ms = 1000u;
     in.startup_ok = true;
     in.can_running = true;
     in.swept = true;
     in.sweep = &sweep;
+    in.nfault_ok = true;
     bms_control_init(&bc, &config);
 }
 
 void tearDown(void) {}
 
-/* One 20 ms step. */
+/* One 20 ms step: the inputs read, the logic, BMS_OK written, then the
+   open-wire check if it is due, its result for the next step. */
 static void step(void)
 {
+    if (!holdReadBack) {
+        in.bms_ok_fb = commanded && in.nfault_ok;
+    }
     bms_control_step(&bc, &in, &out);
+    commanded = out.bms_ok;
+    in.open_wire_ran = out.open_wire_due;
+    in.open_wire = found;
     in.now_ms += STEP_MS;
 }
 
@@ -535,6 +568,372 @@ static void test_bms_status_goes_every_step_and_passes_its_e2e_check(void)
     TEST_ASSERT_EQUAL_UINT8(1u, status().shutdown_circuit_closed);
 }
 
+/* ---- issue 64: the second layers ----------------------------------------- */
+
+/* This step's Event for fault, which must be there. */
+static const uint8_t *event_for(bms_fault_t fault)
+{
+    for (size_t i = 0; i < out.event_count; i++) {
+        if (out.events[i].code == EVENT_BMS_FAULT && out.events[i].data[0] == fault) {
+            return out.events[i].data;
+        }
+    }
+    TEST_FAIL_MESSAGE("no Event for the fault");
+    return NULL;
+}
+
+static void assert_where(const uint8_t *d, uint8_t where, uint16_t index, uint16_t reading)
+{
+    TEST_ASSERT_EQUAL_UINT8(where, d[2]);
+    TEST_ASSERT_EQUAL_UINT16(index, (uint16_t)(d[4] | (d[5] << 8)));
+    TEST_ASSERT_EQUAL_UINT16(reading, (uint16_t)(d[6] | (d[7] << 8)));
+}
+
+static bool active(bms_fault_t fault)
+{
+    return (out.active & (1u << fault)) != 0u;
+}
+
+/* Steps until one runs the open-wire check, then once more: the step that
+   takes its result. */
+static void until_a_check_is_judged(void)
+{
+    for (int i = 0; i < 100 && !out.open_wire_due; i++) {
+        step();
+    }
+    TEST_ASSERT_TRUE(out.open_wire_due);
+    step();
+}
+
+static void test_the_open_wire_check_runs_on_the_first_sweep_then_once_a_second(void)
+{
+    in.swept = false; /* the chain is waking */
+    steps(3u);
+    TEST_ASSERT_FALSE(out.open_wire_due);
+
+    in.swept = true;
+    const uint32_t first = in.now_ms;
+    step();
+    TEST_ASSERT_TRUE(out.open_wire_due);
+
+    while (in.now_ms - first < 1000u) {
+        step();
+        TEST_ASSERT_FALSE(out.open_wire_due);
+    }
+    step();
+    TEST_ASSERT_TRUE(out.open_wire_due);
+    TEST_ASSERT_EQUAL_UINT8(BMS_STATE_DRIVE, out.state);
+}
+
+/* "never in place of a sweep": a step that took none runs no check, and
+   the check due waits for the next that did. */
+static void test_the_open_wire_check_runs_only_after_a_sweep(void)
+{
+    power_up();
+    until_a_check_is_judged();
+    steps(48u);
+    in.swept = false;
+    steps(3u);
+    TEST_ASSERT_FALSE(out.open_wire_due);
+    in.swept = true;
+    step();
+    TEST_ASSERT_TRUE(out.open_wire_due);
+}
+
+/* Power-up (spec #36): BMS_OK rises only after one open-wire check has
+   passed, however clean the Sweeps. */
+static void test_bms_ok_never_rises_before_an_open_wire_check_has_passed(void)
+{
+    found.verdict = BQ_OPEN_WIRE_UNKNOWN;
+    steps(100u);
+    TEST_ASSERT_EQUAL_UINT8(BMS_STATE_STARTUP, out.state);
+    TEST_ASSERT_FALSE(out.bms_ok);
+    TEST_ASSERT_EQUAL_HEX16(0u, out.seen);
+
+    found.verdict = BQ_OPEN_WIRE_PASS;
+    until_a_check_is_judged();
+    TEST_ASSERT_EQUAL_UINT8(BMS_STATE_DRIVE, out.state);
+    TEST_ASSERT_TRUE(out.bms_ok);
+}
+
+/* EV.8.3.4 b: a blown or tripped voltage sense fuse reads as an open sense
+   wire. Two failed checks in a row, a second apart, are the fault. */
+static void test_two_failed_open_wire_checks_in_a_row_are_the_open_sense_wire_fault(void)
+{
+    power_up();
+    until_a_check_is_judged();
+    found = (bq_open_wire_t){
+        .verdict = BQ_OPEN_WIRE_FAIL, .device = 6u, .cell = 42u, .devices_read = 0xFFFFu,
+    };
+
+    until_a_check_is_judged();
+    TEST_ASSERT_EQUAL_UINT8(BMS_STATE_DRIVE, out.state);
+    TEST_ASSERT_TRUE(out.bms_ok);
+    TEST_ASSERT_EQUAL_HEX16(0u, out.seen);
+
+    until_a_check_is_judged();
+    TEST_ASSERT_EQUAL_UINT8(BMS_STATE_FAULT, out.state);
+    TEST_ASSERT_FALSE(out.bms_ok);
+    TEST_ASSERT_EQUAL_HEX16(1u << BMS_FAULT_OPEN_WIRE, out.active);
+    assert_where(event_for(BMS_FAULT_OPEN_WIRE), EVENT_BMS_CELL, 42u, 0u);
+    TEST_ASSERT_EQUAL_UINT8(1u, status().open_wire_active);
+    TEST_ASSERT_EQUAL_UINT8(1u, status().open_wire_seen);
+}
+
+/* A device that did not finish the comparison is named by its number. */
+static void test_a_device_that_did_not_finish_is_named_in_the_event(void)
+{
+    power_up();
+    found = (bq_open_wire_t){ .verdict = BQ_OPEN_WIRE_FAIL, .device = 12u, .devices_read = 0xFFFFu };
+    until_a_check_is_judged();
+    until_a_check_is_judged();
+    TEST_ASSERT_TRUE(active(BMS_FAULT_OPEN_WIRE));
+    assert_where(event_for(BMS_FAULT_OPEN_WIRE), EVENT_BMS_DEVICE, 12u, 0u);
+}
+
+static void test_one_failed_check_then_a_pass_is_no_fault(void)
+{
+    power_up();
+    found.verdict = BQ_OPEN_WIRE_FAIL;
+    until_a_check_is_judged();
+    found.verdict = BQ_OPEN_WIRE_PASS;
+    until_a_check_is_judged();
+    found.verdict = BQ_OPEN_WIRE_FAIL;
+    until_a_check_is_judged();
+    steps(40u); /* to just before the next check */
+    TEST_ASSERT_FALSE(out.open_wire_due);
+    TEST_ASSERT_EQUAL_UINT8(BMS_STATE_DRIVE, out.state);
+    TEST_ASSERT_EQUAL_HEX16(0u, out.seen);
+}
+
+/* A check that could not judge (a device silent: the measurement fault's
+   business) neither counts as a failure nor ends a run of them. */
+static void test_a_check_that_could_not_judge_neither_counts_nor_clears(void)
+{
+    power_up();
+    found.verdict = BQ_OPEN_WIRE_FAIL;
+    until_a_check_is_judged();
+    found.verdict = BQ_OPEN_WIRE_UNKNOWN;
+    until_a_check_is_judged();
+    TEST_ASSERT_FALSE(active(BMS_FAULT_OPEN_WIRE));
+    found.verdict = BQ_OPEN_WIRE_FAIL;
+    until_a_check_is_judged();
+    TEST_ASSERT_TRUE(active(BMS_FAULT_OPEN_WIRE));
+}
+
+/* The budget (spec #36): BMS_OK low within 2.5 s of a wire opening, at
+   worst just after a check passed. */
+static void test_an_open_wire_takes_bms_ok_low_within_2_5_s(void)
+{
+    power_up();
+    until_a_check_is_judged();
+    const uint32_t opened = in.now_ms - 2u * STEP_MS; /* as the passing check ran */
+    found.verdict = BQ_OPEN_WIRE_FAIL;
+
+    while (out.bms_ok && in.now_ms - opened < 5000u) {
+        step();
+    }
+    TEST_ASSERT_FALSE(out.bms_ok);
+    /* in.now_ms is already the next step's time. */
+    TEST_ASSERT_TRUE(in.now_ms - STEP_MS - opened <= 2500u);
+}
+
+/* Firmware does not latch: a second of passing ends the fault. */
+static void test_the_open_wire_fault_ends_once_checks_pass_again(void)
+{
+    power_up();
+    found.verdict = BQ_OPEN_WIRE_FAIL;
+    until_a_check_is_judged();
+    until_a_check_is_judged();
+    TEST_ASSERT_TRUE(active(BMS_FAULT_OPEN_WIRE));
+
+    found.verdict = BQ_OPEN_WIRE_PASS;
+    until_a_check_is_judged(); /* the first of 50 clean Sweeps */
+    steps(BMS_RECOVER_SWEEPS - 2u);
+    TEST_ASSERT_TRUE(active(BMS_FAULT_OPEN_WIRE));
+    step();
+    TEST_ASSERT_FALSE(active(BMS_FAULT_OPEN_WIRE));
+    TEST_ASSERT_EQUAL_UINT8(BMS_STATE_DRIVE, out.state);
+}
+
+/* The cell monitor fault: the comparators, through NFAULT. */
+static void test_nfault_low_is_the_cell_monitor_fault_at_once(void)
+{
+    power_up();
+    in.nfault_ok = false;
+    sweep.bridge_fault = 0x08u; /* the register agrees */
+    step();
+    TEST_ASSERT_EQUAL_UINT8(BMS_STATE_FAULT, out.state);
+    TEST_ASSERT_EQUAL_HEX16(1u << BMS_FAULT_CELL_MONITOR, out.active);
+    assert_where(event_for(BMS_FAULT_CELL_MONITOR), EVENT_BMS_NFAULT, 0u, 0x08u);
+    TEST_ASSERT_EQUAL_UINT8(1u, status().cell_monitor_active);
+
+    /* NFAULT takes BMS_OK low through the AND gate: no internal fault. */
+    steps(100u);
+    TEST_ASSERT_EQUAL_HEX16(1u << BMS_FAULT_CELL_MONITOR, out.seen);
+}
+
+static void test_a_device_reporting_its_own_fault_is_the_cell_monitor_fault(void)
+{
+    power_up();
+    sweep.bridge_fault = 0x02u; /* FAULT_SYS */
+    step();
+    TEST_ASSERT_TRUE(active(BMS_FAULT_CELL_MONITOR));
+    assert_where(event_for(BMS_FAULT_CELL_MONITOR), EVENT_BMS_BRIDGE, 0u, 0x02u);
+}
+
+/* Spec #36: post-wake faults are cleared before BMS_OK may rise; one the
+   clear did not end keeps it low. */
+static void test_bms_ok_does_not_rise_over_a_fault_left_from_the_wake(void)
+{
+    sweep.bridge_fault = 0x01u;
+    in.nfault_ok = false;
+    steps(200u);
+    TEST_ASSERT_FALSE(out.bms_ok);
+    TEST_ASSERT_TRUE(active(BMS_FAULT_CELL_MONITOR));
+}
+
+/* Before the chain is awake NFAULT means nothing: no Sweep, no fault. */
+static void test_nfault_low_while_the_chain_wakes_is_no_fault(void)
+{
+    in.swept = false;
+    in.nfault_ok = false;
+    steps(50u);
+    TEST_ASSERT_EQUAL_UINT8(BMS_STATE_STARTUP, out.state);
+    TEST_ASSERT_EQUAL_HEX16(0u, out.seen);
+}
+
+/* A stuck MCU_BMS_OK, or a broken AND gate: 5 Sweeps of the read-back
+   differing from commanded AND NFAULT. */
+static void test_a_bms_ok_read_back_wrong_for_5_sweeps_is_the_internal_fault(void)
+{
+    power_up();
+    holdReadBack = true;
+    in.bms_ok_fb = false; /* commanded high, NFAULT high */
+    steps(BMS_FEEDBACK_SWEEPS - 1u);
+    TEST_ASSERT_EQUAL_UINT8(BMS_STATE_DRIVE, out.state);
+    TEST_ASSERT_EQUAL_HEX16(0u, out.seen);
+
+    step();
+    TEST_ASSERT_EQUAL_UINT8(BMS_STATE_FAULT, out.state);
+    TEST_ASSERT_EQUAL_HEX16(1u << BMS_FAULT_INTERNAL, out.active);
+    /* read-back 0, commanded 1 (bit 1), NFAULT 1 (bit 2) */
+    assert_where(event_for(BMS_FAULT_INTERNAL), EVENT_BMS_FEEDBACK, 0u, 0x06u);
+    TEST_ASSERT_EQUAL_UINT8(1u, status().internal_active);
+}
+
+static void test_a_read_back_high_while_commanded_low_is_the_internal_fault(void)
+{
+    found.verdict = BQ_OPEN_WIRE_UNKNOWN; /* STARTUP: BMS_OK commanded low */
+    holdReadBack = true;
+    in.bms_ok_fb = true;
+    steps(BMS_FEEDBACK_SWEEPS - 1u);
+    TEST_ASSERT_EQUAL_HEX16(0u, out.seen);
+    step();
+    TEST_ASSERT_TRUE(active(BMS_FAULT_INTERNAL));
+}
+
+/* "a mismatch for 5 sweeps": a step that took no Sweep neither counts one
+   nor ends the run. */
+static void test_the_read_back_check_counts_sweeps_not_steps(void)
+{
+    power_up();
+    holdReadBack = true;
+    in.bms_ok_fb = false;
+    steps(BMS_FEEDBACK_SWEEPS - 1u);
+    in.swept = false;
+    steps(3u);
+    TEST_ASSERT_FALSE(active(BMS_FAULT_INTERNAL));
+    in.swept = true;
+    step();
+    TEST_ASSERT_TRUE(active(BMS_FAULT_INTERNAL));
+}
+
+/* Firmware does not latch (spec #36): once the chips let NFAULT go (each
+   open-wire check clears what they latched, bq_chain.h), a second clean
+   ends the cell monitor fault. */
+static void test_a_comparator_trip_ends_a_second_after_nfault_rises(void)
+{
+    power_up();
+    in.nfault_ok = false;
+    sweep.bridge_fault = 0x04u;
+    steps(30u);
+    TEST_ASSERT_TRUE(active(BMS_FAULT_CELL_MONITOR));
+
+    in.nfault_ok = true;
+    sweep.bridge_fault = 0u;
+    steps(BMS_RECOVER_SWEEPS - 1u);
+    TEST_ASSERT_TRUE(active(BMS_FAULT_CELL_MONITOR));
+    step();
+    TEST_ASSERT_FALSE(active(BMS_FAULT_CELL_MONITOR));
+    TEST_ASSERT_EQUAL_UINT8(BMS_STATE_DRIVE, out.state);
+}
+
+/* A dead bridge reads "no fault" on NFAULT, through its pull-up (ADR
+   0008): its register over SPI must agree. */
+static void test_nfault_disagreeing_with_the_bridge_register_for_5_sweeps_is_internal(void)
+{
+    power_up();
+    sweep.bridge_fault = 0x04u; /* FAULT_REG; NFAULT still reads high */
+    steps(BMS_FEEDBACK_SWEEPS - 1u);
+    TEST_ASSERT_TRUE(active(BMS_FAULT_CELL_MONITOR));
+    TEST_ASSERT_FALSE(active(BMS_FAULT_INTERNAL));
+
+    step();
+    TEST_ASSERT_TRUE(active(BMS_FAULT_INTERNAL));
+    assert_where(event_for(BMS_FAULT_INTERNAL), EVENT_BMS_NFAULT_CHECK, 0u, 0x04u);
+}
+
+static void test_nfault_low_with_a_clear_register_is_internal_too(void)
+{
+    power_up();
+    in.nfault_ok = false;
+    steps(BMS_FEEDBACK_SWEEPS);
+    TEST_ASSERT_TRUE(active(BMS_FAULT_INTERNAL));
+}
+
+/* The register is only read with a Sweep: a step without one neither
+   counts a disagreement nor clears the count. */
+static void test_the_nfault_cross_check_waits_for_the_register(void)
+{
+    power_up();
+    sweep.bridge_fault = 0x04u;
+    steps(BMS_FEEDBACK_SWEEPS - 1u);
+    in.swept = false;
+    steps(2u);
+    TEST_ASSERT_FALSE(active(BMS_FAULT_INTERNAL));
+    in.swept = true;
+    step();
+    TEST_ASSERT_TRUE(active(BMS_FAULT_INTERNAL));
+}
+
+/* BMS_OK low and the Shutdown Circuit still energised 500 ms later: the
+   BMS's output path does not reach the shutdown loop. */
+static void test_bms_ok_low_for_500_ms_with_the_sense_energised_is_internal(void)
+{
+    in.swept = false; /* STARTUP: BMS_OK low from the first step */
+    in.sdc_closed = true;
+    steps(500u / STEP_MS);
+    TEST_ASSERT_FALSE(active(BMS_FAULT_INTERNAL));
+
+    step(); /* 500 ms after the first */
+    TEST_ASSERT_TRUE(active(BMS_FAULT_INTERNAL));
+    assert_where(event_for(BMS_FAULT_INTERNAL), EVENT_BMS_SDC_SENSE, 0u, 500u);
+}
+
+static void test_a_shutdown_circuit_that_opens_inside_500_ms_is_no_fault(void)
+{
+    power_up();
+    in.nfault_ok = false; /* the comparators take BMS_OK low */
+    sweep.bridge_fault = 0x08u;
+    in.sdc_closed = true;
+    steps(480u / STEP_MS);
+    in.sdc_closed = false; /* the loop opened: the path works */
+    steps(200u);
+    TEST_ASSERT_FALSE(active(BMS_FAULT_INTERNAL));
+    TEST_ASSERT_EQUAL_HEX16(0u, out.seen & (1u << BMS_FAULT_INTERNAL));
+}
+
 int main(void)
 {
     UNITY_BEGIN();
@@ -567,5 +966,27 @@ int main(void)
     RUN_TEST(test_each_fault_is_one_event_on_the_step_it_is_raised);
     RUN_TEST(test_the_held_fault_never_ends);
     RUN_TEST(test_bms_status_goes_every_step_and_passes_its_e2e_check);
+    RUN_TEST(test_the_open_wire_check_runs_on_the_first_sweep_then_once_a_second);
+    RUN_TEST(test_the_open_wire_check_runs_only_after_a_sweep);
+    RUN_TEST(test_bms_ok_never_rises_before_an_open_wire_check_has_passed);
+    RUN_TEST(test_two_failed_open_wire_checks_in_a_row_are_the_open_sense_wire_fault);
+    RUN_TEST(test_a_device_that_did_not_finish_is_named_in_the_event);
+    RUN_TEST(test_one_failed_check_then_a_pass_is_no_fault);
+    RUN_TEST(test_a_check_that_could_not_judge_neither_counts_nor_clears);
+    RUN_TEST(test_an_open_wire_takes_bms_ok_low_within_2_5_s);
+    RUN_TEST(test_the_open_wire_fault_ends_once_checks_pass_again);
+    RUN_TEST(test_nfault_low_is_the_cell_monitor_fault_at_once);
+    RUN_TEST(test_a_device_reporting_its_own_fault_is_the_cell_monitor_fault);
+    RUN_TEST(test_bms_ok_does_not_rise_over_a_fault_left_from_the_wake);
+    RUN_TEST(test_nfault_low_while_the_chain_wakes_is_no_fault);
+    RUN_TEST(test_a_bms_ok_read_back_wrong_for_5_sweeps_is_the_internal_fault);
+    RUN_TEST(test_a_read_back_high_while_commanded_low_is_the_internal_fault);
+    RUN_TEST(test_the_read_back_check_counts_sweeps_not_steps);
+    RUN_TEST(test_a_comparator_trip_ends_a_second_after_nfault_rises);
+    RUN_TEST(test_nfault_disagreeing_with_the_bridge_register_for_5_sweeps_is_internal);
+    RUN_TEST(test_nfault_low_with_a_clear_register_is_internal_too);
+    RUN_TEST(test_the_nfault_cross_check_waits_for_the_register);
+    RUN_TEST(test_bms_ok_low_for_500_ms_with_the_sense_energised_is_internal);
+    RUN_TEST(test_a_shutdown_circuit_that_opens_inside_500_ms_is_no_fault);
     return UNITY_END();
 }

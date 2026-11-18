@@ -17,9 +17,9 @@ bool overrun_watch_record(overrun_watch_t *watch, uint32_t now_ms)
 }
 
 overrun_event_t overrun_event_make(uint32_t step_us, const uint32_t *phase_us,
-                                   size_t phase_count)
+                                   size_t phase_count, bool extra_work)
 {
-    overrun_event_t event = { .step_us = step_us };
+    overrun_event_t event = { .step_us = step_us, .extra_work = extra_work };
 
     for (size_t i = 0; i < phase_count; i++) {
         if (phase_us[i] > event.slowest_phase_us) {

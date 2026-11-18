@@ -22,7 +22,10 @@
 #define BMS_STEP_PERIOD_MS 20u
 
 /* Every plan fits in the step with room for the rest of it, so the next
-   Kick (ADR 0013) is never late for the chain. */
+   Kick (ADR 0013) is never late for the chain. The step with the
+   open-wire check runs two, the Sweep's and the check's: their worst
+   together is under the period too (host test), with little room to spare,
+   so the overrun Event says whether the check ran (spec #36). */
 _Static_assert(BQ_PLAN_BUDGET_US < BMS_STEP_PERIOD_MS * 1000u,
                "a cell-monitor plan fits inside one step");
 
@@ -50,6 +53,11 @@ static bms_pack_t pack;  /* this step's, published at its end */
 static uint32_t sweeps;
 static uint32_t sweepsMissing;
 static bool swept; /* this step took a Sweep */
+/* The open-wire check run at the end of the last step, for this one. */
+static bool openWireRan;
+static bq_open_wire_t openWire;
+static uint32_t openWireChecks;
+static uint32_t openWireFails;
 
 /* Read by the shell. */
 static bms_pack_t published;
@@ -118,9 +126,16 @@ static void phase_input(control_step_ctx_t *ctx)
     in.sweep = &pack.sweep;
     in.charge_mode = false; /* #67 */
     /* Active low, like the VCU's SDC_MON_N (issue 19: SDC_OK_N taps the
-       end of the shutdown loop). A status bit only until #64 checks it
-       against BMS_OK. */
+       end of the shutdown loop). The feedback inputs are read once per
+       step, with no debounce (issue 19): FB.NFAULT follows the bridge's
+       open-drain NFAULT (high: no fault), FB.BMS_OK the AND of MCU_BMS_OK
+       and NFAULT (ADR 0008). */
     in.sdc_closed = HAL_GPIO_ReadPin(SDC_OK_N_GPIO_Port, SDC_OK_N_Pin) == GPIO_PIN_RESET;
+    in.nfault_ok = HAL_GPIO_ReadPin(FB_NFAULT_GPIO_Port, FB_NFAULT_Pin) == GPIO_PIN_SET;
+    in.bms_ok_fb = HAL_GPIO_ReadPin(FB_BMS_OK_GPIO_Port, FB_BMS_OK_Pin) == GPIO_PIN_SET;
+    in.open_wire_ran = openWireRan;
+    in.open_wire = openWire;
+    openWireRan = false;
     in.bus_off_latched = bus.latched;
     in.error_passive = bus.error_passive;
     in.rx_overflowed = bus.rx_overflowed;
@@ -161,7 +176,35 @@ static void phase_output(control_step_ctx_t *ctx)
     pack.faults_active = out.active;
     pack.faults_seen = out.seen;
     pack.under_low_voltage_limit = out.under_low_voltage_limit;
+    pack.nfault_ok = in.nfault_ok;
+    pack.bms_ok_fb = in.bms_ok_fb;
+    pack.sdc_closed = in.sdc_closed;
+    pack.open_wire_checks = openWireChecks;
+    pack.open_wire_fails = openWireFails;
+    pack.open_wire = openWire;
     masked_copy(&published, &pack, sizeof published);
+}
+
+/* The open-wire check (bq_chain.h), when the logic asks: after the step's
+   Sweep, judgement, BMS_OK, frames and snapshot, so a check never delays
+   or replaces any of them (spec #36). The sinks are off again before the
+   next Sweep. Its result goes to the logic on the next step, and to the
+   snapshot then. */
+static void phase_open_wire(control_step_ctx_t *ctx)
+{
+    cell_monitor_result_t link;
+
+    if (!out.open_wire_due || !bq_chain_plan_open_wire(&chain, &plan)) {
+        return;
+    }
+    ctx->extra_work_ran = true; /* the overrun Event says the check ran */
+    cell_monitor_run(&plan, &link);
+    bq_chain_open_wire_done(&chain, link.ok, link.resp, link.len, &openWire);
+    openWireRan = true;
+    openWireChecks++;
+    if (openWire.verdict == BQ_OPEN_WIRE_FAIL) {
+        openWireFails++;
+    }
 }
 
 void bms_step_read_pack(bms_pack_t *dst)
@@ -174,7 +217,12 @@ static const control_phase_t bmsPhases[] = {
     { "input",  phase_input },
     { "logic",  phase_logic },
     { "output", phase_output },
+    { "openwire", phase_open_wire },
 };
+
+/* The runner runs no phase past STEP_PHASE_MAX. */
+_Static_assert(sizeof(bmsPhases) / sizeof(bmsPhases[0]) <= STEP_PHASE_MAX,
+               "every BMS phase runs");
 
 const control_step_def_t bms_step_def = {
     .image = "BMS",

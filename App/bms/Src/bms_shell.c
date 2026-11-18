@@ -29,6 +29,8 @@ static const char *chain_state_name(bq_chain_state_t s)
     case BQ_CHAIN_SYNC:       return "SYNC";
     case BQ_CHAIN_VERIFY:     return "VERIFY";
     case BQ_CHAIN_CONFIGURE:  return "CONFIGURE";
+    case BQ_CHAIN_PROTECT:    return "PROTECT";
+    case BQ_CHAIN_CLEAR:      return "CLEAR";
     case BQ_CHAIN_RUNNING:    return "RUNNING";
     case BQ_CHAIN_RETRY_WAIT: return "RETRY_WAIT";
     default:                  return "?";
@@ -70,6 +72,25 @@ static int cmd_cells(int argc, char **argv)
     shell_printf("faults active 0x%03x, seen 0x%03x, a cell under the Low-voltage limit: %s\r\n",
                  (unsigned)pack.faults_active, (unsigned)pack.faults_seen,
                  pack.under_low_voltage_limit ? "yes" : "no");
+    /* The second layers (issue 64). */
+    shell_printf("NFAULT %s, BMS_OK read-back %s, shutdown sense %s, bridge FAULT_SUMMARY ",
+                 pack.nfault_ok ? "high" : "LOW", pack.bms_ok_fb ? "high" : "low",
+                 pack.sdc_closed ? "energised" : "open");
+    if (pack.sweep.bridge_read) {
+        shell_printf("0x%02x\r\n", (unsigned)pack.sweep.bridge_fault);
+    } else {
+        shell_printf("not read\r\n");
+    }
+    static const char *const verdicts[] = {"pass", "FAIL", "unknown"};
+    const bq_open_wire_t *ow = &pack.open_wire;
+    shell_printf("open-wire checks %lu (%lu failed); last %s", (unsigned long)pack.open_wire_checks,
+                 (unsigned long)pack.open_wire_fails,
+                 (pack.open_wire_checks == 0u || (unsigned)ow->verdict > 2u)
+                     ? "none" : verdicts[ow->verdict]);
+    if (pack.open_wire_checks != 0u && ow->verdict == BQ_OPEN_WIRE_FAIL) {
+        shell_printf(", device %u cell %u", (unsigned)ow->device, (unsigned)ow->cell);
+    }
+    shell_printf("\r\n");
     if (pack.chain_state != BQ_CHAIN_RUNNING) {
         shell_printf("no Sweep: the chain is not awake\r\n");
         return 0;

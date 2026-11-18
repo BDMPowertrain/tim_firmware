@@ -119,6 +119,10 @@ _Avoid_: RTD sequence, arming
 One complete reading of every cell voltage and every cell temperature in the pack, taken by the BMS as a single exchange with the cell monitors.
 _Avoid_: Scan, poll, sample, measurement cycle
 
+**Open-wire check**:
+The cell monitors' test that every voltage sense wire still reaches its cell: a small current is drawn from each sense pin and any cell that then reads under a threshold has lost its wire, or the fuse in it. The BMS runs it once a second, after a **Sweep** and never in its place; two failures in a row are a **BMS fault**.
+_Avoid_: Wire test, OW diagnostic, sense check
+
 **BMS fault**:
 A condition for which the BMS takes BMS_OK low. It ends by itself once the condition has stayed away long enough; keeping the Tractive System off until a person resets it is the shutdown board's job, not the BMS's.
 _Avoid_: Trip, error, alarm, latched fault

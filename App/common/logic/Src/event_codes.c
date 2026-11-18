@@ -156,6 +156,7 @@ void event_data_overrun(uint8_t data[EVENT_DATA_SIZE], const overrun_event_t *ov
     put_u32(&data[0], overrun->step_us);
     put_u32(&data[4], overrun->slowest_phase_us);
     data[8] = overrun->slowest_phase;
+    data[9] = overrun->extra_work ? 1u : 0u;
 }
 
 void event_data_bus(uint8_t data[EVENT_DATA_SIZE], const event_bus_t *bus)

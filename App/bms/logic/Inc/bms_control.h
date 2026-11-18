@@ -7,7 +7,8 @@
  *
  * States (BMS_Status State values, can/control.dbc):
  *   STARTUP     BMS_OK low. To DRIVE (CHARGE in Charge mode) once every
- *               task and queue exists, the chain is awake and
+ *               task and queue exists, the chain is awake (its post-wake
+ *               faults cleared), an open-wire check has passed and
  *               BMS_POWERUP_SWEEPS Sweeps in a row were clean. To FAULT
  *               when a BMS fault is raised, and when the chain has brought
  *               back no Sweep for BMS_CHAIN_SILENT_MS: the measurement
@@ -16,8 +17,9 @@
  *   DRIVE       BMS_OK high. To FAULT on any BMS fault.
  *   CHARGE      as DRIVE, in Charge mode (in.charge_mode, #67).
  *   FAULT       BMS_OK low. Ends by itself after BMS_RECOVER_SWEEPS clean
- *               Sweeps in a row (1 s) with no fault active: every value
- *               has been in range for 1 s (ADR 0007).
+ *               Sweeps in a row (1 s) with no fault active and the last
+ *               open-wire check passed: every value has been in range for
+ *               1 s (ADR 0007).
  *   FAULT_HELD  the Held fault (config.held, decided by #65): BMS_OK low
  *               until the next Power-on reset, with the internal fault active.
  * Firmware latches nothing else: the shutdown board's latch keeps the
@@ -44,8 +46,35 @@
  * A fault's active bit clears after BMS_RECOVER_SWEEPS Sweeps clean of it;
  * its seen bit only at a Power-on reset. Each raised fault is an EVENT_BMS_FAULT Event
  * naming the fault and the cell or sensor (event_data_bms_fault()).
- * Open sense wire, cell monitor and the internal fault's other causes are
- * #64 and #65; charger disobeys #67; overcurrent is reserved and never set.
+ * The second layers (issue 64):
+ *   open sense wire    BMS_OPEN_WIRE_CHECKS failed open-wire checks in a
+ *                      row (EV.8.3.4 b: a blown or tripped voltage sense
+ *                      fuse reads as an open wire; 2.5 s budget). The step
+ *                      asks for the check (out.open_wire_due) on a step
+ *                      that took a Sweep: the first, then one at least
+ *                      BMS_OPEN_WIRE_PERIOD_MS after the last, and hands
+ *                      its result in on the next step. A check that could
+ *                      not judge neither counts nor ends a run. BMS_OK
+ *                      first rises only once a check has passed, and only
+ *                      while the last one did.
+ *   cell monitor       NFAULT low (after STARTUP, or with a Sweep), or the
+ *                      bridge's FAULT_SUMMARY non-zero (a device reporting
+ *                      its own fault), BMS_CELL_MONITOR_SWEEPS. These are
+ *                      the stack's comparators behind the firmware's
+ *                      judgement (bq_chain.h); NFAULT has already taken
+ *                      BMS_OK low by hardware (ADR 0008).
+ *   internal           any of three self-checks (EV.8.3.4 e):
+ *                      - the BMS_OK read-back differs from the level last
+ *                        commanded AND the NFAULT read-back,
+ *                        BMS_FEEDBACK_SWEEPS in a row;
+ *                      - the NFAULT read-back disagrees with the bridge's
+ *                        FAULT_SUMMARY (a dead bridge reads "no fault"
+ *                        through NFAULT's pull-up), BMS_FEEDBACK_SWEEPS
+ *                        Sweeps in a row, judged only with a Sweep;
+ *                      - the BMS_OK read-back low for BMS_SDC_SENSE_MS with
+ *                        the Shutdown Circuit sense energised throughout.
+ *                      The Held fault and the timing fault are #65.
+ * Charger disobeys is #67; overcurrent is reserved and never set.
  *
  * A cell under the Low-voltage limit (BMS_LOW_VOLTAGE_MV) in the latest
  * Sweep is a BMS_Status bit and never a BMS fault.
@@ -65,6 +94,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "bq_chain.h"
 #include "bq_sweep.h"
 #include "can_control.h"
 #include "e2e_p11.h"
@@ -89,6 +119,12 @@
 #define BMS_UV_SWEEPS      10u /* 250 ms */
 #define BMS_TEMP_SWEEPS    25u /* 550 ms */
 #define BMS_MEAS_SWEEPS    5u  /* 150 ms */
+
+#define BMS_CELL_MONITOR_SWEEPS 1u /* NFAULT has already acted */
+#define BMS_FEEDBACK_SWEEPS     5u /* the read-back checks */
+#define BMS_SDC_SENSE_MS        500u
+#define BMS_OPEN_WIRE_CHECKS    2u    /* failed in a row: 2.5 s budget */
+#define BMS_OPEN_WIRE_PERIOD_MS 1000u
 
 #define BMS_RECOVER_SWEEPS 50u   /* 1 s clean ends a fault */
 #define BMS_POWERUP_SWEEPS 5u    /* clean Sweeps before BMS_OK first rises */
@@ -127,6 +163,10 @@ typedef struct {
     const bq_sweep_t *sweep;       /* it, when swept */
     bool              charge_mode; /* Charge mode (#67) */
     bool              sdc_closed;  /* the Shutdown Circuit sense reads energised */
+    bool              nfault_ok;   /* FB.NFAULT reads high: no fault */
+    bool              bms_ok_fb;   /* FB.BMS_OK reads high */
+    bool              open_wire_ran; /* the last step ran the open-wire check */
+    bq_open_wire_t    open_wire;     /* its result, when it did */
     bool              bus_off_latched;
     bool              error_passive;
     bool              rx_overflowed;
@@ -147,6 +187,9 @@ typedef struct {
     uint16_t active;            /* bit (1 << bms_fault_t) */
     uint16_t seen;
     bool     under_low_voltage_limit;
+    /* Run the open-wire check after this step's work, and hand its result
+       in on the next step. */
+    bool     open_wire_due;
 
     bool     send_status;       /* status holds a BMS_Status (0x080): bms_tx.h says when */
     uint8_t  status[CAN_CONTROL_BMS_STATUS_LENGTH];
@@ -168,6 +211,18 @@ typedef struct {
     uint16_t     seen;
     bool         under_low_voltage_limit;
     e2e_p11_tx_t status_tx;
+    /* The self-checks. */
+    bool         commanded;        /* BMS_OK as last written; low from reset */
+    uint16_t     feedback_bad;     /* read-back wrong, Sweeps in a row */
+    uint16_t     nfault_check_bad; /* NFAULT against the register, Sweeps in a row */
+    bool         sense_timing;     /* BMS_OK low with the sense energised ... */
+    uint32_t     sense_since_ms;   /* ... since */
+    /* The open-wire check. */
+    bool         ow_asked;         /* one has been asked for */
+    uint32_t     ow_asked_ms;      /* when the last was */
+    uint8_t      ow_fails;         /* failed in a row */
+    bool         ow_passed;        /* the last that judged passed */
+    bq_open_wire_t ow_failed;      /* the last that failed */
 } bms_control_t;
 
 void bms_control_init(bms_control_t *bc, const bms_control_config_t *config);
