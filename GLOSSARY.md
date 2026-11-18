@@ -128,7 +128,7 @@ A condition for which the BMS takes BMS_OK low. It ends by itself once the condi
 _Avoid_: Trip, error, alarm, latched fault
 
 **Low-voltage limit**:
-The cell voltage below which the BMS starts **Derating** to protect cell life. It is not a **BMS fault** and never takes BMS_OK low.
+The cell voltage below which the BMS starts **Derating** to protect cell life: the voltage taper's 100% point, a BMS parameter (3.0 V unset), judged on the sag-compensated minimum cell voltage. It is not a **BMS fault** and never takes BMS_OK low.
 _Avoid_: Soft under-voltage, UV warning, cutoff
 
 **Charge mode**:

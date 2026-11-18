@@ -109,6 +109,11 @@ void setUp(void)
     in.swept = true;
     in.sweep = &sweep;
     in.nfault_ok = true;
+    /* The unset parameters: the spec's tapers, 20.0 A, no compensation. */
+    config.derate = (bms_derate_config_t){
+        .v_full_mv = 3000u, .v_floor_mv = 2700u, .t_full_dc = 500, .t_floor_dc = 570,
+        .cell_res_uohm = 0u, .full_limit_da = 200u,
+    };
     bms_control_init(&bc, &config);
 }
 
@@ -510,6 +515,20 @@ static void test_a_cell_under_the_low_voltage_limit_is_a_status_bit_and_no_fault
     sweep.cell_mv[50] = 3000u;
     step();
     TEST_ASSERT_FALSE(out.under_low_voltage_limit);
+}
+
+/* The Low-voltage limit is the voltage taper's 100% point, a parameter:
+   the bit says the Discharge limit is being derated (can/control.dbc). */
+static void test_the_low_voltage_limit_follows_the_voltage_tapers_full_point(void)
+{
+    config.derate.v_full_mv = 3200u;
+    bms_control_init(&bc, &config);
+    power_up();
+    sweep.cell_mv[50] = 3199u;
+    step();
+    TEST_ASSERT_TRUE(out.under_low_voltage_limit);
+    TEST_ASSERT_EQUAL_UINT8(1u, status().low_voltage_limit);
+    TEST_ASSERT_LESS_THAN_UINT16(200u, out.discharge_limit_da);
 }
 
 /* The BMS makes no decision from a received frame, and a Control bus
@@ -1091,13 +1110,11 @@ static void test_a_further_timing_fault_starts_the_clean_second_again(void)
 
 /* ---- issue 66: the Discharge limit and the send table ------------------ */
 
-/* The spec's tapers with a full limit of 20.0 A, the unset default. */
-static void spec_derating(uint16_t cell_res_uohm)
+/* The unset parameters but for these two. */
+static void derating(uint16_t cell_res_uohm, uint16_t full_limit_da)
 {
-    config.derate = (bms_derate_config_t){
-        .v_full_mv = 3000u, .v_floor_mv = 2700u, .t_full_dc = 500, .t_floor_dc = 570,
-        .cell_res_uohm = cell_res_uohm, .full_limit_da = 200u,
-    };
+    config.derate.cell_res_uohm = cell_res_uohm;
+    config.derate.full_limit_da = full_limit_da;
     bms_control_init(&bc, &config);
 }
 
@@ -1144,7 +1161,7 @@ static void test_every_five_steps_send_status_and_power_each_step_and_each_slow_
 
 static void test_the_discharge_limit_is_zero_until_bms_ok_is_up(void)
 {
-    spec_derating(0u);
+    derating(0u, 200u);
     for (unsigned i = 0; i < BMS_POWERUP_SWEEPS - 1u; i++) {
         step();
         TEST_ASSERT_FALSE(out.bms_ok);
@@ -1159,7 +1176,7 @@ static void test_the_discharge_limit_is_zero_until_bms_ok_is_up(void)
    one Sweep, protected by E2E Profile 11 (Data ID 0x0082). */
 static void test_bms_power_carries_the_limit_the_current_and_the_pack_voltage(void)
 {
-    spec_derating(0u);
+    derating(0u, 200u);
     in.pack_current = (bms_current_t){ .deci_a = 1234, .valid = true };
     e2e_p11_rx_t rx = {0};
     for (unsigned i = 0; i < 10u; i++) {
@@ -1183,7 +1200,7 @@ static void test_an_invalid_pack_current_goes_as_zero(void)
 /* A weak cell lowers the limit, by no more than 4% a step. */
 static void test_a_weak_cell_lowers_the_limit_in_bms_power(void)
 {
-    spec_derating(0u);
+    derating(0u, 200u);
     power_up();
     sweep.cell_mv[50] = 2850u; /* 60% */
     step();
@@ -1196,7 +1213,7 @@ static void test_a_weak_cell_lowers_the_limit_in_bms_power(void)
    0 A to charge in DRIVE. */
 static void test_the_inverter_gets_the_limit_in_whole_amps_and_no_charge(void)
 {
-    spec_derating(0u);
+    derating(0u, 200u);
     power_up();
     sweep.cell_mv[50] = 2850u;
     steps(30u);
@@ -1206,9 +1223,21 @@ static void test_the_inverter_gets_the_limit_in_whole_amps_and_no_charge(void)
     TEST_ASSERT_EQUAL_UINT16(0u, inv.charge_limit);
 }
 
+/* Rounded up, so the inverter's backup sits at or just above the limit the
+   VCU obeys and never cuts under it (ADR 0017). */
+static void test_the_inverter_limit_rounds_up_to_the_whole_amp(void)
+{
+    derating(0u, 205u); /* 20.5 A */
+    power_up();
+    struct can_control_inv_bms_limits_t inv;
+    TEST_ASSERT_EQUAL_INT(0, can_control_inv_bms_limits_unpack(&inv, step_until(0x202u), 8u));
+    TEST_ASSERT_EQUAL_UINT16(21u, inv.discharge_limit);
+    TEST_ASSERT_EQUAL_UINT16(205u, power().discharge_limit);
+}
+
 static void test_the_inverter_limit_is_zero_until_bms_ok_is_up(void)
 {
-    spec_derating(0u);
+    derating(0u, 200u);
     struct can_control_inv_bms_limits_t inv;
     TEST_ASSERT_EQUAL_INT(0, can_control_inv_bms_limits_unpack(&inv, step_until(0x202u), 8u));
     TEST_ASSERT_FALSE(out.bms_ok);
@@ -1219,7 +1248,7 @@ static void test_the_inverter_limit_is_zero_until_bms_ok_is_up(void)
    protected by E2E Profile 11 (Data ID 0x0081). */
 static void test_bms_limits_says_no_charge_in_drive(void)
 {
-    spec_derating(0u);
+    derating(0u, 200u);
     power_up();
     e2e_p11_rx_t rx = {0};
     struct can_control_bms_limits_t lim;
@@ -1291,7 +1320,7 @@ static void test_a_uniform_pack_averages_to_its_one_temperature(void)
    and the fault still comes on the tenth Sweep. */
 static void test_the_under_voltage_fault_stays_on_the_raw_voltage(void)
 {
-    spec_derating(10000u);
+    derating(1200u, 200u);
     in.pack_current = (bms_current_t){ .deci_a = 3000, .valid = true };
     power_up();
     sweep.cell_mv[36] = BMS_UV_MV;
@@ -1326,6 +1355,7 @@ int main(void)
     RUN_TEST(test_the_silent_chain_time_survives_the_wrap);
     RUN_TEST(test_a_blocked_startup_never_raises_bms_ok);
     RUN_TEST(test_a_cell_under_the_low_voltage_limit_is_a_status_bit_and_no_fault);
+    RUN_TEST(test_the_low_voltage_limit_follows_the_voltage_tapers_full_point);
     RUN_TEST(test_a_control_bus_failure_never_takes_bms_ok_low);
     RUN_TEST(test_overcurrent_is_never_set);
     RUN_TEST(test_each_fault_is_one_event_on_the_step_it_is_raised);
@@ -1366,6 +1396,7 @@ int main(void)
     RUN_TEST(test_an_invalid_pack_current_goes_as_zero);
     RUN_TEST(test_a_weak_cell_lowers_the_limit_in_bms_power);
     RUN_TEST(test_the_inverter_gets_the_limit_in_whole_amps_and_no_charge);
+    RUN_TEST(test_the_inverter_limit_rounds_up_to_the_whole_amp);
     RUN_TEST(test_the_inverter_limit_is_zero_until_bms_ok_is_up);
     RUN_TEST(test_bms_limits_says_no_charge_in_drive);
     RUN_TEST(test_bms_pack_voltages_names_the_highest_and_lowest_cell);

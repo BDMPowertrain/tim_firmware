@@ -80,8 +80,9 @@
  *                      steps ran long and in which phase.
  * Charger disobeys is #67; overcurrent is reserved and never set.
  *
- * A cell under the Low-voltage limit (BMS_LOW_VOLTAGE_MV) in the latest
- * Sweep is a BMS_Status bit and never a BMS fault.
+ * The minimum cell under the Low-voltage limit (the voltage taper's 100%
+ * point, a parameter; bms_derate.h) at the latest Sweep is a BMS_Status
+ * bit and never a BMS fault.
  *
  * Derating (issue 66, ADR 0018): the Discharge limit, from the lowest cell
  * and the hottest sensor of each Sweep and the pack current, by
@@ -132,7 +133,6 @@
 #define BMS_UV_MV           2505u /* cell at or below */
 #define BMS_OT_MV           1526u /* sensor reading at or below: 58 C */
 #define BMS_UT_MV           2146u /* sensor reading at or above: 2 C */
-#define BMS_LOW_VOLTAGE_MV  3000u /* a cell below: the Low-voltage limit */
 
 /* Bad Sweeps in a row to raise the fault, at 20 ms each. */
 #define BMS_OV_SWEEPS      3u  /* 100 ms budget */
@@ -175,23 +175,6 @@ typedef struct {
     bms_derate_config_t derate;   /* from the BMS parameters */
 } bms_control_config_t;
 
-/* One Sweep's readings in brief, over the cells and sensors it read
-   validly. A cell or sensor index runs 0 to 127: module index / 8, number
-   index % 8. */
-typedef struct {
-    uint16_t cells;     /* cells read; 0: none, the rest of the cell fields 0 */
-    uint32_t sum_mv;
-    uint16_t min_mv;
-    uint16_t max_mv;
-    uint8_t  min_cell;
-    uint8_t  max_cell;
-    uint16_t temps;     /* sensors read in range; 0: none */
-    int32_t  sum_dc;    /* 0.1 C */
-    int16_t  min_dc;
-    int16_t  max_dc;
-    uint8_t  min_temp;
-    uint8_t  max_temp;
-} bms_pack_summary_t;
 
 typedef struct {
     uint32_t          now_ms;
@@ -256,10 +239,7 @@ typedef struct {
     uint16_t     all_clean;        /* Sweeps clean of every fault in a row */
     uint16_t     active;
     uint16_t     seen;
-    bool         under_low_voltage_limit;
-    e2e_p11_tx_t status_tx;
-    e2e_p11_tx_t power_tx;
-    e2e_p11_tx_t limits_tx;
+    bms_tx_e2e_t e2e;
     bms_derate_t derate;
     bms_pack_summary_t summary;    /* the last Sweep's */
     /* The self-checks. */

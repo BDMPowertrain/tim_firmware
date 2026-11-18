@@ -92,12 +92,14 @@ static void test_a_tapers_full_point_is_always_clear_of_its_floor(void)
                                 def(BMS_PARAM_DISCHARGE_T_FULL)->max);
 }
 
-/* micro-ohm, unset 0: no compensation, the taper acts earliest. */
+/* micro-ohm, unset 0: no compensation, the taper acts earliest. At most
+   1.2 mOhm: at the largest full discharge limit (250 A) that puts back
+   0.3 V, under ADR 0018's 0.375 V instability point. */
 static void test_cell_resistance(void)
 {
     TEST_ASSERT_EQUAL_INT32(0, params_value(&p, BMS_PARAM_CELL_RESISTANCE));
-    TEST_ASSERT_EQUAL(PARAMS_SET_OK, params_set(&p, BMS_PARAM_CELL_RESISTANCE, 10000));
-    TEST_ASSERT_EQUAL(PARAMS_SET_OUT_OF_RANGE, params_set(&p, BMS_PARAM_CELL_RESISTANCE, 10001));
+    TEST_ASSERT_EQUAL(PARAMS_SET_OK, params_set(&p, BMS_PARAM_CELL_RESISTANCE, 1200));
+    TEST_ASSERT_EQUAL(PARAMS_SET_OUT_OF_RANGE, params_set(&p, BMS_PARAM_CELL_RESISTANCE, 1201));
     TEST_ASSERT_EQUAL(PARAMS_SET_OUT_OF_RANGE, params_set(&p, BMS_PARAM_CELL_RESISTANCE, -1));
 }
 
@@ -109,6 +111,17 @@ static void test_full_discharge_limit(void)
     TEST_ASSERT_EQUAL(PARAMS_SET_OK, params_set(&p, BMS_PARAM_FULL_DISCHARGE_LIMIT, 2500));
     TEST_ASSERT_EQUAL(PARAMS_SET_OUT_OF_RANGE, params_set(&p, BMS_PARAM_FULL_DISCHARGE_LIMIT, 2501));
     TEST_ASSERT_EQUAL(PARAMS_SET_OUT_OF_RANGE, params_set(&p, BMS_PARAM_FULL_DISCHARGE_LIMIT, -1));
+}
+
+/* The names a person types in the shell say what they set. */
+static void test_the_discharge_parameters_are_found_by_their_names(void)
+{
+    TEST_ASSERT_EQUAL(BMS_PARAM_DISCHARGE_V_FULL, params_find(&p, "discharge_v_full"));
+    TEST_ASSERT_EQUAL(BMS_PARAM_DISCHARGE_V_FLOOR, params_find(&p, "discharge_v_floor"));
+    TEST_ASSERT_EQUAL(BMS_PARAM_DISCHARGE_T_FULL, params_find(&p, "discharge_t_full"));
+    TEST_ASSERT_EQUAL(BMS_PARAM_DISCHARGE_T_FLOOR, params_find(&p, "discharge_t_floor"));
+    TEST_ASSERT_EQUAL(BMS_PARAM_CELL_RESISTANCE, params_find(&p, "cell_resistance"));
+    TEST_ASSERT_EQUAL(BMS_PARAM_FULL_DISCHARGE_LIMIT, params_find(&p, "full_discharge_limit"));
 }
 
 int main(void)
@@ -123,5 +136,6 @@ int main(void)
     RUN_TEST(test_a_tapers_full_point_is_always_clear_of_its_floor);
     RUN_TEST(test_cell_resistance);
     RUN_TEST(test_full_discharge_limit);
+    RUN_TEST(test_the_discharge_parameters_are_found_by_their_names);
     return UNITY_END();
 }

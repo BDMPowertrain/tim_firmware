@@ -3,18 +3,19 @@
  * and moved at bounded rates.
  *
  *   voltage taper      100% with the minimum cell voltage at or above
- *                      v_full_mv, falling linearly to 20% at v_floor_mv and
- *                      held at 20% below it. The voltage is sag-compensated:
- *                      the measured minimum + pack current x cell
- *                      resistance. With pack current invalid it is the raw
- *                      measured voltage, the conservative side.
+ *                      v_full_mv (the Low-voltage limit), falling linearly
+ *                      to 20% at v_floor_mv and held at 20% below it. The
+ *                      voltage is sag-compensated: the Sweep's minimum +
+ *                      pack current x cell resistance, never more than
+ *                      BMS_DERATE_SAG_MAX_MV above it. With pack current
+ *                      invalid it is the raw voltage, the conservative side.
  *   temperature taper  100% with the maximum cell temperature at or below
  *                      t_full_dc, falling linearly to 20% at t_floor_dc and
  *                      held at 20% above it.
  * The lower taper wins. The limit follows that target at no more than
  * BMS_DERATE_FALL_PPM_PER_S falling and BMS_DERATE_RISE_PPM_PER_S rising
  * (constants: one bad Sweep costs 4% and not the whole limit). The first
- * measurement sets it to the target at once.
+ * Sweep sets it to the target at once.
  *
  * The limit sent is the full discharge limit x that fraction, and 0 A
  * while BMS_OK is low (spec #36: "the BMS sends zero limits until BMS_OK
@@ -43,8 +44,14 @@
    second: 200% and 10%. */
 #define BMS_DERATE_FALL_PPM_PER_S 2000000u
 #define BMS_DERATE_RISE_PPM_PER_S 100000u
-/* A longer gap between measurements moves the limit no further. */
+/* A longer gap between Sweeps moves the limit no further. */
 #define BMS_DERATE_MAX_GAP_MS 1000u
+
+/* The most sag put back on a cell, mV: under the 0.375 V at which ADR 0018
+   finds the loaded-voltage loop goes unstable, so a wrong resistance or an
+   odd current cannot lift a low cell far out of the taper. It also bounds
+   the cell resistance parameter (bms_params.h). */
+#define BMS_DERATE_SAG_MAX_MV 300
 
 /* Pack current as it enters logic: a value and whether it may be used. The
    source is one replaceable input in bms_step.c (issue 29 decides it). */
@@ -66,24 +73,27 @@ typedef struct {
 /* bms_derate_init() it; touch nothing inside. */
 typedef struct {
     bms_derate_config_t config;
-    bool     measured;     /* a measurement has come in */
-    uint32_t last_ms;      /* when */
+    bool     swept;        /* a Sweep has come in */
+    uint32_t last_ms;      /* when the last did */
     uint32_t fraction_ppm; /* of the full limit */
+    bool     under_low_voltage_limit; /* at the last Sweep */
 } bms_derate_t;
 
 void bms_derate_init(bms_derate_t *d, const bms_derate_config_t *config);
 
 /*
- * One step. When measured, min_cell_mv is the lowest cell voltage read and
- * max_temp_dc the highest cell temperature read, of this step's Sweep, and
- * the limit moves toward their target; otherwise it holds. Returns the
+ * One step. When swept, min_cell_mv is the lowest cell voltage and
+ * max_temp_dc the highest cell temperature this step's Sweep read validly,
+ * and the limit moves toward their target; otherwise it holds. Returns the
  * Discharge limit in 0.1 A: 0 unless bms_ok.
  */
-uint16_t bms_derate_step(bms_derate_t *d, uint32_t now_ms, bool measured,
+uint16_t bms_derate_step(bms_derate_t *d, uint32_t now_ms, bool swept,
                          uint16_t min_cell_mv, int16_t max_temp_dc,
                          bms_current_t current, bool bms_ok);
 
-/* The fraction of the full limit the limit stands at, in ppm. */
-uint32_t bms_derate_fraction_ppm(const bms_derate_t *d);
+/* The compensated minimum cell voltage was under the Low-voltage limit
+   (v_full_mv) at the last Sweep: the voltage taper is derating. False
+   before any Sweep. */
+bool bms_derate_under_low_voltage_limit(const bms_derate_t *d);
 
 #endif /* BMS_DERATE_H */

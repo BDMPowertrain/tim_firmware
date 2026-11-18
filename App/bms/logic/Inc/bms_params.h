@@ -23,11 +23,14 @@ typedef enum {
     BMS_PARAM_CAN2_TERM,         /* 1: terminate the DAQ bus */
     BMS_PARAM_CHARGE_TARGET,     /* mV on the highest cell */
     BMS_PARAM_FULL_CHARGE_LIMIT, /* 0.1 A */
-    BMS_PARAM_DISCHARGE_V_FULL,  /* mV: the voltage taper's 100% point */
+    BMS_PARAM_DISCHARGE_V_FULL,  /* mV: the voltage taper's 100% point, the
+                                    Low-voltage limit */
     BMS_PARAM_DISCHARGE_V_FLOOR, /* mV: its 20% point */
     BMS_PARAM_DISCHARGE_T_FULL,  /* 0.1 C: the temperature taper's 100% point */
     BMS_PARAM_DISCHARGE_T_FLOOR, /* 0.1 C: its 20% point */
-    BMS_PARAM_CELL_RESISTANCE,   /* micro-ohm, one cell, for sag compensation */
+    BMS_PARAM_CELL_RESISTANCE,   /* micro-ohm, one cell, for sag compensation;
+                                    at most BMS_DERATE_SAG_MAX_MV back at the
+                                    largest full discharge limit */
     BMS_PARAM_FULL_DISCHARGE_LIMIT, /* 0.1 A: the Discharge limit at 100% */
     BMS_PARAM_COUNT
 } bms_param_t;

@@ -31,20 +31,22 @@ static void test_bms_status_is_due_on_every_step(void)
 
 static void test_a_startup_bms_status_says_startup_bms_ok_low_and_passes_its_e2e_check(void)
 {
-    e2e_p11_tx_t tx = {0};
+    bms_tx_e2e_t tx = {0};
     e2e_p11_rx_t rx = {0};
     struct can_control_bms_status_t signals = {0};
     signals.state = CAN_CONTROL_BMS_STATUS_STATE_STARTUP_CHOICE;
 
     for (int i = 0; i < 20; i++) {
-        uint8_t frame[CAN_CONTROL_BMS_STATUS_LENGTH];
-        bms_tx_build_status(&signals, &tx, frame);
+        bms_tx_frame_t f;
+        bms_tx_build_status(&signals, &tx, &f);
 
-        TEST_ASSERT_EQUAL(E2E_P11_OK,
-                          e2e_p11_check(&rx, 0x0080u, frame, sizeof(frame)));
+        TEST_ASSERT_EQUAL_UINT32(0x080u, f.id);
+        TEST_ASSERT_FALSE(f.extended);
+        TEST_ASSERT_EQUAL_UINT8(8u, f.len);
+        TEST_ASSERT_EQUAL(E2E_P11_OK, e2e_p11_check(&rx, 0x0080u, f.data, f.len));
 
         struct can_control_bms_status_t out;
-        TEST_ASSERT_EQUAL_INT(0, can_control_bms_status_unpack(&out, frame, sizeof(frame)));
+        TEST_ASSERT_EQUAL_INT(0, can_control_bms_status_unpack(&out, f.data, f.len));
         TEST_ASSERT_EQUAL_UINT8(0u, out.state); /* 0 is STARTUP in the DBC */
         TEST_ASSERT_EQUAL_UINT8(0u, out.bms_ok);
         TEST_ASSERT_EQUAL_UINT8((uint8_t)(i % 15), out.counter);

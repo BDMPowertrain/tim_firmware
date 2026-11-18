@@ -263,7 +263,7 @@ CM_ SG_ 128 ChargerDisobeysActive "Charger disobeys its request.";
 CM_ SG_ 128 OvercurrentActive "Reserved, never set (pack current sensing, issue 29).";
 CM_ SG_ 128 OverVoltageSeen "Seen bits: the fault has tripped since power-up; cleared only by a power cycle. Same order as the active bits.";
 CM_ SG_ 128 BmsOk "The level the firmware commands on BMS_OK: 1 = high (no fault).";
-CM_ SG_ 128 LowVoltageLimit "A cell is under the Low-voltage limit (3.0 V) and the Discharge limit is being derated. Not a fault.";
+CM_ SG_ 128 LowVoltageLimit "The sag-compensated minimum cell voltage is under the Low-voltage limit (the voltage taper's 100% point, discharge_v_full, 3.0 V unset) and the Discharge limit is being derated. Not a fault.";
 CM_ SG_ 128 ShutdownCircuitClosed "The Shutdown Circuit sense input reads energised (in the car or on the hand cart).";
 CM_ SG_ 128 ChargeComplete "Charge complete: lasts until a power cycle.";
 CM_ SG_ 128 ParametersDefaulted "No valid stored parameters were found; running on defaults.";

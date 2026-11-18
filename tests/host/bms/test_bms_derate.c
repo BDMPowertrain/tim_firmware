@@ -36,7 +36,7 @@ void setUp(void)
 
 void tearDown(void) {}
 
-/* The first measurement sets the limit to the target at once. */
+/* The first Sweep sets the limit to the target at once. */
 static uint16_t first(uint16_t mv, int16_t dc, bms_current_t i)
 {
     return bms_derate_step(&d, 0u, true, mv, dc, i, true);
@@ -127,13 +127,13 @@ static void test_the_limit_rises_at_10_percent_a_second(void)
     TEST_ASSERT_EQUAL_UINT16(1000u, run(&t, 5, FULL, COOL));
 }
 
-/* A step with no measurement holds the limit, and the next one moves it
-   by its elapsed time, no further than a second's worth. */
-static void test_with_no_measurement_the_limit_holds(void)
+/* A step with no Sweep holds the limit, and the next Sweep moves it by
+   the time since the last, no further than a second's worth. */
+static void test_with_no_sweep_the_limit_holds(void)
 {
     TEST_ASSERT_EQUAL_UINT16(1000u, first(FULL, COOL, none));
     TEST_ASSERT_EQUAL_UINT16(1000u, bms_derate_step(&d, 20u, false, 2600u, COOL, none, true));
-    /* 40 ms since the last measurement: 8%. */
+    /* 40 ms since the last Sweep: 8%. */
     TEST_ASSERT_EQUAL_UINT16(920u, bms_derate_step(&d, 40u, true, 2600u, COOL, none, true));
 
     setUp();
@@ -152,15 +152,46 @@ static void test_the_limit_is_zero_until_bms_ok_is_up(void)
     TEST_ASSERT_EQUAL_UINT16(0u, bms_derate_step(&d, 60u, true, FULL, COOL, none, false));
 }
 
-/* Before any measurement there is nothing to allow. */
-static void test_with_no_measurement_yet_the_limit_is_zero(void)
+/* Before any Sweep there is nothing to allow. */
+static void test_with_no_sweep_yet_the_limit_is_zero(void)
 {
     TEST_ASSERT_EQUAL_UINT16(0u, bms_derate_step(&d, 0u, false, FULL, COOL, none, true));
+}
+
+/* However large the current, no more than BMS_DERATE_SAG_MAX_MV (0.3 V,
+   under ADR 0018's 0.375 V instability point) is put back: 2.60 V at
+   500 A with 1 mOhm reads 2.90 V, not 3.10 V, so 73.3%. */
+static void test_no_more_than_0v3_of_sag_is_put_back(void)
+{
+    const bms_current_t huge = { .deci_a = 5000, .valid = true };
+    TEST_ASSERT_EQUAL_UINT16(733u, first(2600u, COOL, huge));
+}
+
+/* The Low-voltage limit is the voltage taper's 100% point: under it, the
+   voltage taper is derating. On the compensated voltage, like the taper. */
+static void test_under_the_low_voltage_limit_is_where_the_voltage_taper_acts(void)
+{
+    (void)first(2999u, COOL, none);
+    TEST_ASSERT_TRUE(bms_derate_under_low_voltage_limit(&d));
+    (void)bms_derate_step(&d, 20u, true, 3000u, COOL, none, true);
+    TEST_ASSERT_FALSE(bms_derate_under_low_voltage_limit(&d));
+
+    /* 2.95 V at 100 A with 1 mOhm is 3.05 V compensated: no taper. */
+    const bms_current_t discharging = { .deci_a = 1000, .valid = true };
+    (void)bms_derate_step(&d, 40u, true, 2950u, COOL, discharging, true);
+    TEST_ASSERT_FALSE(bms_derate_under_low_voltage_limit(&d));
+
+    /* A step with no Sweep holds it. */
+    (void)bms_derate_step(&d, 60u, true, 2900u, COOL, none, true);
+    (void)bms_derate_step(&d, 80u, false, 3600u, COOL, none, true);
+    TEST_ASSERT_TRUE(bms_derate_under_low_voltage_limit(&d));
 }
 
 int main(void)
 {
     UNITY_BEGIN();
+    RUN_TEST(test_no_more_than_0v3_of_sag_is_put_back);
+    RUN_TEST(test_under_the_low_voltage_limit_is_where_the_voltage_taper_acts);
     RUN_TEST(test_a_full_cool_pack_gets_the_full_limit);
     RUN_TEST(test_the_voltage_taper_runs_from_100_percent_at_3v0_to_20_percent_at_2v7);
     RUN_TEST(test_the_temperature_taper_runs_from_100_percent_at_50c_to_20_percent_at_57c);
@@ -169,8 +200,8 @@ int main(void)
     RUN_TEST(test_with_pack_current_invalid_the_taper_uses_the_raw_voltage);
     RUN_TEST(test_the_limit_falls_at_200_percent_a_second);
     RUN_TEST(test_the_limit_rises_at_10_percent_a_second);
-    RUN_TEST(test_with_no_measurement_the_limit_holds);
+    RUN_TEST(test_with_no_sweep_the_limit_holds);
     RUN_TEST(test_the_limit_is_zero_until_bms_ok_is_up);
-    RUN_TEST(test_with_no_measurement_yet_the_limit_is_zero);
+    RUN_TEST(test_with_no_sweep_yet_the_limit_is_zero);
     return UNITY_END();
 }
