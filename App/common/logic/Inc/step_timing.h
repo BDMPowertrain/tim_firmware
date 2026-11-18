@@ -42,7 +42,7 @@ void step_sched_init(step_sched_t *sched, uint32_t period_ms,
  */
 uint32_t step_sched_next(step_sched_t *sched, uint32_t now_ms);
 
-#define STEP_PHASE_MAX 5u /* phases a step may time: the BMS has 5 (issue 64) */
+#define STEP_PHASE_MAX 5u /* phases a step may time */
 
 /* Times in microseconds. Zero-initialise at power-on. */
 typedef struct {

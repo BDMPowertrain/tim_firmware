@@ -113,7 +113,7 @@ void event_data_param_out_of_range(uint8_t data[EVENT_DATA_SIZE], uint16_t id, i
 void event_data_param_save(uint8_t data[EVENT_DATA_SIZE], uint8_t result, uint32_t counter);
 
 /* 0 step (us, u32), 4 slowest phase (us, u32), 8 slowest phase index (u8),
-   9 the open-wire check ran in the step (u8, 0 or 1). */
+   9 the image's extra work ran in the step (u8, 0 or 1). */
 void event_data_overrun(uint8_t data[EVENT_DATA_SIZE], const overrun_event_t *overrun);
 
 typedef struct {

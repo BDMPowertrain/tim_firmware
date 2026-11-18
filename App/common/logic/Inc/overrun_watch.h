@@ -43,12 +43,12 @@ typedef struct {
     uint32_t step_us;
     uint32_t slowest_phase_us;
     uint8_t  slowest_phase; /* counted from 0; the first of equals */
-    bool     open_wire;     /* the BMS's open-wire check ran in the step (spec #36) */
+    bool     extra_work;    /* the image's occasional extra work ran in the step */
 } overrun_event_t;
 
 /* The Event data of a step that overran, from its own timings and whether
-   the open-wire check ran in it (always false on the VCU). */
+   the image's occasional extra work ran in it (control_step.h). */
 overrun_event_t overrun_event_make(uint32_t step_us, const uint32_t *phase_us,
-                                   size_t phase_count, bool open_wire);
+                                   size_t phase_count, bool extra_work);
 
 #endif /* OVERRUN_WATCH_H */

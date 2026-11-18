@@ -56,7 +56,7 @@ static void test_the_overrun_event(void)
 {
     const overrun_event_t overrun = {
         .step_us = 12345u, .slowest_phase_us = 0x0100u, .slowest_phase = 3u,
-        .open_wire = true,
+        .extra_work = true,
     };
     const uint8_t want[EVENT_DATA_SIZE] = {
         0x39, 0x30, 0, 0, 0x00, 0x01, 0, 0, 3, 1, 0, 0, 0, 0, 0, 0,
