@@ -77,6 +77,8 @@ add_host_test(test_vcu_control logic_vcu vcu/test_vcu_control.c)
 add_host_test(test_vcu_calibration logic_vcu vcu/test_vcu_calibration.c)
 add_host_test(test_vcu_power_limiter logic_vcu vcu/test_vcu_power_limiter.c)
 add_host_test(test_vcu_power_limiter_plant logic_vcu vcu/test_vcu_power_limiter_plant.c)
+add_host_test(test_vcu_log logic_vcu vcu/test_vcu_log.c)
+add_host_test(test_vcu_imu_log logic_vcu vcu/test_vcu_imu_log.c)
 add_host_test(test_bms_tx logic_bms bms/test_bms_tx.c)
 add_host_test(test_bms_params logic_bms bms/test_bms_params.c)
 add_host_test(test_record_ring logic_common common/test_record_ring.c)
@@ -116,6 +118,25 @@ if(Python3_Interpreter_FOUND)
             -DDIR=${CMAKE_CURRENT_BINARY_DIR}
             -P ${CMAKE_CURRENT_SOURCE_DIR}/power_rule_windows_check.cmake)
     set_tests_properties(test_power_rule_windows_plant PROPERTIES FIXTURES_REQUIRED power_traces)
+
+    # The VCU's Records (issue 61): the decoder on the files test_vcu_log
+    # writes, the DBC decoding with them, and the rule-window check on the
+    # decoded step logs. The DBC decoding needs cantools (requirements.txt).
+    execute_process(COMMAND ${Python3_EXECUTABLE} -c "import cantools"
+        RESULT_VARIABLE no_cantools OUTPUT_QUIET ERROR_QUIET)
+    if(no_cantools AND TIM_REQUIRE_PYTHON)
+        message(FATAL_ERROR "cantools is missing for test_data_log_vcu_decoder: pip install -r requirements.txt")
+    elseif(no_cantools)
+        message(WARNING "No cantools (pip install -r requirements.txt): test_data_log_vcu_decoder is not run")
+    else()
+        set_tests_properties(test_vcu_log PROPERTIES FIXTURES_SETUP vcu_log_sample)
+        add_test(NAME test_data_log_vcu_decoder
+            COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/data_log_vcu_check.py
+                ${repo_root}/tools/data_log_decode.py
+                ${repo_root}/tools/power_rule_windows.py
+                ${CMAKE_CURRENT_BINARY_DIR})
+        set_tests_properties(test_data_log_vcu_decoder PROPERTIES FIXTURES_REQUIRED vcu_log_sample)
+    endif()
 else()
     message(WARNING "No Python 3.10 or later: test_data_log_decoder and the power rule-window checks are not run")
 endif()

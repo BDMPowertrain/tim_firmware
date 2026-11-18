@@ -12,7 +12,8 @@
    — the lightest ISR-to-task handoff FreeRTOS has, no queue or
    semaphore object involved. imuTask then takes spi3Mutex, bursts the
    whole FIFO off SPI3 in one transaction, releases the mutex, and
-   demuxes the burst into accel/gyro samples by each entry's tag byte.
+   demuxes the burst into accel/gyro samples by each entry's tag byte,
+   and pairs them into the Data log's IMU Records (vcu_imu_log.h).
    This is what keeps SPI3 (shared with the mezzanine header) idle
    between bursts instead of busy at the sensor's own output rate. */
 
@@ -26,9 +27,12 @@
 
 #include "cmsis_os2.h"
 
+#include "data_log_record.h"
+#include "data_log_ring.h"
 #include "main.h"
 #include "print.h"
 #include "spi3_bus.h"
+#include "vcu_imu_log.h"
 
 extern SPI_HandleTypeDef hspi3;
 
@@ -56,6 +60,10 @@ extern SPI_HandleTypeDef hspi3;
    sensors is ~10 accel + ~10 gyro samples, roughly a 100 ms burst
    period. Split across FIFO_CTRL1 (low 8 bits) / FIFO_CTRL2 (bit 0). */
 #define IMU_FIFO_WATERMARK       20u
+
+/* imuTask reads the FIFO at least this often even with no IMU_INT edge:
+   about two watermarks, so a normal 100 ms burst is never read early. */
+#define IMU_WAKE_TIMEOUT_MS      250u
 
 /* FIFO_CTRL4 (0Ah): FIFO_MODE[2:0]=110, continuous mode — newest sample
    overwrites the oldest if we ever fall behind, instead of the FIFO
@@ -88,6 +96,18 @@ extern SPI_HandleTypeDef hspi3;
    putting a 225-byte buffer on a task's stack is exactly the mistake
    that overflowed shellTask earlier. */
 static uint8_t spiTxBuf[IMU_SPI_BUF_LEN];
+
+_Static_assert(IMU_FIFO_BURST_MAX_WORDS == VCU_IMU_ENTRIES_MAX,
+               "a FIFO read fits the IMU Records' pairing");
+_Static_assert(IMU_FIFO_TAG_ACCEL == VCU_IMU_ACCEL && IMU_FIFO_TAG_GYRO == VCU_IMU_GYRO,
+               "the pairing reads the FIFO's own tags");
+
+/* The IMU Records (issue 61): each read's entries, paired into accel and
+   gyro Records for the Data log. imuTask's alone; static, not on its
+   stack. */
+static vcu_imu_pairer_t pairer;
+static vcu_imu_entry_t entries[VCU_IMU_ENTRIES_MAX];
+static vcu_imu_record_t records[VCU_IMU_PAIRS_MAX];
 static uint8_t spiRxBuf[IMU_SPI_BUF_LEN];
 
 /* Cached latest samples, for imu_get_latest_accel()/imu_get_latest_gyro()
@@ -217,18 +237,19 @@ static bool imu_hw_init(void)
     return true;
 }
 
-/* Runs once per IMU_INT watermark interrupt. Bounded to a 100 ms wait
-   for spi3Mutex rather than blocking forever: if the mezzanine bus is
-   held longer than that, skipping this cycle and catching up next
-   watermark is better than stalling imuTask (osPriorityAboveNormal)
-   indefinitely behind it. */
-static void imu_drain_fifo(void)
+/* One read of at most IMU_FIFO_BURST_MAX_WORDS entries. Returns the
+   entries it left in the FIFO. Bounded to a 100 ms wait for spi3Mutex
+   rather than blocking forever: if the mezzanine bus is held longer than
+   that, skipping this cycle and catching up next time is better than
+   stalling imuTask (osPriorityAboveNormal) indefinitely behind it. */
+static uint16_t imu_drain_fifo(void)
 {
     if (!spi3_bus_lock(100)) {
-        return;
+        return 0u;
     }
 
-    uint16_t pending = imu_fifo_pending();
+    const uint16_t inFifo = imu_fifo_pending();
+    uint16_t pending = inFifo;
     if (pending > IMU_FIFO_BURST_MAX_WORDS) {
         pending = IMU_FIFO_BURST_MAX_WORDS;
     }
@@ -240,7 +261,7 @@ static void imu_drain_fifo(void)
     spi3_bus_unlock();
 
     if (pending == 0) {
-        return;
+        return 0u;
     }
 
     osMutexAcquire(imuDataMutex, osWaitForever);
@@ -250,6 +271,8 @@ static void imu_drain_fifo(void)
         int16_t x = (int16_t)((uint16_t)word[1] | ((uint16_t)word[2] << 8));
         int16_t y = (int16_t)((uint16_t)word[3] | ((uint16_t)word[4] << 8));
         int16_t z = (int16_t)((uint16_t)word[5] | ((uint16_t)word[6] << 8));
+
+        entries[i] = (vcu_imu_entry_t){.sensor = sensor, .xyz = {x, y, z}};
 
         if (sensor == IMU_FIFO_TAG_ACCEL) {
             latestAccel.x = x;
@@ -264,6 +287,19 @@ static void imu_drain_fifo(void)
         }
     }
     osMutexRelease(imuDataMutex);
+
+    /* One Record per accel and gyro pair, about 100 Hz, dated back from
+       this read (vcu_imu_log.h). Never waits: a full ring drops and counts. */
+    const size_t made = vcu_imu_pair(&pairer, entries, pending, (size_t)(inFifo - pending),
+                                     osKernelGetTickCount(), records);
+    for (size_t i = 0; i < made; i++) {
+        uint8_t record[DATA_LOG_IMU_SIZE];
+
+        data_log_imu_encode(record, &records[i].sample);
+        (void)data_log_push(DATA_LOG_RING_IMU, DATA_LOG_IMU, records[i].uptime_ms, record,
+                            sizeof record);
+    }
+    return (uint16_t)(inFifo - pending);
 }
 
 /* Deliberately minimal: no SPI3 access (that's spi3_bus_lock(), which
@@ -282,6 +318,7 @@ void imuTask(void *argument)
     (void)argument;
 
     imuTaskHandle = osThreadGetId();
+    vcu_imu_pairer_init(&pairer);
 
     const osMutexAttr_t imuDataMutex_attributes = {
         .name = "imuDataMutex",
@@ -298,9 +335,16 @@ void imuTask(void *argument)
         vTaskSuspend(NULL);
     }
 
+    /* IMU_INT is the watermark flag, an EXTI on its rising edge. A FIFO
+       left at or above the watermark keeps the line high and no edge
+       comes again (seen on the bench, issue 61, after a debugger halt; a
+       skipped read does the same). So each wake reads until the FIFO is
+       below the watermark, and the wait times out, so a missed edge
+       costs IMU_WAKE_TIMEOUT_MS of latency, never the IMU. */
     for (;;) {
-        ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
-        imu_drain_fifo();
+        (void)ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(IMU_WAKE_TIMEOUT_MS));
+        while (imu_drain_fifo() >= IMU_FIFO_WATERMARK) {
+        }
     }
 }
 

@@ -52,8 +52,18 @@ jobs:
       - name: Install Ninja
         run: sudo apt-get update && sudo apt-get install -y ninja-build
 
+      # The Data log decoder's check decodes VCU Records with the DBC files
+      # through cantools (issue 61); the configure fails without it here.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Install cantools
+        run: pip install -r requirements.txt
+
+      # Python is pinned to setup-python's, the one with cantools.
       - name: Configure
-        run: cmake --preset host-tests-sanitize
+        run: cmake --preset host-tests-sanitize -DPython3_EXECUTABLE="$(which python)"
 
       - name: Build the host tests
         run: cmake --build --preset host-tests-sanitize

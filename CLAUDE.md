@@ -34,6 +34,11 @@ executable per test file, added with add_host_test() in
 tests/host/CMakeLists.txt. Warnings are errors, and so is a float promoted
 to double.
 
+The Data log decoder's checks also need Python 3.10 or later with cantools
+(`pip install -r requirements.txt`). If CMake finds a different Python than
+the one with cantools, point it there:
+`cmake --preset host-tests -DPython3_EXECUTABLE=<that python>`.
+
 One-time setup: the host-tests presets need a native `gcc` on the PATH, next
 to the Arm toolchain.
 - Windows: `winget install BrechtSanders.WinLibs.POSIX.UCRT`, then open a new
@@ -55,7 +60,7 @@ there and nowhere else. can/generate.py turns them into
 App/common/logic/can_db/, which is committed and is logic. NEVER edit
 can_db/ by hand: change the DBC file, run the script, commit both. CI
 regenerates and fails on any difference. Python (3.10 or later) is needed
-only for this, not to build an image.
+only for this and the host tests' decoder checks, not to build an image.
 
 The generated structs hold raw signal values (tenths of an amp and so on):
 the scale and unit of each signal are in its DBC file. No float or double
@@ -172,12 +177,19 @@ undo provisioning.
   task, queue or shell command sends on it.
 - The Data log (ADR 0021) leaves the control step through a ring with one
   writer and one reader, no lock (App/common/Src/data_log_ring.c, linked
-  into both images); the Event writer copies each Event into a second
-  ring. The SD logger (App/common/Src/data_log.c, both images) is their
-  one reader and the only FatFS caller; it starts when the step leaves
-  STARTUP, which the BMS step does not do yet. The file format is App/common/logic/Inc/data_log_record.h, and
-  tools/data_log_decode.py turns a file into CSV: change both together
-  (a host test checks they agree, and needs Python 3.10 or later).
+  into both images); every other producer has a ring of its own: the
+  Event writer, and on the VCU the IMU task and the two DAQ bus tasks
+  (one ring each). The image gives each ring's storage in its tasks.c, and
+  a ring it leaves out records nothing. The SD logger
+  (App/common/Src/data_log.c, both images) is their one reader and the
+  only FatFS caller; it starts when the step leaves STARTUP, which the BMS
+  step does not do yet. The file format is
+  App/common/logic/Inc/data_log_record.h, with the VCU's step Record in
+  App/vcu/logic/Inc/vcu_log.h, and tools/data_log_decode.py turns a file
+  into CSV: change them together (host tests check they agree; they need
+  Python 3.10 or later and, for the DBC decoding, cantools from
+  requirements.txt). If logging costs too much CPU, the retreat order is
+  in App/vcu/Src/tasks.c: drop the DAQ recording, then lower the IMU rate.
 
 ## Conventions
 - Tasks are created in the image's tasks.c (App/vcu/Src/tasks.c,

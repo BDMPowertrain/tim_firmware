@@ -314,6 +314,9 @@ void canRxTask(void *argument)
         osMutexRelease(rxCacheMutex);
 
         rxCount++;
+        /* The Data log's raw copy (issue 61); an image without the ring
+           records nothing. */
+        data_log_push_daq(false, &frame, osKernelGetTickCount());
 
         /* Activity LED, active low per CLAUDE.md: toggling on every
            processed frame gives a visible blink at low traffic and a
@@ -384,6 +387,7 @@ static bool drain(can_frame_t *pending, bool *have_pending)
         }
         *have_pending = false;
         txCount++;
+        data_log_push_daq(true, pending, osKernelGetTickCount());
         HAL_GPIO_TogglePin(GPIO_CAN2LED_GPIO_Port, GPIO_CAN2LED_Pin);
     }
 }

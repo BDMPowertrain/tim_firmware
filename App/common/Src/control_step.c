@@ -29,6 +29,10 @@ static const control_step_def_t *runningDef;
 
 static control_snapshot_t published;
 
+/* The step's Record as it is built: the step's own, static rather than on
+   its stack. */
+static uint8_t recordBytes[CONTROL_STEP_RECORD_MAX];
+
 /* Set by the shell, read by the step. */
 static volatile bool hangRequested;
 
@@ -136,9 +140,17 @@ void control_step_task(void *argument)
             .step_us = stepUs,
             .overruns = sched.overruns,
         };
-        uint8_t recordBytes[DATA_LOG_STEP_SIZE];
-        data_log_step_encode(recordBytes, &record);
-        (void)data_log_push_step(DATA_LOG_STEP, ctx.now_ms, recordBytes, sizeof recordBytes);
+        uint8_t recordType = DATA_LOG_STEP;
+        uint16_t recordLen = (def->record != NULL)
+                                 ? def->record(&record, recordBytes, sizeof recordBytes,
+                                               &recordType)
+                                 : 0u;
+        if (recordLen == 0u) {
+            recordType = DATA_LOG_STEP;
+            data_log_step_encode(recordBytes, &record);
+            recordLen = DATA_LOG_STEP_SIZE;
+        }
+        (void)data_log_push(DATA_LOG_RING_STEP, recordType, ctx.now_ms, recordBytes, recordLen);
 
         ctx.step_count++;
 

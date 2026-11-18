@@ -69,9 +69,9 @@ static uint32_t stepRecords[RECORD_RING_STORAGE_SIZE(STEP_RECORDS, DATA_LOG_STEP
 static const data_log_def_t dataLogDef = {
     .image = PARAMS_IMAGE_BMS,
     .startup_state = CAN_CONTROL_BMS_STATUS_STATE_STARTUP_CHOICE,
-    .step_storage = stepRecords,
-    .step_storage_size = sizeof stepRecords,
-    .step_payload_max = DATA_LOG_STEP_SIZE,
+    .rings = {
+        [DATA_LOG_RING_STEP] = {stepRecords, sizeof stepRecords, DATA_LOG_STEP_SIZE},
+    },
 };
 
 /* The BMS has no slow reading of its own yet: ADC1 (board temperature,

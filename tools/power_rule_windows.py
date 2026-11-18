@@ -13,8 +13,11 @@ thing everywhere.
 A trace is (time in ms, pack power in W) samples in time order. Each sample
 holds until the next, as a meter that reports every 20 ms does; the last
 one ends the trace. "Above" is strictly above: exactly 80 kW is allowed.
-Both windows are judged on the held power, the moving average over every
-500 ms window inside the trace (none before 500 ms of data).
+A row with an empty power cell is no reading: it ends the stretch before
+it, nothing is held across it, and the time to the next reading is
+reported as not judged. Each stretch is judged on its own. Both windows
+are judged on the held power, the moving average over every 500 ms
+window inside the trace (none before 500 ms of data).
 
     python tools/power_rule_windows.py log.csv [--time-column time_ms]
         [--power-column pack_power_w] [--limit 80000]
@@ -117,9 +120,48 @@ def violations(samples, limit_w=LIMIT_W):
 
 
 def read_csv(path, time_column="time_ms", power_column="pack_power_w"):
+    """The trace in a CSV file, every row a sample."""
     with open(path, newline="") as f:
         return [(float(row[time_column]), float(row[power_column]))
                 for row in csv.DictReader(f)]
+
+
+def read_stretches(path, time_column="time_ms", power_column="pack_power_w"):
+    """The traces in a CSV file whose power cell may be empty, and the time
+    with no reading, in ms. A decoded step log leaves it empty while the
+    meter's mailbox is not VALID (issue 61): nothing is known there, so an
+    empty cell ends the stretch before it, the last reading held until that
+    row, and no reading is carried across it."""
+    stretches, current = [], []
+    unknown = 0.0
+    gap_from = None
+    with open(path, newline="") as f:
+        for row in csv.DictReader(f):
+            t = float(row[time_column])
+            cell = row[power_column].strip()
+            if not cell:
+                if current:
+                    current.append((t, current[-1][1]))
+                    stretches.append(current)
+                    current = []
+                if gap_from is None:
+                    gap_from = t
+                continue
+            if gap_from is not None:
+                unknown += t - gap_from
+                gap_from = None
+            current.append((t, float(cell)))
+    if current:
+        stretches.append(current)
+    return stretches, unknown
+
+
+def violations_in_csv(path, time_column="time_ms", power_column="pack_power_w",
+                      limit_w=LIMIT_W):
+    """Every Violation in a CSV file, each stretch between empty cells
+    judged on its own (read_stretches())."""
+    stretches, _ = read_stretches(path, time_column, power_column)
+    return [v for s in stretches for v in violations(s, limit_w)]
 
 
 def main(argv=None) -> int:
@@ -130,9 +172,12 @@ def main(argv=None) -> int:
     ap.add_argument("--limit", type=float, default=LIMIT_W, help="watts")
     args = ap.parse_args(argv)
 
-    found = violations(read_csv(args.csv, args.time_column, args.power_column), args.limit)
+    found = violations_in_csv(args.csv, args.time_column, args.power_column, args.limit)
+    _, unknown = read_stretches(args.csv, args.time_column, args.power_column)
     for v in found:
         print(f"{args.csv}: {v}")
+    if unknown > 0:
+        print(f"{args.csv}: {unknown:g} ms with no power reading, not judged")
     if not found:
         print(f"{args.csv}: no Violation (EV.3.4.1)")
     return 1 if found else 0
