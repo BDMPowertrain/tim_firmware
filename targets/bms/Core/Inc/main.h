@@ -59,6 +59,27 @@ void Error_Handler(void);
 /* Private defines -----------------------------------------------------------*/
 #define Can_Term_2_Pin GPIO_PIN_13
 #define Can_Term_2_GPIO_Port GPIOC
+#define SDC_OK_N_Pin GPIO_PIN_14
+#define SDC_OK_N_GPIO_Port GPIOC
+#define VBAT_ADC_Pin GPIO_PIN_3
+#define VBAT_ADC_GPIO_Port GPIOC
+#define BOARD_TEMP_Pin GPIO_PIN_0
+#define BOARD_TEMP_GPIO_Port GPIOA
+#define CURRENT_SENSE_1_Pin GPIO_PIN_1
+#define CURRENT_SENSE_1_GPIO_Port GPIOA
+#define CURRENT_SENSE_2_Pin GPIO_PIN_3
+#define CURRENT_SENSE_2_GPIO_Port GPIOA
+#define BQ_NCS_Pin GPIO_PIN_6
+#define BQ_NCS_GPIO_Port GPIOA
+#define SPI_RDY_Pin GPIO_PIN_7
+#define SPI_RDY_GPIO_Port GPIOA
+#define SPI_RDY_EXTI_IRQn EXTI9_5_IRQn
+#define FB_NFAULT_Pin GPIO_PIN_5
+#define FB_NFAULT_GPIO_Port GPIOC
+#define MCU_BMS_OK_Pin GPIO_PIN_0
+#define MCU_BMS_OK_GPIO_Port GPIOB
+#define FB_BMS_OK_Pin GPIO_PIN_2
+#define FB_BMS_OK_GPIO_Port GPIOB
 #define SPI2_CS_Pin GPIO_PIN_12
 #define SPI2_CS_GPIO_Port GPIOB
 #define GPIO_CAN2LED_Pin GPIO_PIN_6
@@ -75,10 +96,14 @@ void Error_Handler(void);
 #define SWDIO_GPIO_Port GPIOA
 #define SWCLK_Pin GPIO_PIN_14
 #define SWCLK_GPIO_Port GPIOA
-#define SPI3_CS_Pin GPIO_PIN_2
-#define SPI3_CS_GPIO_Port GPIOD
+#define UNUSED_JTDI_Pin GPIO_PIN_15
+#define UNUSED_JTDI_GPIO_Port GPIOA
+#define IMU_CS_Pin GPIO_PIN_2
+#define IMU_CS_GPIO_Port GPIOD
 #define SWO_Pin GPIO_PIN_3
 #define SWO_GPIO_Port GPIOB
+#define IMU_INT_Pin GPIO_PIN_4
+#define IMU_INT_GPIO_Port GPIOB
 #define FDCAN2_STB_Pin GPIO_PIN_9
 #define FDCAN2_STB_GPIO_Port GPIOB
 
