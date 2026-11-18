@@ -36,6 +36,7 @@ static const uint16_t raiseAt[BMS_FAULT_COUNT] = {
     [BMS_FAULT_OPEN_WIRE]     = 1u,
     [BMS_FAULT_CELL_MONITOR]  = BMS_CELL_MONITOR_SWEEPS,
     [BMS_FAULT_INTERNAL]      = 1u,
+    [BMS_FAULT_CHARGER_DISOBEYS] = 1u, /* bms_charge.h times the 5 s */
 };
 
 bool bms_control_held(reset_cause_t cause, bool debugger)
@@ -49,6 +50,7 @@ void bms_control_init(bms_control_t *bc, const bms_control_config_t *config)
     bc->config = *config;
     bc->state = BMS_STATE_STARTUP;
     bms_derate_init(&bc->derate, &config->derate);
+    bms_charge_init(&bc->charge, &config->charge);
 }
 
 static uint16_t bit(bms_fault_t f)
@@ -86,7 +88,8 @@ static void unknown_unless_bad(judged_t *j)
 
 /* Judges this step's Sweep for every fault. A fault this function does not
    judge (#64, #65, #67, overcurrent) is clean. */
-static void judge(const bms_control_in_t *in, bool started_up, judged_t j[BMS_FAULT_COUNT])
+static void judge(const bms_control_in_t *in, bool charge_mode, bool started_up,
+                  judged_t j[BMS_FAULT_COUNT])
 {
     memset(j, 0, sizeof(judged_t) * BMS_FAULT_COUNT);
 
@@ -98,7 +101,7 @@ static void judge(const bms_control_in_t *in, bool started_up, judged_t j[BMS_FA
         j[BMS_FAULT_UNDER_VOLTAGE].verdict = VERDICT_UNKNOWN;
         j[BMS_FAULT_OVER_TEMP].verdict = VERDICT_UNKNOWN;
         j[BMS_FAULT_UNDER_TEMP].verdict =
-            in->charge_mode ? VERDICT_UNKNOWN : VERDICT_CLEAN;
+            charge_mode ? VERDICT_UNKNOWN : VERDICT_CLEAN;
         j[BMS_FAULT_MEASUREMENT].verdict = started_up ? VERDICT_BAD : VERDICT_UNKNOWN;
         return;
     }
@@ -150,8 +153,25 @@ static void judge(const bms_control_in_t *in, bool started_up, judged_t j[BMS_FA
         unknown_unless_bad(&j[BMS_FAULT_UNDER_TEMP]);
     }
     /* Under-temperature is a fault in Charge mode only. */
-    if (!in->charge_mode) {
+    if (!charge_mode) {
         j[BMS_FAULT_UNDER_TEMP].verdict = VERDICT_CLEAN;
+    }
+}
+
+/* Charger disobeys (issue 67): bms_charge_listen() has timed it. */
+static void judge_charger(const bms_charge_heard_t *h, judged_t *j)
+{
+    switch (h->obey) {
+    case BMS_CHARGE_DISOBEYS:
+        *j = (judged_t){ .verdict = VERDICT_BAD, .where = EVENT_BMS_CHARGER,
+                         .mv = h->reported_da };
+        break;
+    case BMS_CHARGE_OVER: /* timing: neither raised nor clean */
+        j->verdict = VERDICT_UNKNOWN;
+        break;
+    default:
+        j->verdict = VERDICT_CLEAN;
+        break;
     }
 }
 
@@ -270,9 +290,9 @@ static void judge_internal(bms_control_t *bc, const bms_control_in_t *in, judged
     }
 }
 
-static uint8_t next_state(const bms_control_t *bc, const bms_control_in_t *in)
+static uint8_t next_state(const bms_control_t *bc, const bms_control_in_t *in, bool charge_mode)
 {
-    const uint8_t run = in->charge_mode ? BMS_STATE_CHARGE : BMS_STATE_DRIVE;
+    const uint8_t run = charge_mode ? BMS_STATE_CHARGE : BMS_STATE_DRIVE;
 
     if (bc->config.held) {
         return BMS_STATE_FAULT_HELD;
@@ -292,6 +312,15 @@ static uint8_t next_state(const bms_control_t *bc, const bms_control_in_t *in)
         return (bc->all_clean >= BMS_RECOVER_SWEEPS && bc->ow_passed) ? run : BMS_STATE_FAULT;
     default:
         return run;
+    }
+}
+
+static void add_charge_events(bms_control_out_t *out, const bms_charge_events_t *ce)
+{
+    for (size_t i = 0; i < ce->count && out->event_count < BMS_CONTROL_EVENTS_MAX; i++) {
+        bms_event_t *ev = &out->events[out->event_count++];
+        ev->code = ce->events[i].code;
+        memcpy(ev->data, ce->events[i].data, EVENT_DATA_SIZE);
     }
 }
 
@@ -346,6 +375,7 @@ static void build_status(bms_control_t *bc, const bms_control_in_t *in, bms_cont
         .charger_disobeys_seen = has(s, BMS_FAULT_CHARGER_DISOBEYS),
         .overcurrent_seen = has(s, BMS_FAULT_OVERCURRENT),
         .bms_ok = out->bms_ok ? 1u : 0u,
+        .charge_complete = (out->charge == BMS_CHARGE_COMPLETE) ? 1u : 0u,
         .low_voltage_limit = out->under_low_voltage_limit ? 1u : 0u,
         .shutdown_circuit_closed = in->sdc_closed ? 1u : 0u,
         .parameters_defaulted = bc->config.params_defaulted ? 1u : 0u,
@@ -372,8 +402,15 @@ void bms_control_step(bms_control_t *bc, const bms_control_in_t *in, bms_control
     }
     bc->started = true;
 
+    /* The charger first (bms_charge.h): Charge mode, and whether it
+       disobeys. Its Events go after the fault Events. */
+    bms_charge_events_t chargeEvents = { .count = 0u };
+    const bms_charge_heard_t heard =
+        bms_charge_listen(&bc->charge, in->now_ms, in->charger, &chargeEvents);
+
     const bool startedUp = bc->state != BMS_STATE_STARTUP;
-    judge(in, startedUp, j);
+    judge(in, heard.charge_mode, startedUp, j);
+    judge_charger(&heard, &j[BMS_FAULT_CHARGER_DISOBEYS]);
     judge_open_wire(bc, in, &j[BMS_FAULT_OPEN_WIRE]);
     judge_cell_monitor(in, startedUp, &j[BMS_FAULT_CELL_MONITOR]);
     judge_internal(bc, in, &j[BMS_FAULT_INTERNAL]);
@@ -434,7 +471,7 @@ void bms_control_step(bms_control_t *bc, const bms_control_in_t *in, bms_control
         bc->seen |= bit(BMS_FAULT_INTERNAL);
     }
 
-    bc->state = next_state(bc, in);
+    bc->state = next_state(bc, in, heard.charge_mode);
 
     const uint16_t devicesRead = in->swept ? in->sweep->devices_read : 0u;
     for (bms_fault_t f = 0; f < BMS_FAULT_COUNT; f++) {
@@ -471,6 +508,19 @@ void bms_control_step(bms_control_t *bc, const bms_control_in_t *in, bms_control
     out->under_low_voltage_limit = bms_derate_under_low_voltage_limit(&bc->derate);
     out->summary = bc->summary;
 
+    /* The charge (bms_charge.h), on the same Sweep, BMS_OK as written. */
+    const bms_charge_in_t chargeIn = {
+        .now_ms = in->now_ms,
+        .swept = swept,
+        .summary = &bc->summary,
+        .bms_ok = out->bms_ok,
+        .fault_active = bc->active != 0u,
+        .sdc_closed = in->sdc_closed,
+    };
+    out->charge_limit_da = bms_charge_step(&bc->charge, &chargeIn, &chargeEvents);
+    out->charge = bms_charge_state(&bc->charge);
+    add_charge_events(out, &chargeEvents);
+
     /* The open-wire check: after a Sweep, never in place of one; the first
        at once, then once a second (spec #36). */
     if (in->swept &&
@@ -489,7 +539,7 @@ void bms_control_step(bms_control_t *bc, const bms_control_in_t *in, bms_control
         .summary = &bc->summary,
         .pack_current = in->pack_current,
         .discharge_limit_da = out->discharge_limit_da,
-        .charge_limit_da = 0u, /* 0 A out of Charge mode (#67) */
+        .charge_limit_da = out->charge_limit_da,
     };
     if (bms_tx_status_due(in->step_count)) {
         build_status(bc, in, out);
@@ -498,7 +548,12 @@ void bms_control_step(bms_control_t *bc, const bms_control_in_t *in, bms_control
         bms_tx_build_power(&values, &bc->e2e, next_frame(out));
     }
     const bms_tx_slow_t slow = bms_tx_slow_due(in->step_count);
-    if (slow != BMS_TX_SLOW_NONE) {
+    if (bc->state == BMS_STATE_CHARGE && bms_tx_charger_request_due(in->step_count)) {
+        /* In place of 0x202, in CHARGE only (bms_tx.h). */
+        struct can_control_chg_request_t req;
+        bms_charge_request(&bc->charge, in->now_ms, &req);
+        bms_tx_build_charger_request(&req, next_frame(out));
+    } else if (slow != BMS_TX_SLOW_NONE) {
         bms_tx_build_slow(slow, &values, &bc->e2e, next_frame(out));
     }
 }

@@ -38,6 +38,9 @@ typedef struct {
     uint16_t         faults_seen;    /* since power-on */
     bool             under_low_voltage_limit;
     uint16_t         discharge_limit_da; /* the Discharge limit sent, 0.1 A */
+    uint16_t         charge_limit_da;    /* the Charge limit sent, 0.1 A */
+    bms_charge_state_t charge;           /* issue 67 */
+    bool             charger_heard;      /* its mailbox VALID */
     bms_current_t    pack_current;       /* as the step took it */
     bms_pack_summary_t summary;          /* the last Sweep in brief */
     /* The second layers (issue 64), as this step read them. */

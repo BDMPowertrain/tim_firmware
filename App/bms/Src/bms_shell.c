@@ -85,6 +85,11 @@ static int cmd_cells(int argc, char **argv)
     } else {
         shell_printf("invalid\r\n");
     }
+    /* Charge control (issue 67, ADR 0019). */
+    shell_printf("charge %s, charge limit %u.%u A, charger %s\r\n",
+                 bms_charge_state_name(pack.charge), (unsigned)(pack.charge_limit_da / 10u),
+                 (unsigned)(pack.charge_limit_da % 10u),
+                 pack.charger_heard ? "heard" : "not heard");
     /* The second layers (issue 64). */
     shell_printf("NFAULT %s, BMS_OK read-back %s, shutdown sense %s, bridge FAULT_SUMMARY ",
                  pack.nfault_ok ? "high" : "LOW", pack.bms_ok_fb ? "high" : "low",

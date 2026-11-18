@@ -53,6 +53,9 @@ const char *event_code_name(uint16_t code)
     case EVENT_NOT_CALIBRATED:     return "not calibrated";
     case EVENT_DATA_LOG_CARD:      return "data log card";
     case EVENT_BMS_FAULT:          return "BMS fault";
+    case EVENT_CHARGE:             return "charge";
+    case EVENT_CHARGE_RESTED:      return "charge rested cells";
+    case EVENT_CHARGER_FLAGS:      return "charger flags";
     default:                       return "?";
     }
 }
@@ -243,6 +246,42 @@ void event_data_bms_fault(uint8_t data[EVENT_DATA_SIZE], const event_bms_fault_t
     put_u16(&data[4], fault->index);
     put_u16(&data[6], fault->reading_mv);
     put_u16(&data[8], fault->devices_read);
+}
+
+static void put_cells(uint8_t *b, const event_charge_cells_t *c)
+{
+    put_u16(&b[0], c->highest_mv);
+    put_u16(&b[2], c->highest);
+    put_u16(&b[4], c->lowest_mv);
+    put_u16(&b[6], c->lowest);
+}
+
+void event_data_charge(uint8_t data[EVENT_DATA_SIZE], const event_charge_t *charge)
+{
+    memset(data, 0, EVENT_DATA_SIZE);
+    data[0] = charge->from;
+    data[1] = charge->to;
+    data[2] = charge->cause;
+    put_cells(&data[4], &charge->cells);
+    put_u16(&data[12], charge->limit_da);
+}
+
+void event_data_charge_rested(uint8_t data[EVENT_DATA_SIZE], const event_charge_cells_t *cells,
+                              uint32_t since_stop_ms)
+{
+    memset(data, 0, EVENT_DATA_SIZE);
+    put_cells(&data[0], cells);
+    put_u32(&data[8], since_stop_ms);
+}
+
+void event_data_charger_flags(uint8_t data[EVENT_DATA_SIZE], const event_charger_flags_t *flags)
+{
+    memset(data, 0, EVENT_DATA_SIZE);
+    data[0] = flags->from;
+    data[1] = flags->to;
+    data[2] = flags->charge_state;
+    put_u16(&data[4], flags->output_dv);
+    put_u16(&data[6], flags->output_da);
 }
 
 void event_data_data_log_card(uint8_t data[EVENT_DATA_SIZE], const event_data_log_card_t *card)

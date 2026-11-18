@@ -91,6 +91,11 @@ uint16_t bms_derate_step(bms_derate_t *d, uint32_t now_ms, bool swept,
                          uint16_t min_cell_mv, int16_t max_temp_dc,
                          bms_current_t current, bool bms_ok);
 
+/* The bounded rates themselves: fraction_ppm moved toward target_ppm by no
+   more than they allow over gap_ms (at most BMS_DERATE_MAX_GAP_MS). The
+   Charge limit moves by the same (ADR 0019, bms_charge.h). */
+uint32_t bms_derate_rate_limited(uint32_t fraction_ppm, uint32_t target_ppm, uint32_t gap_ms);
+
 /* The compensated minimum cell voltage was under the Low-voltage limit
    (v_full_mv) at the last Sweep: the voltage taper is derating. False
    before any Sweep. */

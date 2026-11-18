@@ -41,9 +41,7 @@ static int32_t compensated_mv(const bms_derate_config_t *c, uint16_t mv, bms_cur
     return (int32_t)mv + sag;
 }
 
-/* Moves the fraction toward target, by no more than the rates allow over
-   gap_ms. */
-static uint32_t rate_limited(uint32_t now, uint32_t target, uint32_t gap_ms)
+uint32_t bms_derate_rate_limited(uint32_t now, uint32_t target, uint32_t gap_ms)
 {
     if (gap_ms > BMS_DERATE_MAX_GAP_MS) {
         gap_ms = BMS_DERATE_MAX_GAP_MS;
@@ -70,7 +68,8 @@ uint16_t bms_derate_step(bms_derate_t *d, uint32_t now_ms, bool swept,
                                  -(int32_t)c->t_floor_dc);
         const uint32_t target = (v < t) ? v : t;
 
-        d->fraction_ppm = d->swept ? rate_limited(d->fraction_ppm, target, now_ms - d->last_ms)
+        d->fraction_ppm = d->swept ? bms_derate_rate_limited(d->fraction_ppm, target,
+                                                             now_ms - d->last_ms)
                                    : target; /* the first: at once */
         d->under_low_voltage_limit = mv < (int32_t)c->v_full_mv;
         d->swept = true;

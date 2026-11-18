@@ -10,8 +10,10 @@
  * frame never waits for one (ADR 0004). 0x60D, every 100 ms, is inside the
  * Energy Meter's 250 ms. At the step count's wrap (after 994 days) one slot
  * repeats, delaying the others by one step.
- * In Charge mode the charger request takes the 0x202 slot on one step in
- * fifty (#67).
+ * In the BMS state CHARGE the charger request (CHG_Request, 0x1806E5F4)
+ * takes the 0x202 slot on one step in fifty (bms_tx_charger_request_due(),
+ * issue 67), so it goes once a second; can/control.dbc gives step 26 of
+ * the fifty to the balancing status frame, which is not built yet.
  *
  * Every frame's layout and units are can/control.dbc's; this module is the
  * only place that fills one. The values come in as bms_tx_values_t, the
@@ -92,6 +94,14 @@ typedef struct {
 bool bms_tx_status_due(uint32_t step_count);
 bool bms_tx_power_due(uint32_t step_count);
 bms_tx_slow_t bms_tx_slow_due(uint32_t step_count);
+
+/* The 0x202 slot of step 1 of each 50-step second: the charger request's,
+   in CHARGE. */
+bool bms_tx_charger_request_due(uint32_t step_count);
+
+/* CHG_Request, 29-bit, in the charger's big-endian format; no E2E. */
+void bms_tx_build_charger_request(const struct can_control_chg_request_t *r,
+                                  bms_tx_frame_t *f);
 
 /* Sums up one Sweep. */
 void bms_tx_summarise(const bq_sweep_t *sweep, bms_pack_summary_t *out);

@@ -4,9 +4,8 @@
  * A code is never reused for another meaning once an image has written
  * it: a stored Event outlives the image that wrote it.
  *
- * Codes for Events whose source is not built yet (charger,
- * balancing and the rest of the spec's list)
- * are added here when their source is.
+ * Codes for Events whose source is not built yet (balancing and the rest
+ * of the spec's list) are added here when their source is.
  *
  * This is logic (ADR 0002): no HAL, no RTOS, no clock.
  */
@@ -63,6 +62,13 @@ typedef enum {
 
     /* The BMS's faults (ADR 0007, bms_control.h). */
     EVENT_BMS_FAULT = 96, /* event_data_bms_fault(): a BMS fault raised */
+
+    /* Charge control (ADR 0019, bms_charge.h). A silent charger is the
+       charger mailbox's EVENT_MAILBOX_TIMEOUT, and an EVENT_CHARGE too if
+       it stopped a charge. */
+    EVENT_CHARGE        = 97, /* event_data_charge(): the charge changed state */
+    EVENT_CHARGE_RESTED = 98, /* event_data_charge_rested(): after Charge complete */
+    EVENT_CHARGER_FLAGS = 99, /* event_data_charger_flags(): no flag is a BMS fault */
 } event_code_t;
 
 /* "boot", "overrun" and so on, for the shell; "?" for a code not here. */
@@ -209,6 +215,9 @@ void event_data_discharge_slow(uint8_t data[EVENT_DATA_SIZE], int16_t bus_dv, ui
                                      Overrun Events before it say which steps */
 #define EVENT_BMS_HELD        10u /* the Held fault; the boot Event says which
                                      reset */
+/* Issue 67. */
+#define EVENT_BMS_CHARGER     11u /* charger disobeys; reading: the charger's
+                                     reported output current, 0.1 A */
 
 typedef struct {
     uint8_t  fault;        /* bms_fault_t (bms_control.h) */
@@ -224,6 +233,45 @@ typedef struct {
 /* 0 fault (u8), 1 state (u8), 2 where (u8), 4 index (u16), 6 reading
    (u16, mV), 8 devices read (u16). */
 void event_data_bms_fault(uint8_t data[EVENT_DATA_SIZE], const event_bms_fault_t *fault);
+
+/* The highest and lowest cell of a Sweep, each 1 to 128 as in
+   event_bms_fault_t, 0 when the Sweep read no cell. */
+typedef struct {
+    uint16_t highest_mv;
+    uint16_t highest;
+    uint16_t lowest_mv;
+    uint16_t lowest;
+} event_charge_cells_t;
+
+typedef struct {
+    uint8_t  from;     /* bms_charge_state_t (bms_charge.h) */
+    uint8_t  to;
+    uint8_t  cause;    /* bms_charge_cause_t: why it left CHARGING */
+    event_charge_cells_t cells; /* the last Sweep's */
+    uint16_t limit_da; /* the Charge limit, 0.1 A */
+} event_charge_t;
+
+/* 0 from (u8), 1 to (u8), 2 cause (u8), 4 highest cell (u16, mV), 6 its
+   cell (u16), 8 lowest cell (u16, mV), 10 its cell (u16), 12 the Charge
+   limit (u16, 0.1 A). */
+void event_data_charge(uint8_t data[EVENT_DATA_SIZE], const event_charge_t *charge);
+
+/* 0 highest cell (u16, mV), 2 its cell (u16), 4 lowest cell (u16, mV),
+   6 its cell (u16), 8 ms since the stop (u32). */
+void event_data_charge_rested(uint8_t data[EVENT_DATA_SIZE], const event_charge_cells_t *cells,
+                              uint32_t since_stop_ms);
+
+typedef struct {
+    uint8_t  from;         /* CHG_Status flags byte, bits 0-4 (can/control.dbc) */
+    uint8_t  to;
+    uint8_t  charge_state; /* bms_charge_state_t */
+    uint16_t output_dv;    /* the charger's output voltage, 0.1 V */
+    uint16_t output_da;    /* its output current, 0.1 A */
+} event_charger_flags_t;
+
+/* 0 flags before (u8), 1 flags now (u8), 2 charge state (u8), 4 output
+   voltage (u16, 0.1 V), 6 output current (u16, 0.1 A). */
+void event_data_charger_flags(uint8_t data[EVENT_DATA_SIZE], const event_charger_flags_t *flags);
 
 /* 0 VCU state (u8). */
 void event_data_em_violation(uint8_t data[EVENT_DATA_SIZE], uint8_t state);
