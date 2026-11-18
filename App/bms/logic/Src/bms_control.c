@@ -38,6 +38,11 @@ static const uint16_t raiseAt[BMS_FAULT_COUNT] = {
     [BMS_FAULT_INTERNAL]      = 1u,
 };
 
+bool bms_control_held(reset_cause_t cause, bool debugger)
+{
+    return !debugger && !reset_cause_is_power_on(cause);
+}
+
 void bms_control_init(bms_control_t *bc, const bms_control_config_t *config)
 {
     memset(bc, 0, sizeof *bc);
@@ -208,7 +213,8 @@ static void judge_cell_monitor(const bms_control_in_t *in, bool started_up, judg
     }
 }
 
-/* The BMS's own output path (issue 64; spec #36, the self-checks). */
+/* The BMS's own output path (issue 64; spec #36, the self-checks), and
+   its own timing (issue 65). */
 static void judge_internal(bms_control_t *bc, const bms_control_in_t *in, judged_t *j)
 {
     const bool registerRead = in->swept && in->sweep->bridge_read;
@@ -245,7 +251,9 @@ static void judge_internal(bms_control_t *bc, const bms_control_in_t *in, judged
         bc->sense_timing = false;
     }
 
-    if (bc->feedback_bad >= BMS_FEEDBACK_SWEEPS) {
+    if (in->timing_fault) {
+        *j = (judged_t){ .verdict = VERDICT_BAD, .where = EVENT_BMS_TIMING };
+    } else if (bc->feedback_bad >= BMS_FEEDBACK_SWEEPS) {
         const uint16_t bits = (uint16_t)((in->bms_ok_fb ? 1u : 0u) | (bc->commanded ? 2u : 0u) |
                                          (in->nfault_ok ? 4u : 0u));
         *j = (judged_t){ .verdict = VERDICT_BAD, .where = EVENT_BMS_FEEDBACK, .mv = bits };
@@ -410,12 +418,13 @@ void bms_control_step(bms_control_t *bc, const bms_control_in_t *in, bms_control
         bc->all_clean = 0u;
     }
 
-    /* The Held fault: the internal fault from the first step on, never
-       clearing (#65 decides when). */
+    /* The Held fault (bms_control_held()): the internal fault from the
+       first step on, never clearing. */
     if (bc->config.held) {
         if ((bc->seen & bit(BMS_FAULT_INTERNAL)) == 0u) {
             raised |= bit(BMS_FAULT_INTERNAL);
-            j[BMS_FAULT_INTERNAL] = (judged_t){ .verdict = VERDICT_BAD };
+            j[BMS_FAULT_INTERNAL] = (judged_t){ .verdict = VERDICT_BAD,
+                                                .where = EVENT_BMS_HELD };
         }
         bc->active |= bit(BMS_FAULT_INTERNAL);
         bc->seen |= bit(BMS_FAULT_INTERNAL);

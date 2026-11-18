@@ -35,6 +35,14 @@
  *   read-back must agree with the bridge's fault register. BMS_OK low for
  *   500 ms with the Shutdown Circuit sense still energised raises the
  *   internal fault (EV.8.3.4 e, "a fault in the BMS").
+ *
+ * Issue 65 (ADR 0007, 0011):
+ * - The Held fault after a watchdog, software, reset-pin or option-byte-
+ *   load reset; a brown-out sets BOR and is a Power-on reset; with the core
+ *   debug enable bit set any reset is a Power-on reset. Held, BMS_OK never
+ *   rises and FAULT_HELD never ends.
+ * - Three Overruns within one second are the BMS internal fault, ending
+ *   after 1 s clean.
  */
 #include <string.h>
 
@@ -43,6 +51,7 @@
 #include "can_control.h"
 #include "e2e_p11.h"
 #include "event_codes.h"
+#include "reset_cause.h"
 #include "unity.h"
 
 #define STEP_MS 20u
@@ -525,8 +534,54 @@ static void test_each_fault_is_one_event_on_the_step_it_is_raised(void)
                             out.active);
 }
 
-/* The Held fault (#65 decides when): FAULT_HELD from the first step with
-   the internal fault, and no recovery. */
+/* The Held fault (ADR 0007, 0011): after any reset that was not a
+   Power-on reset (BOR flag set). The reset-cause register's flags as
+   RM0440 7.4.28 gives them, classified by reset_cause.h. */
+#define CSR_OBLRSTF  (1u << 25)
+#define CSR_PINRSTF  (1u << 26)
+#define CSR_BORRSTF  (1u << 27)
+#define CSR_SFTRSTF  (1u << 28)
+#define CSR_IWDGRSTF (1u << 29)
+#define CSR_WWDGRSTF (1u << 30)
+#define CSR_LPWRRSTF (1u << 31)
+
+static bool held_after(uint32_t csr, bool debugger)
+{
+    return bms_control_held(reset_cause_classify(csr), debugger);
+}
+
+static void test_every_reset_but_power_on_is_held(void)
+{
+    TEST_ASSERT_TRUE(held_after(CSR_IWDGRSTF | CSR_PINRSTF, false)); /* the hang */
+    TEST_ASSERT_TRUE(held_after(CSR_SFTRSTF | CSR_PINRSTF, false));  /* the crash routine */
+    TEST_ASSERT_TRUE(held_after(CSR_PINRSTF, false));                /* the reset pin */
+    TEST_ASSERT_TRUE(held_after(CSR_OBLRSTF | CSR_PINRSTF, false));  /* option-byte load */
+    TEST_ASSERT_TRUE(held_after(CSR_WWDGRSTF | CSR_PINRSTF, false));
+    TEST_ASSERT_TRUE(held_after(CSR_LPWRRSTF | CSR_PINRSTF, false));
+    TEST_ASSERT_TRUE(held_after(0u, false)); /* no flag: not shown to be power-on */
+}
+
+/* BOR set is a Power-on reset (a supply sag included): a normal start,
+   whatever else is set with it. */
+static void test_a_power_on_reset_is_not_held_whatever_else_is_set(void)
+{
+    TEST_ASSERT_FALSE(held_after(CSR_BORRSTF | CSR_PINRSTF, false));
+    TEST_ASSERT_FALSE(held_after(CSR_BORRSTF | CSR_IWDGRSTF | CSR_SFTRSTF | CSR_PINRSTF, false));
+}
+
+/* With the core debug enable bit set, any reset is a Power-on reset. */
+static void test_no_reset_is_held_under_the_debugger(void)
+{
+    TEST_ASSERT_FALSE(held_after(CSR_IWDGRSTF | CSR_PINRSTF, true));
+    TEST_ASSERT_FALSE(held_after(CSR_SFTRSTF | CSR_PINRSTF, true));
+    TEST_ASSERT_FALSE(held_after(CSR_PINRSTF, true));
+    TEST_ASSERT_FALSE(held_after(CSR_OBLRSTF | CSR_PINRSTF, true));
+    TEST_ASSERT_FALSE(held_after(0u, true));
+    TEST_ASSERT_FALSE(held_after(CSR_BORRSTF | CSR_PINRSTF, true));
+}
+
+/* The Held fault: FAULT_HELD from the first step with the internal fault,
+   its Event naming the Held fault, and no recovery. */
 static void test_the_held_fault_never_ends(void)
 {
     config.held = true;
@@ -537,6 +592,7 @@ static void test_the_held_fault_never_ends(void)
     TEST_ASSERT_EQUAL_size_t(1u, out.event_count);
     TEST_ASSERT_EQUAL_UINT8(BMS_FAULT_INTERNAL, out.events[0].data[0]);
     TEST_ASSERT_EQUAL_UINT8(BMS_STATE_FAULT_HELD, out.events[0].data[1]);
+    TEST_ASSERT_EQUAL_UINT8(EVENT_BMS_HELD, out.events[0].data[2]);
 
     steps(500u);
     TEST_ASSERT_EQUAL_UINT8(BMS_STATE_FAULT_HELD, out.state);
@@ -545,6 +601,22 @@ static void test_the_held_fault_never_ends(void)
     TEST_ASSERT_EQUAL_HEX16(1u << BMS_FAULT_INTERNAL, out.active);
     TEST_ASSERT_EQUAL_UINT8(1u, status().internal_active);
     TEST_ASSERT_EQUAL_size_t(0u, out.event_count);
+}
+
+/* BMS_OK never rises after a held reset, at any step, though everything
+   a normal start needs is there: only a Power-on reset leaves FAULT_HELD. */
+static void test_bms_ok_never_rises_while_held(void)
+{
+    config.held = true;
+    bms_control_init(&bc, &config);
+    in.sdc_closed = true;
+    for (unsigned i = 0; i < 3000u; i++) { /* a minute */
+        step();
+        TEST_ASSERT_FALSE(out.bms_ok);
+        TEST_ASSERT_EQUAL_UINT8(BMS_STATE_FAULT_HELD, out.state);
+        TEST_ASSERT_TRUE(out.fault_active);
+    }
+    TEST_ASSERT_EQUAL_UINT8(1u, status().internal_active);
 }
 
 /* BMS_Status goes every step from the first, protected by E2E Profile 11
@@ -934,6 +1006,58 @@ static void test_a_shutdown_circuit_that_opens_inside_500_ms_is_no_fault(void)
     TEST_ASSERT_EQUAL_HEX16(0u, out.seen & (1u << BMS_FAULT_INTERNAL));
 }
 
+/* Issue 65: three Overruns within one second (the runner's timing fault,
+   true for one step) are the BMS internal fault, which recovers after 1 s
+   clean like any other. The Overrun Events carry the specific cause. */
+static void test_a_timing_fault_is_the_internal_fault_at_once(void)
+{
+    power_up();
+    in.timing_fault = true;
+    step();
+    TEST_ASSERT_EQUAL_UINT8(BMS_STATE_FAULT, out.state);
+    TEST_ASSERT_FALSE(out.bms_ok);
+    TEST_ASSERT_TRUE(out.fault_active);
+    TEST_ASSERT_EQUAL_HEX16(1u << BMS_FAULT_INTERNAL, out.active);
+    TEST_ASSERT_EQUAL_size_t(1u, out.event_count);
+    assert_where(event_for(BMS_FAULT_INTERNAL), EVENT_BMS_TIMING, 0u, 0u);
+    TEST_ASSERT_EQUAL_UINT8(1u, status().internal_active);
+}
+
+static void test_a_timing_fault_recovers_after_exactly_1_s_clean(void)
+{
+    power_up();
+    in.timing_fault = true;
+    step();
+    in.timing_fault = false;
+    steps(BMS_RECOVER_SWEEPS - 1u);
+    TEST_ASSERT_EQUAL_UINT8(BMS_STATE_FAULT, out.state);
+    TEST_ASSERT_TRUE(active(BMS_FAULT_INTERNAL));
+    step();
+    TEST_ASSERT_EQUAL_UINT8(BMS_STATE_DRIVE, out.state);
+    TEST_ASSERT_TRUE(out.bms_ok);
+    TEST_ASSERT_FALSE(active(BMS_FAULT_INTERNAL));
+    TEST_ASSERT_EQUAL_HEX16(1u << BMS_FAULT_INTERNAL, out.seen);
+}
+
+/* Each further Overrun with two others in the second before it is the
+   timing fault again: the clean second starts again, with no new Event. */
+static void test_a_further_timing_fault_starts_the_clean_second_again(void)
+{
+    power_up();
+    in.timing_fault = true;
+    step();
+    in.timing_fault = false;
+    steps(BMS_RECOVER_SWEEPS - 1u);
+    in.timing_fault = true;
+    step();
+    TEST_ASSERT_EQUAL_size_t(0u, out.event_count);
+    in.timing_fault = false;
+    steps(BMS_RECOVER_SWEEPS - 1u);
+    TEST_ASSERT_EQUAL_UINT8(BMS_STATE_FAULT, out.state);
+    step();
+    TEST_ASSERT_EQUAL_UINT8(BMS_STATE_DRIVE, out.state);
+}
+
 int main(void)
 {
     UNITY_BEGIN();
@@ -964,7 +1088,11 @@ int main(void)
     RUN_TEST(test_a_control_bus_failure_never_takes_bms_ok_low);
     RUN_TEST(test_overcurrent_is_never_set);
     RUN_TEST(test_each_fault_is_one_event_on_the_step_it_is_raised);
+    RUN_TEST(test_every_reset_but_power_on_is_held);
+    RUN_TEST(test_a_power_on_reset_is_not_held_whatever_else_is_set);
+    RUN_TEST(test_no_reset_is_held_under_the_debugger);
     RUN_TEST(test_the_held_fault_never_ends);
+    RUN_TEST(test_bms_ok_never_rises_while_held);
     RUN_TEST(test_bms_status_goes_every_step_and_passes_its_e2e_check);
     RUN_TEST(test_the_open_wire_check_runs_on_the_first_sweep_then_once_a_second);
     RUN_TEST(test_the_open_wire_check_runs_only_after_a_sweep);
@@ -988,5 +1116,8 @@ int main(void)
     RUN_TEST(test_the_nfault_cross_check_waits_for_the_register);
     RUN_TEST(test_bms_ok_low_for_500_ms_with_the_sense_energised_is_internal);
     RUN_TEST(test_a_shutdown_circuit_that_opens_inside_500_ms_is_no_fault);
+    RUN_TEST(test_a_timing_fault_is_the_internal_fault_at_once);
+    RUN_TEST(test_a_timing_fault_recovers_after_exactly_1_s_clean);
+    RUN_TEST(test_a_further_timing_fault_starts_the_clean_second_again);
     return UNITY_END();
 }
