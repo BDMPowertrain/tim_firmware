@@ -1,2 +1,2 @@
 cantools==45.1.2
-python-can==4.4.2
+python-can==4.6.1
