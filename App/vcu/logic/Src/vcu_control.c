@@ -45,6 +45,7 @@ void vcu_control_init(vcu_control_t *vc, const vcu_control_config_t *config)
     vc->calibration = vcu_cal_check(&vc->cal_values, config->cal_present);
     vc->cal_fingerprint = vcu_cal_fingerprint(&vc->cal_values);
     vcu_pedal_check_reset(&vc->pedal_check);
+    vcu_power_limiter_init(&vc->limiter);
 }
 
 static bool calibrated(const vcu_control_t *vc)
@@ -84,6 +85,13 @@ typedef struct {
     bool     inverter_reads_disabled; /* a VALID INV_InternalStates: not enabled */
     bool     em_status_valid;
     bool     em_violation;   /* a VALID EM_Status has Violation set */
+    /* BMS_Power, or its Substitute (0 A, 0 V, a 0 A Discharge limit), and
+       INV_MotorPosition, or its (0 rpm): the Power limiter's. */
+    uint32_t power_frames;   /* BMS_Power frames accepted: a change is a new one */
+    int16_t  pack_current_da;
+    uint16_t pack_voltage_dv; /* BMS_Power's, the same sweep as its current */
+    uint16_t discharge_limit_da;
+    int16_t  motor_speed_rpm;
 } bus_view_t;
 
 static bool valid(const vcu_control_in_t *in, vcu_rx_t row)
@@ -117,6 +125,8 @@ static void read_bus(const vcu_control_in_t *in, bus_view_t *bus)
     struct can_control_inv_fault_codes_t invFaults;
     struct can_control_inv_internal_states_t invStates;
     struct can_control_em_status_t emStatus;
+    struct can_control_bms_power_t bmsPower;
+    struct can_control_inv_motor_position_t invPosition;
 
     (void)can_control_bms_status_unpack(&bmsStatus, frame(in, VCU_RX_BMS_STATUS),
                                         CAN_CONTROL_BMS_STATUS_LENGTH);
@@ -131,6 +141,11 @@ static void read_bus(const vcu_control_in_t *in, bus_view_t *bus)
                                                  CAN_CONTROL_INV_INTERNAL_STATES_LENGTH);
     (void)can_control_em_status_unpack(&emStatus, frame(in, VCU_RX_EM_STATUS),
                                        CAN_CONTROL_EM_STATUS_LENGTH);
+    (void)can_control_bms_power_unpack(&bmsPower, frame(in, VCU_RX_BMS_POWER),
+                                       CAN_CONTROL_BMS_POWER_LENGTH);
+    (void)can_control_inv_motor_position_unpack(&invPosition,
+                                                frame(in, VCU_RX_INV_MOTOR_POSITION),
+                                                CAN_CONTROL_INV_MOTOR_POSITION_LENGTH);
 
     bus->bms_status_valid = valid(in, VCU_RX_BMS_STATUS);
     bus->bms_limits_valid = valid(in, VCU_RX_BMS_LIMITS);
@@ -155,6 +170,11 @@ static void read_bus(const vcu_control_in_t *in, bus_view_t *bus)
                                    invStates.enable_state == 0u;
     bus->em_status_valid = valid(in, VCU_RX_EM_STATUS);
     bus->em_violation = bus->em_status_valid && emStatus.violation != 0u;
+    bus->power_frames = in->mailboxes[VCU_RX_BMS_POWER].counters.good;
+    bus->pack_current_da = bmsPower.pack_current;
+    bus->pack_voltage_dv = bmsPower.pack_voltage;
+    bus->discharge_limit_da = bmsPower.discharge_limit;
+    bus->motor_speed_rpm = invPosition.motor_speed;
 }
 
 /* The bus is at least percent of the pack voltage. */
@@ -735,6 +755,7 @@ static void send_status(vcu_control_t *vc, const vcu_control_in_t *in,
         .error_passive = in->error_passive ? 1u : 0u,
         .receive_overflow = in->rx_overflowed ? 1u : 0u,
         .discharge_slow = vc->discharge_slow ? 1u : 0u,
+        .limiter_active = out->limiter.active ? 1u : 0u,
         .last_reset_not_power_on = vc->config.last_reset_not_power_on ? 1u : 0u,
         .not_dual_bank = vc->config.not_dual_bank ? 1u : 0u,
         .brake_engaged = out->brake_engaged ? 1u : 0u,
@@ -843,17 +864,28 @@ void vcu_control_step(vcu_control_t *vc, const vcu_control_in_t *in,
     /* 5. The driver request, from the lower Pedal travel. */
     out->torque_request = driver_request(vc, lower_travel(&out->sensors));
 
-    /* 6. The limiters: an empty slot until the Power limiter (issue 60).
-       A limiter only ever lowers the request (EV.3.1.3). */
-    int16_t torque = out->torque_request;
+    /* 6. The gates: zero torque outside READY_TO_DRIVE, on the first
+       0x0C0 after entry, and during any Torque cut. They zero the request
+       the limiter is handed, so a car that is not being driven never binds
+       it and never moves its trim. */
+    const bool gated = vc->state != VCU_STATE_READY_TO_DRIVE ||
+                       state_before != VCU_STATE_READY_TO_DRIVE || out->cuts != 0u;
 
-    /* 7. The gates: zero torque outside READY_TO_DRIVE, on the first
-       0x0C0 after entry, and during any Torque cut. Nothing runs after
-       them. */
-    if (vc->state != VCU_STATE_READY_TO_DRIVE || state_before != VCU_STATE_READY_TO_DRIVE ||
-        out->cuts != 0u) {
-        torque = 0;
-    }
+    /* 7. The Power limiter (ADR 0017): the lower of the request and its
+       torque ceiling, so it only ever lowers torque (EV.3.1.3). It reads
+       BMS_Power and the motor speed, never the Energy Meter. */
+    const vcu_power_limiter_in_t limiter_in = {
+        .now_ms = in->now_ms,
+        .request = gated ? 0 : out->torque_request,
+        .motor_speed_rpm = bus.motor_speed_rpm,
+        .power_valid = bus.bms_power_valid,
+        .power_frames = bus.power_frames,
+        .pack_current_da = bus.pack_current_da,
+        .pack_voltage_dv = bus.pack_voltage_dv,
+        .discharge_limit_da = bus.discharge_limit_da,
+    };
+    vcu_power_limiter_step(&vc->limiter, &limiter_in, &out->limiter);
+    const int16_t torque = out->limiter.torque;
     out->torque = torque;
 
     /* 8. Send and set the outputs, in the same step. Nothing runs after. */

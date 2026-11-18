@@ -11,6 +11,7 @@ add_logic_library(logic_vcu
         Src/vcu_daq.c
         Src/vcu_params.c
         Src/vcu_pedal_check.c
+        Src/vcu_power_limiter.c
         Src/vcu_sensors.c
         Src/vcu_tx.c
 )

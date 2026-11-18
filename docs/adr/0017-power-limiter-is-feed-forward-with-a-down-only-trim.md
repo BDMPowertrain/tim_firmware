@@ -21,7 +21,7 @@ The power ceiling is the lower of a fixed 72 kW target and the BMS discharge lim
 - A pessimistic efficiency constant costs power until someone corrects it from car logs or a dyno; the trim will not find it.
 - The limiter needs the pack current sensor. A lost BMS_Power frame is a torque cut, not a reduced-power mode, because the same frame carries the discharge limit.
 - 72 kW is a 10% margin held by a written error budget (sensor accuracy, sample delay, trim lag), not by measurement against the Energy Meter.
-- The trim updates once per new BMS_Power frame and only while the limiter is binding, is kept between pulls, and starts at its lowest bound after BMS_Power has been invalid.
+- The trim updates once per new BMS_Power frame and only while the limiter is binding (and has bound for 50 ms without a break, so a frame sampled before the torque rose cannot wind it up: issue 60), is kept between pulls, and starts at its lowest bound after BMS_Power has been invalid.
 - The limiter never writes a computed value into the torque-limit bytes of the inverter command; those keep the fixed maximum-torque parameter.
 - The inverter's 0x202 current limit stays a backup for the discharge limit only. It gets the same value as the VCU, unscaled, so it sits just above the limiter and does not fight it. It knows nothing of 80 kW.
 - The limiter is proven by a host closed-loop test against a plant model with pack resistance, bench scripts, and car logs, all judged by one shared check of the two rule windows.

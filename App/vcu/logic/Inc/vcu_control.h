@@ -46,12 +46,18 @@
  *
  * The torque path (issue 57), in the step's order: the pedal sensors and
  * the plausibility timers; Brake engaged and the brake-and-pedal check;
- * the state transitions; the driver request; the limiters (an empty slot
- * until issue 60); the gates; the send.
+ * the state transitions; the driver request; the gates; the Power
+ * limiter; the send.
  *   Driver request: from the lower Pedal travel, 0 below 5%, then linear
  *   from 0 at 5% to the max_torque Parameter at 100%. Never negative.
  *   Gates: zero torque outside READY_TO_DRIVE, on the first 0x0C0 after
- *   entry, and while any Torque cut is active.
+ *   entry, and while any Torque cut is active. They zero the request the
+ *   limiter is handed, so the limiter binds only on a car being driven.
+ *   Power limiter (issue 60, ADR 0017; vcu_power_limiter.h): the lower of
+ *   the request and a torque ceiling from the Power ceiling, BMS_Power and
+ *   the motor speed, so it only ever lowers torque (EV.3.1.3). It reads
+ *   nothing from the Energy Meter. LimiterActive in VCU_Status is set while
+ *   it binds; out.limiter says which of its ceilings was the lower.
  *
  * Torque cuts (ADR 0006, vcu_cut_t). Each ends only once its cause is gone
  * and the higher Pedal travel is below 5%, so torque never returns under a
@@ -158,6 +164,7 @@
 #include "mailbox.h"
 #include "vcu_calibration.h"
 #include "vcu_pedal_check.h"
+#include "vcu_power_limiter.h"
 #include "vcu_sensors.h"
 
 #define VCU_STATE_STARTUP        CAN_CONTROL_VCU_STATUS_STATE_STARTUP_CHOICE
@@ -312,7 +319,8 @@ typedef struct {
     bool          startup_blocked;
     bool          fault_active;   /* for the heartbeat LED */
     int16_t       torque_request; /* the driver's, from the lower Pedal travel, 0.1 N.m */
-    int16_t       torque;         /* in this step's 0x0C0 after the gates, 0.1 N.m */
+    int16_t       torque;         /* in this step's 0x0C0 after the gates and the limiter, 0.1 N.m */
+    vcu_power_limiter_out_t limiter;    /* the Power limiter's ceilings, trim, and whether it bound */
     uint16_t      cuts;           /* the Torque cuts active: bit (1 << vcu_cut_t) */
     vcu_cal_result_t  calibration;    /* VCU_CAL_OK: Calibrated */
     bool              pedal_check_due;
@@ -375,6 +383,7 @@ typedef struct {
     uint32_t          cal_fingerprint; /* vcu_cal_fingerprint() of the config's */
     vcu_pedal_check_t pedal_check;
     bool         pedal_check_passed; /* since reset */
+    vcu_power_limiter_t limiter;
 } vcu_control_t;
 
 void vcu_control_init(vcu_control_t *vc, const vcu_control_config_t *config);

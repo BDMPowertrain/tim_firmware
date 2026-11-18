@@ -92,6 +92,8 @@ static struct can_control_inv_voltage_t invVoltage;
 static struct can_control_inv_fault_codes_t invFaults;
 static struct can_control_inv_internal_states_t invStates;
 static struct can_control_em_status_t emStatus;
+static struct can_control_inv_motor_position_t invPosition;
+static struct can_control_em_measurement_t emMeasurement;
 
 /* ------------------------------------------------------------------ */
 /* The bench                                                          */
@@ -158,6 +160,12 @@ static void pack_frame(size_t row, uint8_t *frame)
         break;
     case VCU_RX_EM_STATUS:
         (void)can_control_em_status_pack(frame, &emStatus, 8u);
+        break;
+    case VCU_RX_INV_MOTOR_POSITION:
+        (void)can_control_inv_motor_position_pack(frame, &invPosition, 8u);
+        break;
+    case VCU_RX_EM_MEASUREMENT:
+        (void)can_control_em_measurement_pack(frame, &emMeasurement, 8u);
         break;
     default:
         /* Every other frame is all zeros: 0 rpm, VSM start, and so on. */
@@ -268,15 +276,22 @@ static void to_ts_active(void)
     TEST_ASSERT_EQUAL_UINT8(VCU_STATE_TS_ACTIVE, out.state);
 }
 
+/* The Start procedure from TS_ACTIVE: brake held, then a press. */
+static void to_ready_to_drive_from_ts_active(void)
+{
+    brake_on();
+    in.start_pressed = false;
+    run_ms(VCU_START_RELEASE_MS);
+    in.start_pressed = true;
+    step();
+    TEST_ASSERT_EQUAL_UINT8(VCU_STATE_READY_TO_DRIVE, out.state);
+}
+
 /* The Start procedure: brake held, then a press of the start button. */
 static void to_ready_to_drive(void)
 {
     to_ts_active();
-    brake_on();
-    run_ms(VCU_START_RELEASE_MS); /* the button has been released long enough */
-    in.start_pressed = true;
-    step();
-    TEST_ASSERT_EQUAL_UINT8(VCU_STATE_READY_TO_DRIVE, out.state);
+    to_ready_to_drive_from_ts_active();
 }
 
 /* A press of the start button after it has been released long enough. */
@@ -338,7 +353,12 @@ void setUp(void)
     /* A healthy BMS and inverter, Tractive System up. */
     bmsStatus = (struct can_control_bms_status_t){ .state = 1u, .bms_ok = 1u };
     bmsLimits = (struct can_control_bms_limits_t){ .pack_voltage = PACK_DV };
-    bmsPower = (struct can_control_bms_power_t){ .pack_voltage = PACK_DV };
+    /* 300 A at 400 V: 120 kW, so the 72 kW target is the Power ceiling,
+       far above 100 N.m at the standstill the inverter reports. */
+    bmsPower = (struct can_control_bms_power_t){ .pack_voltage = PACK_DV,
+                                                 .discharge_limit = 3000u };
+    invPosition = (struct can_control_inv_motor_position_t){ 0 };
+    emMeasurement = (struct can_control_em_measurement_t){ 0 };
     invVoltage = (struct can_control_inv_voltage_t){ .dc_bus_voltage = (int16_t)PACK_DV };
     invFaults = (struct can_control_inv_fault_codes_t){ 0 };
     invStates = (struct can_control_inv_internal_states_t){ 0 };
@@ -1659,6 +1679,106 @@ static void test_the_entry_frame_has_zero_torque_and_the_next_the_request(void)
     TEST_ASSERT_EQUAL_INT16(500, torque_sent());
 }
 
+/* ------------------------------------------------------------------ */
+/* The Power limiter (issue 60, ADR 0017)                             */
+/* ------------------------------------------------------------------ */
+
+/* Ready to Drive at 6000 rpm (628.3 rad/s) with the pedal floored, past
+   the entry frame. */
+static void full_pedal_at_6000_rpm(void)
+{
+    invPosition.motor_speed = 6000;
+    to_ready_to_drive();
+    brake_off();
+    set_pedal(1000u);
+    step();
+}
+
+/* EV.3.1.3, EV.3.3.1: the limiter's slot lowers the request to the torque
+   ceiling. From reset the trim is -15%: 61.2 kW x 0.85 / 628.3 rad/s =
+   82.79 N.m, under the 100 N.m asked. VCU_Status says why, and the torque
+   limit bytes keep the Parameter, never the ceiling (ADR 0017). */
+static void test_the_power_limiter_lowers_the_request_to_the_ceiling(void)
+{
+    full_pedal_at_6000_rpm();
+    TEST_ASSERT_EQUAL_INT16(1000, out.torque_request);
+    TEST_ASSERT_EQUAL_INT16(827, torque_sent());
+    TEST_ASSERT_EQUAL_INT16(1000, command_frame().torque_limit);
+    TEST_ASSERT_TRUE(out.limiter.active);
+    TEST_ASSERT_EQUAL_UINT8(VCU_CEILING_TARGET, out.limiter.lower);
+    step();
+    TEST_ASSERT_EQUAL_UINT8(1u, status_frame().limiter_active);
+    TEST_ASSERT_EQUAL_INT16(827, status_frame().torque_sent);
+}
+
+/* Under the ceiling the request goes through and LimiterActive is clear. */
+static void test_a_request_under_the_ceiling_is_sent_as_it_is(void)
+{
+    invPosition.motor_speed = 6000;
+    to_ready_to_drive();
+    brake_off();
+    set_pedal(525u); /* 50 N.m */
+    run_ms(2u * STEP_MS);
+    TEST_ASSERT_EQUAL_INT16(500, torque_sent());
+    TEST_ASSERT_FALSE(out.limiter.active);
+    TEST_ASSERT_EQUAL_UINT8(0u, status_frame().limiter_active);
+}
+
+/* The trim learns from BMS_Power frames while the limiter binds: this BMS
+   reads no current, so the trim rises to 0 and the ceiling to 72 kW x
+   0.85 / 628.3 rad/s = 97.40 N.m. */
+static void test_the_trim_learns_from_bms_power_while_the_limiter_binds(void)
+{
+    full_pedal_at_6000_rpm();
+    run_ms(200u);
+    TEST_ASSERT_EQUAL_INT32(0, out.limiter.trim_ppm);
+    TEST_ASSERT_EQUAL_INT16(974, torque_sent());
+}
+
+/* A pedal held outside Ready to Drive is gated before the limiter, so the
+   limiter never binds and the trim learns nothing from a parked car. */
+static void test_a_pedal_held_outside_ready_to_drive_teaches_the_trim_nothing(void)
+{
+    invPosition.motor_speed = 6000;
+    to_ts_active();
+    set_pedal(1000u);
+    run_ms(1000u);
+    TEST_ASSERT_FALSE(out.limiter.active);
+    TEST_ASSERT_EQUAL_UINT8(0u, status_frame().limiter_active);
+    set_pedal(0u);
+    to_ready_to_drive_from_ts_active();
+    brake_off();
+    set_pedal(1000u);
+    step();
+    TEST_ASSERT_EQUAL_INT32(-150000, out.limiter.trim_ppm);
+    TEST_ASSERT_EQUAL_INT16(827, torque_sent());
+}
+
+/* The BMS asks for less: 100 A x 400 V = 40 kW, the lower ceiling, and the
+   Data log can tell which it was. 40 kW less 15% x 0.85 / 628.3 rad/s =
+   45.99 N.m. */
+static void test_the_discharge_limit_ceiling_is_named_as_the_lower(void)
+{
+    bmsPower.discharge_limit = 1000u;
+    full_pedal_at_6000_rpm();
+    TEST_ASSERT_EQUAL_UINT8(VCU_CEILING_DISCHARGE, out.limiter.lower);
+    TEST_ASSERT_EQUAL_INT16(459, torque_sent());
+    TEST_ASSERT_TRUE(out.limiter.active);
+}
+
+/* ADR 0017: nothing in the torque path reads the Energy Meter. It reports
+   200 kW and a Violation; the torque is what it would be without it. */
+static void test_the_energy_meter_never_changes_the_torque(void)
+{
+    emMeasurement.current = 400;
+    emMeasurement.voltage = 500;
+    emStatus.violation = 1u;
+    full_pedal_at_6000_rpm();
+    TEST_ASSERT_EQUAL_INT16(827, torque_sent());
+    run_ms(200u);
+    TEST_ASSERT_EQUAL_INT16(974, torque_sent());
+}
+
 /* Leaving Ready to Drive zeroes torque in the same step. */
 static void test_leaving_ready_to_drive_zeroes_torque_in_the_same_step(void)
 {
@@ -2781,6 +2901,12 @@ int main(void)
     RUN_TEST(test_the_request_uses_the_lower_pedal_travel);
     RUN_TEST(test_the_command_is_never_negative);
     RUN_TEST(test_no_torque_outside_ready_to_drive);
+    RUN_TEST(test_the_power_limiter_lowers_the_request_to_the_ceiling);
+    RUN_TEST(test_a_request_under_the_ceiling_is_sent_as_it_is);
+    RUN_TEST(test_the_trim_learns_from_bms_power_while_the_limiter_binds);
+    RUN_TEST(test_a_pedal_held_outside_ready_to_drive_teaches_the_trim_nothing);
+    RUN_TEST(test_the_discharge_limit_ceiling_is_named_as_the_lower);
+    RUN_TEST(test_the_energy_meter_never_changes_the_torque);
     RUN_TEST(test_the_entry_frame_has_zero_torque_and_the_next_the_request);
     RUN_TEST(test_leaving_ready_to_drive_zeroes_torque_in_the_same_step);
     RUN_TEST(test_apps_disagreeing_for_80_ms_cuts_torque_79_ms_does_not);

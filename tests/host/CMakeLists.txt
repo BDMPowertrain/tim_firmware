@@ -75,6 +75,8 @@ add_host_test(test_vcu_params logic_vcu vcu/test_vcu_params.c)
 add_host_test(test_vcu_sensors logic_vcu vcu/test_vcu_sensors.c)
 add_host_test(test_vcu_control logic_vcu vcu/test_vcu_control.c)
 add_host_test(test_vcu_calibration logic_vcu vcu/test_vcu_calibration.c)
+add_host_test(test_vcu_power_limiter logic_vcu vcu/test_vcu_power_limiter.c)
+add_host_test(test_vcu_power_limiter_plant logic_vcu vcu/test_vcu_power_limiter_plant.c)
 add_host_test(test_bms_tx logic_bms bms/test_bms_tx.c)
 add_host_test(test_bms_params logic_bms bms/test_bms_params.c)
 add_host_test(test_record_ring logic_common common/test_record_ring.c)
@@ -101,6 +103,19 @@ if(Python3_Interpreter_FOUND)
             -DDIR=${CMAKE_CURRENT_BINARY_DIR}
             -P ${CMAKE_CURRENT_SOURCE_DIR}/data_log_decoder_check.cmake)
     set_tests_properties(test_data_log_decoder PROPERTIES FIXTURES_REQUIRED data_log_sample)
+
+    # The 80 kW rule's two windows (issue 60): the check itself, then the
+    # traces the Power limiter's closed-loop test writes.
+    add_test(NAME test_power_rule_windows
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_power_rule_windows.py)
+    set_tests_properties(test_vcu_power_limiter_plant PROPERTIES FIXTURES_SETUP power_traces)
+    add_test(NAME test_power_rule_windows_plant
+        COMMAND ${CMAKE_COMMAND}
+            -DPYTHON=${Python3_EXECUTABLE}
+            -DCHECK=${repo_root}/tools/power_rule_windows.py
+            -DDIR=${CMAKE_CURRENT_BINARY_DIR}
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/power_rule_windows_check.cmake)
+    set_tests_properties(test_power_rule_windows_plant PROPERTIES FIXTURES_REQUIRED power_traces)
 else()
-    message(WARNING "No Python 3.10 or later: test_data_log_decoder is not run")
+    message(WARNING "No Python 3.10 or later: test_data_log_decoder and the power rule-window checks are not run")
 endif()
