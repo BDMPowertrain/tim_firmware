@@ -19,8 +19,9 @@
    - A write waits for SPI_RDY high before it goes (BQ79600-Q1 data sheet
      SLUSDS1A Fig 7-17); a read sends its command, then reads each
      128-byte buffer the bridge says is ready, until the response is in or
-     tWAIT_READ_MAX has passed (Fig 7-16). A read that times out still reads
-     out what the bridge holds, then sends a Comm Clear.
+     tWAIT_READ_MAX has passed (Fig 7-16). A read that times out keeps the
+     buffers already read and sends a Comm Clear; it never reads while
+     SPI_RDY is low.
 
    The calling task sleeps on thread flags during every transfer and every
    wait, set by the DMA completion and the SPI_RDY interrupts. Called only

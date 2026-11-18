@@ -30,8 +30,11 @@ extern SPI_HandleTypeDef hspi3;
    0.5 us; SLUAA17A asks 2 us around the ping). */
 #define NCS_GUARD_US 2u
 
-static const uint8_t zeros[WAKE_PING_BYTES] = {0};
-static const uint8_t ones[CHUNK] = {
+/* The wake ping's bytes; the first also serves as the Comm Clear. */
+static const uint8_t ping_zeros[WAKE_PING_BYTES] = {0};
+/* What goes out on MOSI while a response is read: the host holds MOSI
+   high when not sending a command (SLUSDS1A 7.3.2.1.2.2). */
+static const uint8_t read_filler[CHUNK] = {
     [0 ... CHUNK - 1u] = 0xFFu,
 };
 
@@ -143,24 +146,32 @@ static bool wait_spi_rdy_edge(uint32_t ticks)
    bridge's FIFOs after a read that did not finish. */
 static void comm_clear(void)
 {
-    (void)send_frame(zeros, 1u);
+    (void)send_frame(ping_zeros, 1u);
 }
 
 /* ---- commands ----------------------------------------------------------- */
 
 static bool wake_ping(void)
 {
-    return send_frame(zeros, WAKE_PING_BYTES);
+    return send_frame(ping_zeros, WAKE_PING_BYTES);
 }
 
-static bool write_command(const bq_command_t *cmd)
+/* Before any command: SPI_RDY high says the bridge can take it (SLUSDS1A
+   Fig 7-16, 7-17). A bridge that stays busy past the wait gets a Comm
+   Clear. */
+static bool wait_ready_for_command(void)
 {
     (void)osThreadFlagsClear(FLAG_SPI_RDY);
     if (!spi_rdy_high() && !wait_spi_rdy_edge(WRITE_READY_TICKS)) {
         comm_clear();
         return false;
     }
-    return send_frame(cmd->frame, cmd->len);
+    return true;
+}
+
+static bool write_command(const bq_command_t *cmd)
+{
+    return wait_ready_for_command() && send_frame(cmd->frame, cmd->len);
 }
 
 /* Whole milliseconds, rounded up, plus one tick for where in the tick the
@@ -181,9 +192,7 @@ static bool read_command(const bq_command_t *cmd, size_t *len)
     size_t got = 0u;
 
     *len = 0u;
-    (void)osThreadFlagsClear(FLAG_SPI_RDY);
-    if (!spi_rdy_high() && !wait_spi_rdy_edge(WRITE_READY_TICKS)) {
-        comm_clear();
+    if (!wait_ready_for_command()) {
         return false;
     }
     /* SPI_RDY drops within 5 us of the command's first byte and rises
@@ -197,31 +206,30 @@ static bool read_command(const bq_command_t *cmd, size_t *len)
 
     while (got < expected) {
         const uint32_t elapsed = osKernelGetTickCount() - start;
-        const bool ready = (elapsed < limit) && wait_spi_rdy_edge(limit - elapsed);
+        if (elapsed >= limit || !wait_spi_rdy_edge(limit - elapsed)) {
+            /* tWAIT_READ_MAX has passed: the buffers read so far are kept
+               (whole frames in them still decode) and the bridge is
+               cleared, never read while SPI_RDY is low (SLUSDS1A Fig 7-16;
+               that sets a comm fault). */
+            timeouts++;
+            comm_clear();
+            return false;
+        }
         const size_t n = (expected - got < CHUNK) ? expected - got : CHUNK;
 
         /* Cleared before the buffer is read: SPI_RDY falls before its last
            byte goes out and the next edge may come at once. */
         (void)osThreadFlagsClear(FLAG_SPI_RDY);
         select();
-        const bool moved = transfer(ones, &response[got], n);
+        const bool moved = transfer(read_filler, &response[got], n);
         deselect();
         if (!moved) {
             comm_clear();
             return false;
         }
-        if (!ready) {
-            /* Timed out: what the bridge held has been read out above (a
-               byte it does not hold reads 0xFF, which ends the parsing);
-               clear it for the next command (SLUSDS1A Fig 7-16). */
-            *len = got + n;
-            timeouts++;
-            comm_clear();
-            return false;
-        }
         got += n;
+        *len = got;
     }
-    *len = got;
     return true;
 }
 

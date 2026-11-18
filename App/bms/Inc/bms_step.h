@@ -18,7 +18,8 @@
 
 /* What the step publishes about the pack each step, for the shell and
    later the Data log and the DAQ bus. Copied with interrupts masked (ADR
-   0010: the BMS published snapshot, about 550 bytes). */
+   0010: the BMS published snapshot; about 550 bytes, a little over that
+   ADR's 500-byte estimate). */
 typedef struct {
     uint32_t         step_count;     /* the step that published it */
     bq_chain_state_t chain_state;

@@ -24,7 +24,7 @@
  * The first command that goes up the chain on every wake is a balancing
  * stop (spec, issue 36): every balancing timer to 0 s with BAL_GO, as a
  * broadcast because the stack may not be addressed yet. A device that was
- * bleeding when the MCU reset stops here.
+ * balancing when the MCU reset stops here.
  *
  * Any failure during the wake ends the attempt; the next wake ping goes a
  * second after the last one began, for as long as it takes. A running chain
