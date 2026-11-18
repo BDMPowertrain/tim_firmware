@@ -20,7 +20,7 @@ Faults to try against the BMS:
                    timeout (5 s); the BMS pauses the charge, BMS_OK stays high
 
 The bus is the Control bus at 500 kbit/s (the BMS's only rate, #33). Needs
-cantools (requirements.txt) and python-can (`pip install python-can`) and a
+cantools and python-can (both in requirements.txt) and a
 python-can adapter, for example:
 
     python tools/charger_sim.py --interface pcan --channel PCAN_USBBUS1
