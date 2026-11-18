@@ -2,18 +2,21 @@
    tasks_init() once, then terminates; everything running after that
    point was created here.
 
-   The BMS image so far: it boots, runs Housekeeping (the heartbeat LED),
-   answers the common shell on USART1, runs its control step on the
-   Control bus and publishes its status on the DAQ bus. The cell-monitor Sweep and the BMS
-   pins come with later work. */
+   The BMS image so far: it boots, runs Housekeeping (the heartbeat LED
+   and VBAT), answers the shell on USART1, runs its control step, which
+   wakes the cell monitors and takes one Sweep every 20 ms, on the Control
+   bus, and publishes its status on the DAQ bus. No BMS fault is judged
+   yet, so BMS_OK stays low. */
 
 #include "tasks.h"
 
 #include "FreeRTOS.h"
 #include "task.h"
 
+#include "bms_adc.h"
 #include "bms_daq.h"
 #include "bms_params.h"
+#include "bms_shell.h"
 #include "bms_step.h"
 #include "can_control.h"
 #include "can_daq.h"
@@ -74,10 +77,9 @@ static const data_log_def_t dataLogDef = {
     },
 };
 
-/* The BMS has no slow reading of its own yet: ADC1 (board temperature,
-   VBAT) is not configured in its CubeMX project. */
+/* VBAT, as on the VCU (#47): the newest averaged count from ADC1. */
 static const housekeeping_def_t housekeepingDef = {
-    .poll = NULL,
+    .poll = bms_adc_poll_vbat,
 };
 
 /* What the DAQ publisher sends from the BMS (can/daq.dbc). */
@@ -95,9 +97,9 @@ void tasks_init(void)
 
        print_init() must run before any task that might print is created.
        shell_init() arms the USART1 RX interrupt, so it must run before
-       that interrupt can fire. The BMS has no shell commands of its own
-       yet, so it never calls shell_register_commands(), and it never
-       refuses `hang` or `crash`, so it registers no refusal hook. */
+       that interrupt can fire. The BMS's own commands are registered
+       before shellTask is created; it never refuses `hang` or `crash`, so
+       it registers no refusal hook. */
     bool ok = print_init();
     /* The Event queue before anything posts, and the flash lock before
        anything shares bank 2. */
@@ -109,8 +111,11 @@ void tasks_init(void)
        The BMS accepts a save at any time, so it has no save hook. */
     ok = parameters_init(&bms_param_table, NULL) && ok;
     ok = shell_init() && ok;
+    bms_shell_register();
     ok = can_if_init(&daqPublisher, parameters_value(BMS_PARAM_CAN2_TERM) != 0) && ok;
     ok = housekeeping_init() && ok;
+    /* ADC1 before Housekeeping and the step read it; blocks 1-2 ms. */
+    ok = bms_adc_start() && ok;
     ok = bms_step_init() && ok;
     /* Started in main(); a configuration that did not take is a start-up
        failure, so the BMS stays in STARTUP. */

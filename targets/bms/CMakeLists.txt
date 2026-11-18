@@ -52,8 +52,8 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     # Add user sources here
     # App/common/ is compiled into both images, App/bms/ into this one only
     # (ADR 0001). The Data log (data_log.c, data_log_ring.c) writes through
-    # the SD driver (sd_spi.c) and FatFs; VBAT and the SPI3 bus lock join
-    # when this project configures their peripherals.
+    # the SD driver (sd_spi.c) and FatFs. SPI3 is the cell monitors' alone
+    # (cell_monitor.c), so the SPI3 bus lock is not linked.
     ../../App/common/Src/can_if.c
     ../../App/common/Src/control_bus.c
     ../../App/common/Src/control_step.c
@@ -73,8 +73,12 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     ../../App/common/Src/shell.c
     ../../App/common/Src/stats.c
     ../../App/common/Src/termination.c
+    ../../App/common/Src/vbat.c
     ../../App/common/Src/watchdog.c
+    ../../App/bms/Src/bms_adc.c
+    ../../App/bms/Src/bms_shell.c
     ../../App/bms/Src/bms_step.c
+    ../../App/bms/Src/cell_monitor.c
     ../../App/bms/Src/tasks.c
 )
 
