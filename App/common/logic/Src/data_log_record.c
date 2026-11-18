@@ -70,3 +70,23 @@ void data_log_step_encode(uint8_t out[DATA_LOG_STEP_SIZE], const data_log_step_t
     put_u16(&out[6], s->step_us > 0xFFFFu ? 0xFFFFu : (uint16_t)s->step_us);
     put_u32(&out[8], s->overruns);
 }
+
+void data_log_imu_encode(uint8_t out[DATA_LOG_IMU_SIZE], const data_log_imu_t *s)
+{
+    for (size_t i = 0; i < 3u; i++) {
+        put_u16(&out[2u * i], (uint16_t)s->accel[i]);
+        put_u16(&out[6u + 2u * i], (uint16_t)s->gyro[i]);
+    }
+}
+
+uint16_t data_log_daq_encode(uint8_t out[DATA_LOG_DAQ_SIZE_MAX], const can_frame_t *f)
+{
+    const uint8_t len = (f->len > CAN_FRAME_DATA_MAX) ? (uint8_t)CAN_FRAME_DATA_MAX : f->len;
+    const uint32_t id = (f->id & 0x1FFFFFFFu) | (f->is_extended ? DATA_LOG_ID_EXTENDED : 0u) |
+                        (f->is_fd ? DATA_LOG_DAQ_FD : 0u) | (f->is_brs ? DATA_LOG_DAQ_BRS : 0u);
+
+    put_u32(&out[0], id);
+    out[4] = len;
+    memcpy(&out[5], f->data, len);
+    return (uint16_t)(5u + len);
+}

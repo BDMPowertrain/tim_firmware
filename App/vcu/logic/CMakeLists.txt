@@ -9,6 +9,8 @@ add_logic_library(logic_vcu
         Src/vcu_calibration.c
         Src/vcu_control.c
         Src/vcu_daq.c
+        Src/vcu_log.c
+        Src/vcu_imu_log.c
         Src/vcu_params.c
         Src/vcu_pedal_check.c
         Src/vcu_power_limiter.c

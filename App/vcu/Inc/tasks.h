@@ -86,7 +86,10 @@
    than that; re-measure with `tasks` if more call depth gets added. */
 #define SHELL_TASK_STACK_SIZE     2048u
 
-/* High-rate sensing band, per the reserved-priority table in
+/* imuTask also pairs each FIFO read into IMU Records for the Data log
+   (issue 61); the entries and pairs are static in imu.c, the encoded
+   Record (12 bytes) on this stack. Re-measure with `tasks` once logging.
+   High-rate sensing band, per the reserved-priority table in
    Documentation/tim-rtos-architecture.md section 2. Measured via
    `tasks` with the driver actually parsing live FIFO bursts (not just
    idling): high-water mark settled at 400 B free out of 1024 — real
@@ -112,9 +115,11 @@
    queue, so a late canRxTask drops only logging data. The Control bus
    (CAN1) has no task: its interrupt writes the mailboxes and the control
    step sends (ADR 0004). daqTask's stack holds a snapshot copy and two
-   frames; unmeasured. Measure with `tasks` and adjust. */
+   frames; unmeasured. canRxTask also encodes each frame for the Data log
+   (issue 61, data_log_push_daq(): a 69-byte payload on top of its 72-byte
+   frame), so it has 768. Measure both with `tasks` and adjust. */
 #define CAN_RX_TASK_PRIORITY      osPriorityNormal
-#define CAN_RX_TASK_STACK_SIZE    512u
+#define CAN_RX_TASK_STACK_SIZE    768u
 
 #define DAQ_TASK_PRIORITY         osPriorityNormal
 #define DAQ_TASK_STACK_SIZE       1024u

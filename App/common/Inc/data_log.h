@@ -6,7 +6,8 @@
    FatFS. It replaces the CSV logger and its start, stop and dump commands.
 
    It waits for the end of STARTUP, then mounts the card and opens a new
-   file in this boot's directory (data_log_card.h), and from then on
+   file in this boot's directory (data_log_card.h), writes the image's
+   preamble Record into it, and from then on
    encodes every Record (data_log_record.h) into a 4 KB batch that goes to
    the card in whole sectors (log_batch.h), syncing every second (the bytes
    after the last whole sector wait in RAM for the next) and rolling the
@@ -28,13 +29,23 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "data_log_ring.h"
+
 /* The image's Data log. Must outlive the task. */
 typedef struct {
     uint8_t  image;          /* PARAMS_IMAGE_VCU or PARAMS_IMAGE_BMS, for the file header */
     uint8_t  startup_state;  /* the image's STARTUP state: logging starts when the step leaves it */
-    void    *step_storage;   /* the step ring's (RECORD_RING_STORAGE_SIZE()), word-aligned */
-    size_t   step_storage_size;
-    uint16_t step_payload_max; /* at most DATA_LOG_PAYLOAD_MAX */
+    /* Each ring's storage (data_log_ring.h), payloads at most
+       DATA_LOG_PAYLOAD_MAX. The step ring is required; the Event ring's
+       entry is not read; any other left empty is a ring the image does
+       not have. */
+    data_log_ring_def_t rings[DATA_LOG_RING_COUNT];
+    /* A Record written first in every file, sequence number 0, that the
+       image's other Records need to be read (the VCU: its mailbox map,
+       DATA_LOG_MAILBOXES). preamble_len 0: none. */
+    uint8_t     preamble_type;
+    const void *preamble;
+    uint16_t    preamble_len;
 } data_log_def_t;
 
 /* The largest Record payload the logger takes from a ring. */

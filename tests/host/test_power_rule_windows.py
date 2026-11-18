@@ -92,6 +92,25 @@ class CommandLine(unittest.TestCase):
     def test_a_violation_exits_1(self):
         self.assertEqual(1, prw.main([self.write_csv(trace((1000, 85_000), step_ms=10))]))
 
+    def test_a_row_with_no_power_ends_the_reading_before_it(self):
+        # A decoded step log leaves the power empty while the meter's mailbox
+        # is not VALID (issue 61). Nothing is known there, so no reading is
+        # held across it: 85 kW from 0 to 50 ms and from 100 to 150 ms is
+        # two stretches of 50 ms, not 150 ms above the limit.
+        path = self.write_csv([(0, 85_000), (50, ""), (100, 85_000), (150, 70_000),
+                               (200, 70_000)])
+        self.assertEqual([], prw.violations_in_csv(path))
+
+    def test_a_long_stretch_between_gaps_is_still_judged(self):
+        path = self.write_csv([(0, ""), (10, 85_000), (60, 85_000), (120, 70_000),
+                               (130, "")])
+        self.assertEqual([prw.Violation("continuous", 10.0, 120.0, 85_000.0)],
+                         prw.violations_in_csv(path))
+
+    def test_a_file_with_gaps_says_how_much_was_not_judged(self):
+        path = self.write_csv([(0, 70_000), (10, ""), (20, ""), (30, 70_000), (40, 70_000)])
+        self.assertEqual(0, prw.main([path]))
+
 
 if __name__ == "__main__":
     unittest.main()

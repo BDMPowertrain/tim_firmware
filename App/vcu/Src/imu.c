@@ -12,7 +12,8 @@
    — the lightest ISR-to-task handoff FreeRTOS has, no queue or
    semaphore object involved. imuTask then takes spi3Mutex, bursts the
    whole FIFO off SPI3 in one transaction, releases the mutex, and
-   demuxes the burst into accel/gyro samples by each entry's tag byte.
+   demuxes the burst into accel/gyro samples by each entry's tag byte,
+   and pairs them into the Data log's IMU Records (vcu_imu_log.h).
    This is what keeps SPI3 (shared with the mezzanine header) idle
    between bursts instead of busy at the sensor's own output rate. */
 
@@ -26,9 +27,12 @@
 
 #include "cmsis_os2.h"
 
+#include "data_log_record.h"
+#include "data_log_ring.h"
 #include "main.h"
 #include "print.h"
 #include "spi3_bus.h"
+#include "vcu_imu_log.h"
 
 extern SPI_HandleTypeDef hspi3;
 
@@ -88,6 +92,18 @@ extern SPI_HandleTypeDef hspi3;
    putting a 225-byte buffer on a task's stack is exactly the mistake
    that overflowed shellTask earlier. */
 static uint8_t spiTxBuf[IMU_SPI_BUF_LEN];
+
+_Static_assert(IMU_FIFO_BURST_MAX_WORDS == VCU_IMU_ENTRIES_MAX,
+               "a FIFO read fits the IMU Records' pairing");
+_Static_assert(IMU_FIFO_TAG_ACCEL == VCU_IMU_ACCEL && IMU_FIFO_TAG_GYRO == VCU_IMU_GYRO,
+               "the pairing reads the FIFO's own tags");
+
+/* The IMU Records (issue 61): each read's entries, paired into accel and
+   gyro Records for the Data log. imuTask's alone; static, not on its
+   stack. */
+static vcu_imu_pairer_t pairer;
+static vcu_imu_entry_t entries[VCU_IMU_ENTRIES_MAX];
+static vcu_imu_record_t records[VCU_IMU_PAIRS_MAX];
 static uint8_t spiRxBuf[IMU_SPI_BUF_LEN];
 
 /* Cached latest samples, for imu_get_latest_accel()/imu_get_latest_gyro()
@@ -228,7 +244,8 @@ static void imu_drain_fifo(void)
         return;
     }
 
-    uint16_t pending = imu_fifo_pending();
+    const uint16_t inFifo = imu_fifo_pending();
+    uint16_t pending = inFifo;
     if (pending > IMU_FIFO_BURST_MAX_WORDS) {
         pending = IMU_FIFO_BURST_MAX_WORDS;
     }
@@ -251,6 +268,8 @@ static void imu_drain_fifo(void)
         int16_t y = (int16_t)((uint16_t)word[3] | ((uint16_t)word[4] << 8));
         int16_t z = (int16_t)((uint16_t)word[5] | ((uint16_t)word[6] << 8));
 
+        entries[i] = (vcu_imu_entry_t){.sensor = sensor, .xyz = {x, y, z}};
+
         if (sensor == IMU_FIFO_TAG_ACCEL) {
             latestAccel.x = x;
             latestAccel.y = y;
@@ -264,6 +283,18 @@ static void imu_drain_fifo(void)
         }
     }
     osMutexRelease(imuDataMutex);
+
+    /* One Record per accel and gyro pair, about 100 Hz, dated back from
+       this read (vcu_imu_log.h). Never waits: a full ring drops and counts. */
+    const size_t made = vcu_imu_pair(&pairer, entries, pending, (size_t)(inFifo - pending),
+                                     osKernelGetTickCount(), records);
+    for (size_t i = 0; i < made; i++) {
+        uint8_t record[DATA_LOG_IMU_SIZE];
+
+        data_log_imu_encode(record, &records[i].sample);
+        (void)data_log_push(DATA_LOG_RING_IMU, DATA_LOG_IMU, records[i].uptime_ms, record,
+                            sizeof record);
+    }
 }
 
 /* Deliberately minimal: no SPI3 access (that's spi3_bus_lock(), which
@@ -282,6 +313,7 @@ void imuTask(void *argument)
     (void)argument;
 
     imuTaskHandle = osThreadGetId();
+    vcu_imu_pairer_init(&pairer);
 
     const osMutexAttr_t imuDataMutex_attributes = {
         .name = "imuDataMutex",

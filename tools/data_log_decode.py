@@ -2,15 +2,28 @@
 """Turns one Data log file (ADR 0021) into CSV, one file per Record type.
 
     python tools/data_log_decode.py B00042/L0003.TDL [-o OUTDIR] [--summary FILE]
+        [--control-dbc can/control.dbc] [--daq-dbc can/daq.dbc]
 
-Writes <stem>.step.csv and <stem>.event.csv (each only if the file holds that
-type) into OUTDIR (default: beside the input) and prints a summary: the file
-header, each type's Record count and the Records lost in gaps of its sequence
-numbers, Records skipped for a bad CRC, and the bytes of a torn last Record.
+Writes <stem>.<type>.csv for each Record type the file holds (step, event,
+vcu_step, imu, daq_rx, daq_tx) into OUTDIR (default: beside the input) and
+prints a summary: the file header, each type's Record count and the Records
+lost in gaps of its sequence numbers, Records skipped for a bad CRC, and the
+bytes of a torn last Record.
 
-The format is App/common/logic/Inc/data_log_record.h; a change there changes
-this file in the same commit. tests/host checks the two agree. Python 3.10 or
-later, standard library only.
+The VCU's step Records name their mailboxes by the map the file starts with;
+each mailbox's frame and the 0x0C0 sent are decoded with the Control bus DBC,
+and DAQ bus frames with the DAQ bus DBC. A mailbox that is not VALID holds
+its Substitute, and the power column derived from it (bms_power_w,
+em_power_w) is left empty. Judge the 80 kW rule on a decoded step log with
+
+    python tools/power_rule_windows.py <stem>.vcu_step.csv \\
+        --time-column uptime_ms --power-column em_power_w
+
+The format is App/common/logic/Inc/data_log_record.h and, for the VCU's
+Records, App/vcu/logic/Inc/vcu_log.h; a change there changes this file in
+the same commit. tests/host checks they agree. Python 3.10 or later. The DBC
+decoding needs cantools (requirements.txt); a file with no VCU step or DAQ
+Records needs only the standard library.
 """
 
 from __future__ import annotations
@@ -30,8 +43,36 @@ OVERHEAD = 14  # 12 bytes before the payload, the CRC-16 after
 
 STEP = 1
 EVENT = 2
-TYPE_NAMES = {STEP: "step", EVENT: "event"}
+VCU_STEP = 3
+IMU = 4
+DAQ_RX = 5
+DAQ_TX = 6
+MAILBOXES = 7
+TYPE_NAMES = {STEP: "step", EVENT: "event", VCU_STEP: "vcu_step", IMU: "imu",
+              DAQ_RX: "daq_rx", DAQ_TX: "daq_tx", MAILBOXES: "mailboxes"}
 IMAGE_NAMES = {1: "VCU", 2: "BMS"}
+
+CAN_DIR = Path(__file__).resolve().parent.parent / "can"
+
+# imu.h: the full scales imu.c configures (+/-8 g, +/-2000 dps).
+ACCEL_G_PER_LSB = 0.244 / 1000
+GYRO_DPS_PER_LSB = 70.0 / 1000
+
+# data_log_record.h: the bits on top of a CAN ID in a DAQ frame Record and the map.
+ID_MASK = 0x1FFFFFFF
+ID_EXTENDED = 0x80000000
+DAQ_FD = 0x40000000
+DAQ_BRS = 0x20000000
+
+# vcu_log.h
+MAILBOX_AT = 65
+MAILBOX_STATES = ["NODATA", "VALID", "INVALID"]
+SENSOR_STATUS = ["OK", "NO_SAMPLE", "SUPPLY_FAULT", "NOT_CALIBRATED", "OUT_OF_RANGE"]
+INPUT_BITS = ["sdc_closed", "start_pressed", "can_running", "bus_off_latched",
+              "error_passive", "rx_overflowed", "samples_ready", "brake_engaged"]
+DECIDED_BITS = ["limiter_active", "lower_ceiling", "command_sent", "fault_clear_sent",
+                "status_sent", "brake_light", "fault_led", "pedal_check_due"]
+INV_COMMAND_ID = 0x0C0
 
 
 def crc16(data: bytes) -> int:
@@ -129,8 +170,14 @@ def decode(data: bytes) -> Decoded:
     return out
 
 
+# ---- the Records every image writes ----------------------------------------
+
+STEP_COLUMNS = ["seq", "uptime_ms", "step_count", "state", "fault_active",
+                "background_stalled", "timing_fault", "startup_ok", "step_us", "overruns"]
+
+
 def step_row(r: Record) -> list:
-    count, state, flags, step_us, overruns = struct.unpack("<IBBHI", r.payload)
+    count, state, flags, step_us, overruns = struct.unpack("<IBBHI", r.payload[:12])
     return [r.seq, r.uptime_ms, count, state, flags & 1, (flags >> 1) & 1,
             (flags >> 2) & 1, (flags >> 3) & 1, step_us, overruns]
 
@@ -143,14 +190,167 @@ def event_row(r: Record) -> list:
             int(crc == crc16(r.payload[0:30]))]
 
 
-COLUMNS = {
-    STEP: (["seq", "uptime_ms", "step_count", "state", "fault_active",
-            "background_stalled", "timing_fault", "startup_ok", "step_us",
-            "overruns"], step_row, 12),
+def imu_row(r: Record) -> list:
+    raw = struct.unpack("<6h", r.payload)
+    return ([r.seq, r.uptime_ms, *raw] +
+            [round(v * ACCEL_G_PER_LSB, 6) for v in raw[:3]] +
+            [round(v * GYRO_DPS_PER_LSB, 6) for v in raw[3:]])
+
+
+FIXED = {
+    STEP: (STEP_COLUMNS, step_row, 12),
     EVENT: (["seq", "uptime_ms", "boot", "event_seq", "event_uptime_ms", "code",
              "data", "crc_ok"], event_row, 32),
+    IMU: (["seq", "uptime_ms", "ax_raw", "ay_raw", "az_raw", "gx_raw", "gy_raw", "gz_raw",
+           "ax_g", "ay_g", "az_g", "gx_dps", "gy_dps", "gz_dps"], imu_row, 12),
 }
 
+
+# ---- the Message database --------------------------------------------------
+
+_dbs: dict[Path, object] = {}
+
+
+def load_dbc(path: Path):
+    """The DBC at path, loaded once; cantools is imported only then."""
+    if path not in _dbs:
+        try:
+            import cantools  # only VCU step and DAQ Records need it
+        except ImportError:
+            raise ValueError("decoding VCU step and DAQ Records needs cantools: "
+                             "pip install -r requirements.txt") from None
+        _dbs[path] = cantools.database.load_file(str(path))
+    return _dbs[path]
+
+
+def find_message(db, frame_id: int):
+    try:
+        return db.get_message_by_frame_id(frame_id)
+    except KeyError:
+        return None
+
+
+def decode_signals(msg, data: bytes) -> dict | None:
+    """Each signal's scaled value; None for a frame the DBC cannot read."""
+    try:
+        return msg.decode(data, decode_choices=False, allow_truncated=True)
+    except Exception:  # cantools raises several kinds; the frame stays raw
+        return None
+
+
+def signal_cells(msg, signals: dict | None) -> list:
+    if msg is None:
+        return []
+    return [str(signals[s.name]) if signals and s.name in signals else "" for s in msg.signals]
+
+
+def signal_columns(prefix: str, msg) -> list[str]:
+    return [f"{prefix}.{s.name}" for s in msg.signals] if msg else []
+
+
+# ---- DAQ bus frames --------------------------------------------------------
+
+DAQ_COLUMNS = ["seq", "uptime_ms", "id", "extended", "fd", "brs", "len", "data", "name",
+               "signals"]
+
+
+def daq_row(r: Record, db) -> list:
+    raw_id, length = struct.unpack_from("<IB", r.payload, 0)
+    data = r.payload[5:5 + length]
+    frame_id = raw_id & ID_MASK
+    msg = find_message(db, frame_id)
+    signals = decode_signals(msg, data) if msg else None
+    return [r.seq, r.uptime_ms, hex(frame_id), int(bool(raw_id & ID_EXTENDED)),
+            int(bool(raw_id & DAQ_FD)), int(bool(raw_id & DAQ_BRS)), length, data.hex(),
+            msg.name if msg else "",
+            ";".join(f"{k}={v}" for k, v in signals.items()) if signals else ""]
+
+
+# ---- the VCU's step Record (vcu_log.h) -------------------------------------
+
+def sensor_status(b: int) -> str:
+    return SENSOR_STATUS[b] if b < len(SENSOR_STATUS) else str(b)
+
+
+def power(signals: dict | None, current: str, voltage: str):
+    return signals[current] * signals[voltage] if signals else ""
+
+
+class VcuStep:
+    """The columns and rows of a file's VCU step Records, named by its map."""
+
+    def __init__(self, map_payload: bytes | None, db, first: Record):
+        self.mailboxes = []  # (column prefix, message or None), in Record order
+        self.notes = []      # what the summary must say about these Records
+        self.skipped = 0     # Records whose mailboxes do not match the map
+        if map_payload:
+            for i in range(map_payload[0]):
+                (raw,) = struct.unpack_from("<I", map_payload, 1 + 4 * i)
+                msg = find_message(db, raw & ID_MASK)
+                self.mailboxes.append((msg.name if msg else f"0x{raw & ID_MASK:x}", msg))
+        else:
+            # The map was lost: name the mailboxes by position, leave them raw.
+            count = first.payload[64] if len(first.payload) > MAILBOX_AT else 0
+            self.mailboxes = [(f"mailbox{i}", None) for i in range(count)]
+            self.notes.append("vcu_step: no mailbox map: mailboxes named by position, "
+                              "not decoded")
+        self.command = find_message(db, INV_COMMAND_ID)
+        self.columns = (STEP_COLUMNS + INPUT_BITS + DECIDED_BITS +
+                        ["apps1_counts", "apps2_counts", "brake1_counts", "brake2_counts",
+                         "supply1_counts", "supply2_counts", "apps1_travel_pct",
+                         "apps2_travel_pct", "apps1_status", "apps2_status",
+                         "brake1_pressure_counts", "brake2_pressure_counts",
+                         "brake1_status", "brake2_status", "start_blockers", "cuts",
+                         "torque_request_nm", "torque_nm", "torque_ceiling_nm",
+                         "power_ceiling_w", "trim_ppm", "command"] +
+                        signal_columns("INV_Command", self.command) +
+                        ["bms_power_w", "em_power_w"])
+        for name, msg in self.mailboxes:
+            self.columns += [f"{name}.state", f"{name}.data"] + signal_columns(name, msg)
+
+    def row(self, r: Record) -> list | None:
+        """None for a Record whose mailboxes do not match the map."""
+        p = r.payload
+        if len(p) <= MAILBOX_AT or len(p) != MAILBOX_AT + 9 * p[64] \
+                or p[64] != len(self.mailboxes):
+            self.skipped += 1
+            return None
+        inputs, decided = p[12], p[13]
+        counts = struct.unpack_from("<6H", p, 14)
+        travel = struct.unpack_from("<2H", p, 26)
+        pressure = struct.unpack_from("<2H", p, 32)
+        blockers, cuts, request, torque, ceiling = struct.unpack_from("<HHhhh", p, 38)
+        power_ceiling, trim = struct.unpack_from("<Ii", p, 48)
+        sent = bool(decided & 0x04)
+
+        decided_cells = [(decided >> i) & 1 for i in range(8)]
+        decided_cells[1] = "discharge" if decided & 0x02 else "target"
+        out = (step_row(r) + [(inputs >> i) & 1 for i in range(8)] + decided_cells +
+               list(counts) + [t / 10 for t in travel] +
+               [sensor_status(p[30]), sensor_status(p[31])] +
+               list(pressure) + [sensor_status(p[36]), sensor_status(p[37])] +
+               [f"0x{blockers:04x}", f"0x{cuts:04x}", request / 10, torque / 10,
+                ceiling / 10, power_ceiling, trim, p[56:64].hex() if sent else ""])
+        if self.command:
+            out += signal_cells(self.command,
+                                decode_signals(self.command, p[56:64]) if sent else None)
+
+        valid = {}
+        boxes = []
+        for i, (name, msg) in enumerate(self.mailboxes):
+            at = MAILBOX_AT + 9 * i
+            state = MAILBOX_STATES[p[at]] if p[at] < len(MAILBOX_STATES) else str(p[at])
+            data = p[at + 1:at + 9]
+            signals = decode_signals(msg, data[:msg.length]) if msg else None
+            boxes += [state, data.hex()] + signal_cells(msg, signals)
+            if state == "VALID":
+                valid[name] = signals
+        out += [power(valid.get("BMS_Power"), "PackCurrent", "PackVoltage"),
+                power(valid.get("EM_Measurement"), "Current", "Voltage")]
+        return out + boxes
+
+
+# ---- the file --------------------------------------------------------------
 
 def gaps(seqs: list[int]) -> tuple[int, int]:
     """Records lost and gaps, from one type's sequence numbers in order."""
@@ -180,18 +380,49 @@ def summary(d: Decoded) -> str:
     return "\n".join(lines) + "\n"
 
 
-def write_csvs(d: Decoded, outdir: Path, stem: str) -> None:
+def tables(d: Decoded, control_dbc: Path, daq_dbc: Path,
+           notes: list[str] | None = None) -> dict[int, tuple[list, list]]:
+    """Each type's columns and rows. A Record of the wrong size is left out;
+    notes gets what the summary must say about the VCU's step Records."""
+    def of(t: int) -> list[Record]:
+        return [r for r in d.records if r.type == t]
+
+    notes = [] if notes is None else notes
+    out = {}
+    for t, (columns, row, size) in FIXED.items():
+        if of(t):
+            out[t] = (columns, [row(r) for r in of(t) if len(r.payload) == size])
+    for t in (DAQ_RX, DAQ_TX):
+        if of(t):
+            db = load_dbc(daq_dbc)
+            out[t] = (DAQ_COLUMNS, [daq_row(r, db) for r in of(t)
+                                    if len(r.payload) >= 5 and
+                                    len(r.payload) == 5 + r.payload[4]])
+    if of(VCU_STEP):
+        maps = of(MAILBOXES)
+        step = VcuStep(maps[0].payload if maps else None, load_dbc(control_dbc),
+                       of(VCU_STEP)[0])
+        out[VCU_STEP] = (step.columns,
+                         [x for x in map(step.row, of(VCU_STEP)) if x is not None])
+        notes += step.notes
+        if step.skipped:
+            notes.append(f"vcu_step: {step.skipped} records left out: their mailboxes "
+                         "do not match the file's map")
+    return out
+
+
+def write_csvs(d: Decoded, outdir: Path, stem: str,
+               control_dbc: Path = CAN_DIR / "control.dbc",
+               daq_dbc: Path = CAN_DIR / "daq.dbc") -> list[str]:
+    """Writes the CSVs; returns the notes for the summary."""
+    notes: list[str] = []
     outdir.mkdir(parents=True, exist_ok=True)
-    for t, (columns, row, size) in COLUMNS.items():
-        records = [r for r in d.records if r.type == t]
-        if not records:
-            continue
+    for t, (columns, rows) in sorted(tables(d, control_dbc, daq_dbc, notes).items()):
         with open(outdir / f"{stem}.{TYPE_NAMES[t]}.csv", "w", newline="") as f:
             w = csv.writer(f, lineterminator="\n")
             w.writerow(columns)
-            for r in records:
-                if len(r.payload) == size:
-                    w.writerow(row(r))
+            w.writerows(rows)
+    return notes
 
 
 def main() -> int:
@@ -199,16 +430,19 @@ def main() -> int:
     p.add_argument("file", type=Path)
     p.add_argument("-o", "--outdir", type=Path)
     p.add_argument("--summary", type=Path, help="also write the summary here")
+    p.add_argument("--control-dbc", type=Path, default=CAN_DIR / "control.dbc")
+    p.add_argument("--daq-dbc", type=Path, default=CAN_DIR / "daq.dbc")
     args = p.parse_args()
 
     try:
         d = decode(args.file.read_bytes())
+        notes = write_csvs(d, args.outdir or args.file.parent, args.file.stem,
+                           args.control_dbc, args.daq_dbc)
     except ValueError as e:
         print(f"{args.file}: {e}", file=sys.stderr)
         return 1
 
-    write_csvs(d, args.outdir or args.file.parent, args.file.stem)
-    text = summary(d)
+    text = summary(d) + "".join(f"{n}\n" for n in notes)
     sys.stdout.write(text)
     if args.summary:
         args.summary.parent.mkdir(parents=True, exist_ok=True)

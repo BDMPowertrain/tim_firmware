@@ -31,7 +31,7 @@
    DAQ publisher), in the Normal band as on the VCU; the sizes are the
    VCU's (App/vcu/Inc/tasks.h), unmeasured on the BMS. */
 #define CAN_RX_TASK_PRIORITY      osPriorityNormal
-#define CAN_RX_TASK_STACK_SIZE    512u
+#define CAN_RX_TASK_STACK_SIZE    768u
 
 #define DAQ_TASK_PRIORITY         osPriorityNormal
 #define DAQ_TASK_STACK_SIZE       1024u

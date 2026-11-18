@@ -16,6 +16,7 @@
 #include "reset_cause.h"
 #include "reset_info.h"
 #include "vcu_adc.h"
+#include "vcu_log.h"
 #include "vcu_params.h"
 
 #define VCU_STEP_PERIOD_MS 10u
@@ -233,6 +234,22 @@ bool vcu_step_read_inputs(vcu_inputs_t *out_inputs)
     return true;
 }
 
+_Static_assert(VCU_LOG_STEP_SIZE <= CONTROL_STEP_RECORD_MAX,
+               "the VCU's step Record fits the runner's buffer");
+
+/* The step Record (issue 61): what this step read and decided, from the
+   step's own statics, after the last phase. */
+static uint16_t step_record(const data_log_step_t *step, uint8_t *buf, size_t cap,
+                            uint8_t *type)
+{
+    if (cap < VCU_LOG_STEP_SIZE) {
+        return 0u;
+    }
+    vcu_log_step_encode(buf, step, &in, &out);
+    *type = DATA_LOG_VCU_STEP;
+    return (uint16_t)VCU_LOG_STEP_SIZE;
+}
+
 static const control_phase_t vcuPhases[] = {
     { "input",  phase_input },
     { "logic",  phase_logic },
@@ -247,4 +264,5 @@ const control_step_def_t vcu_step_def = {
     .state_name = vcu_control_state_name,
     .image_data = &inputs,
     .image_data_size = sizeof(inputs),
+    .record = step_record,
 };

@@ -68,11 +68,15 @@ bool data_log_init(const data_log_def_t *d)
 
     def = d;
     statusMutex = osMutexNew(&attr);
-    if (d->step_payload_max > DATA_LOG_PAYLOAD_MAX) {
+    for (size_t i = 0; i < DATA_LOG_RING_COUNT; i++) {
+        if (d->rings[i].payload_max > DATA_LOG_PAYLOAD_MAX) {
+            return false;
+        }
+    }
+    if (d->preamble_len > DATA_LOG_PAYLOAD_MAX) {
         return false;
     }
-    return data_log_rings_open(d->step_storage, d->step_storage_size, d->step_payload_max) &&
-           statusMutex != NULL;
+    return data_log_rings_open(d->rings) && statusMutex != NULL;
 }
 
 static void publish_status(void)
@@ -204,6 +208,19 @@ static FRESULT open_file(uint32_t now)
     fr = put(bytes, sizeof bytes);
     if (fr != FR_OK) {
         return fr;
+    }
+    if (def->preamble_len > 0u) {
+        const record_head_t head = {
+            .uptime_ms = now,
+            .seq = 0u,
+            .len = def->preamble_len,
+            .type = def->preamble_type,
+        };
+        fr = put(encoded, data_log_record_encode(encoded, sizeof encoded, &head,
+                                                 (const uint8_t *)def->preamble));
+        if (fr != FR_OK) {
+            return fr;
+        }
     }
     data_log_card_opened(&card, now);
     (void)memcpy(status.file, path, sizeof path);
@@ -418,6 +435,9 @@ static void drain(record_ring_t *ring, uint32_t now)
 {
     record_head_t head;
 
+    if (ring == NULL) {
+        return;
+    }
     while (record_ring_pop(ring, &head, payload, sizeof payload)) {
         if (card.state != DATA_LOG_LOGGING) {
             status.not_written++;
@@ -470,8 +490,13 @@ void dataLogTask(void *argument)
         if (data_log_card_roll_due(&card, now)) {
             roll(now);
         }
-        drain(data_log_event_ring(), now);
-        drain(data_log_step_ring(), now);
+        /* Events first: the rarest and the most wanted. */
+        drain(data_log_ring(DATA_LOG_RING_EVENT), now);
+        for (size_t i = 0; i < DATA_LOG_RING_COUNT; i++) {
+            if (i != DATA_LOG_RING_EVENT) {
+                drain(data_log_ring((data_log_ring_id_t)i), now);
+            }
+        }
         if (data_log_card_sync_due(&card, now)) {
             sync(now);
         }
@@ -501,7 +526,7 @@ int data_log_cmd(int argc, char **argv)
         shell_printf("usage: datalog\r\n");
         return 0;
     }
-    if (statusMutex == NULL || data_log_step_ring() == NULL) {
+    if (statusMutex == NULL || data_log_ring(DATA_LOG_RING_STEP) == NULL) {
         shell_printf("datalog: not running\r\n");
         return 0;
     }
@@ -509,16 +534,27 @@ int data_log_cmd(int argc, char **argv)
     s = shared;
     (void)osMutexRelease(statusMutex);
 
-    const record_ring_t *step = data_log_step_ring();
-    const record_ring_t *event = data_log_event_ring();
+    static const char *const ringNames[DATA_LOG_RING_COUNT] = {
+        [DATA_LOG_RING_STEP] = "step",
+        [DATA_LOG_RING_EVENT] = "event",
+        [DATA_LOG_RING_IMU] = "imu",
+        [DATA_LOG_RING_DAQ_RX] = "daq rx",
+        [DATA_LOG_RING_DAQ_TX] = "daq tx",
+    };
 
     shell_printf("datalog: card %s\r\n", state_name(s.state));
     shell_printf("datalog: file %s\r\n", s.file[0] != '\0' ? s.file : "(none)");
-    shell_printf("datalog: records written %lu, dropped %lu (step %lu, event %lu), "
-                 "not written %lu\r\n",
+    shell_printf("datalog: records written %lu, dropped %lu, not written %lu\r\n",
                  (unsigned long)s.written, (unsigned long)data_log_dropped(),
-                 (unsigned long)record_ring_dropped(step),
-                 (unsigned long)record_ring_dropped(event), (unsigned long)s.not_written);
+                 (unsigned long)s.not_written);
+    for (size_t i = 0; i < DATA_LOG_RING_COUNT; i++) {
+        const record_ring_t *ring = data_log_ring((data_log_ring_id_t)i);
+        if (ring != NULL) {
+            shell_printf("datalog:   %-6s %3lu deep, dropped %lu\r\n", ringNames[i],
+                         (unsigned long)record_ring_depth(ring),
+                         (unsigned long)record_ring_dropped(ring));
+        }
+    }
     shell_printf("datalog: files opened %lu, deleted for space %lu, last FatFS error %u\r\n",
                  (unsigned long)s.files, (unsigned long)s.deleted, (unsigned)s.last_result);
     return 0;

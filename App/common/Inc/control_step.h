@@ -34,6 +34,7 @@
 #include <stdint.h>
 
 #include "control_bus.h"
+#include "data_log_record.h"
 #include "overrun_watch.h"
 #include "step_timing.h"
 
@@ -75,7 +76,16 @@ typedef struct {
        reads it back out of control_snapshot_t.image_data. NULL for none. */
     const void            *image_data;
     size_t                 image_data_size;
+    /* The image's step Record (ADR 0021): writes this step's payload into
+       out (at most cap bytes), sets *type and returns the length; called
+       once per step after the last phase. NULL, or a 0 return: the minimal
+       DATA_LOG_STEP Record (data_log_record.h). */
+    uint16_t             (*record)(const data_log_step_t *step, uint8_t *out, size_t cap,
+                                   uint8_t *type);
 } control_step_def_t;
+
+/* The longest step Record the runner takes from the image. */
+#define CONTROL_STEP_RECORD_MAX 256u
 
 /* The argument of control_step_task(). Must outlive the task. */
 typedef struct {

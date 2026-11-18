@@ -126,6 +126,54 @@ static void test_an_event_record_carries_the_32_bytes_of_the_event_log(void)
     TEST_ASSERT_EQUAL_UINT8_ARRAY(ev.data, &b[12], EVENT_DATA_SIZE);
 }
 
+static void test_an_imu_payload_is_the_accel_then_the_gyro_each_x_y_z(void)
+{
+    const data_log_imu_t s = {
+        .accel = {0x0102, -2, 0x7FFF},
+        .gyro = {-32768, 0, 0x0A0B},
+    };
+    uint8_t b[DATA_LOG_IMU_SIZE];
+    const uint8_t want[12] = {
+        0x02, 0x01, 0xFE, 0xFF, 0xFF, 0x7F, /* accel x, y, z */
+        0x00, 0x80, 0x00, 0x00, 0x0B, 0x0A, /* gyro x, y, z */
+    };
+
+    TEST_ASSERT_EQUAL_UINT32(12u, DATA_LOG_IMU_SIZE);
+    data_log_imu_encode(b, &s);
+    TEST_ASSERT_EQUAL_UINT8_ARRAY(want, b, sizeof want);
+}
+
+static void test_a_daq_frame_payload_is_its_id_with_format_bits_its_length_and_its_bytes(void)
+{
+    const can_frame_t fd = {
+        .id = 0x18FF01F4u, .len = 12u, .is_extended = true, .is_fd = true, .is_brs = true,
+        .data = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12},
+    };
+    const uint8_t wantFd[17] = {
+        0xF4, 0x01, 0xFF, 0xF8, /* ID with extended, FD and BRS on top */
+        12,
+        1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12,
+    };
+    const can_frame_t classic = {.id = 0x290u, .len = 2u, .data = {0xAA, 0xBB}};
+    const uint8_t wantClassic[7] = {0x90, 0x02, 0x00, 0x00, 2, 0xAA, 0xBB};
+    uint8_t b[DATA_LOG_DAQ_SIZE_MAX];
+
+    TEST_ASSERT_EQUAL_UINT32(69u, DATA_LOG_DAQ_SIZE_MAX);
+    TEST_ASSERT_EQUAL_UINT16(17u, data_log_daq_encode(b, &fd));
+    TEST_ASSERT_EQUAL_UINT8_ARRAY(wantFd, b, sizeof wantFd);
+    TEST_ASSERT_EQUAL_UINT16(7u, data_log_daq_encode(b, &classic));
+    TEST_ASSERT_EQUAL_UINT8_ARRAY(wantClassic, b, sizeof wantClassic);
+}
+
+static void test_a_daq_frame_longer_than_a_can_frame_is_cut_to_64_bytes(void)
+{
+    can_frame_t f = {.id = 0x123u, .len = 200u, .is_fd = true};
+    uint8_t b[DATA_LOG_DAQ_SIZE_MAX];
+
+    TEST_ASSERT_EQUAL_UINT16(DATA_LOG_DAQ_SIZE_MAX, data_log_daq_encode(b, &f));
+    TEST_ASSERT_EQUAL_UINT8(64u, b[4]);
+}
+
 /* ---- the sample file for the decoder ---------------------------------- */
 
 static FILE *out;
@@ -243,6 +291,9 @@ int main(void)
     RUN_TEST(test_a_record_that_does_not_fit_is_not_encoded);
     RUN_TEST(test_a_step_payload_holds_the_step_and_saturates_a_long_step_time);
     RUN_TEST(test_an_event_record_carries_the_32_bytes_of_the_event_log);
+    RUN_TEST(test_an_imu_payload_is_the_accel_then_the_gyro_each_x_y_z);
+    RUN_TEST(test_a_daq_frame_payload_is_its_id_with_format_bits_its_length_and_its_bytes);
+    RUN_TEST(test_a_daq_frame_longer_than_a_can_frame_is_cut_to_64_bytes);
     RUN_TEST(test_writes_a_sample_file_with_a_gap_a_bad_record_and_a_torn_tail);
     return UNITY_END();
 }

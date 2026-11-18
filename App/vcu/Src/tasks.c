@@ -26,6 +26,7 @@
 #include "vcu_adc.h"
 #include "vcu_control.h"
 #include "vcu_daq.h"
+#include "vcu_log.h"
 #include "vcu_params.h"
 #include "vcu_shell.h"
 #include "vcu_step.h"
@@ -65,19 +66,54 @@ static const events_task_args_t eventTaskArgs = {
     .after_open = vcu_step_find_pedal_check, /* ADR 0016 */
 };
 
-/* The Data log's step ring (ADR 0021): 64 Records, 640 ms of steps. */
-#define STEP_RECORDS 64u
+/* The Data log's rings (ADR 0021, issue 61). The logger empties them every
+   20 ms; the depth covers a card that stalls for a few hundred ms.
+     step    64 full step Records (vcu_log.h), 640 ms of steps.
+     imu     64 accel and gyro pairs, about 615 ms at 104 Hz.
+     daq rx  32 DAQ bus frames heard, daq tx 16 sent: the DAQ bus carries
+             nothing safety-related, so these drop first under a burst.
 
-static uint32_t stepRecords[RECORD_RING_STORAGE_SIZE(STEP_RECORDS, DATA_LOG_STEP_SIZE) /
+   If the bench measurements of ADR 0021 fail (idle below 50% with logging
+   on, or a worse step time), the retreat order is:
+     1. drop the DAQ bus recording: leave the daq rx and daq tx rings out
+        of dataLogDef below, and can_if pushes nothing;
+     2. lower the IMU rate: the batch rate in imu.c (FIFO_CTRL3, and
+        VCU_IMU_PERIOD_US in vcu_imu_log.h with it);
+   the step Records go last. */
+#define STEP_RECORDS   64u
+#define IMU_RECORDS    64u
+#define DAQ_RX_RECORDS 32u
+#define DAQ_TX_RECORDS 16u
+
+static uint32_t stepRecords[RECORD_RING_STORAGE_SIZE(STEP_RECORDS, VCU_LOG_STEP_SIZE) /
                             sizeof(uint32_t)];
+static uint32_t imuRecords[RECORD_RING_STORAGE_SIZE(IMU_RECORDS, DATA_LOG_IMU_SIZE) /
+                           sizeof(uint32_t)];
+static uint32_t daqRxRecords[RECORD_RING_STORAGE_SIZE(DAQ_RX_RECORDS, DATA_LOG_DAQ_SIZE_MAX) /
+                             sizeof(uint32_t)];
+static uint32_t daqTxRecords[RECORD_RING_STORAGE_SIZE(DAQ_TX_RECORDS, DATA_LOG_DAQ_SIZE_MAX) /
+                             sizeof(uint32_t)];
+
+_Static_assert(VCU_LOG_STEP_SIZE <= DATA_LOG_PAYLOAD_MAX && VCU_LOG_MAP_SIZE <= DATA_LOG_PAYLOAD_MAX,
+               "the logger takes the VCU's step Record and map");
+
+/* The step Record's mailboxes by frame ID, first in every file: filled in
+   tasks_init(). */
+static uint8_t mailboxMap[VCU_LOG_MAP_SIZE];
 
 /* Read by the Data log for as long as it runs. */
 static const data_log_def_t dataLogDef = {
     .image = PARAMS_IMAGE_VCU,
     .startup_state = VCU_STATE_STARTUP,
-    .step_storage = stepRecords,
-    .step_storage_size = sizeof stepRecords,
-    .step_payload_max = DATA_LOG_STEP_SIZE,
+    .rings = {
+        [DATA_LOG_RING_STEP] = {stepRecords, sizeof stepRecords, VCU_LOG_STEP_SIZE},
+        [DATA_LOG_RING_IMU] = {imuRecords, sizeof imuRecords, DATA_LOG_IMU_SIZE},
+        [DATA_LOG_RING_DAQ_RX] = {daqRxRecords, sizeof daqRxRecords, DATA_LOG_DAQ_SIZE_MAX},
+        [DATA_LOG_RING_DAQ_TX] = {daqTxRecords, sizeof daqTxRecords, DATA_LOG_DAQ_SIZE_MAX},
+    },
+    .preamble_type = DATA_LOG_MAILBOXES,
+    .preamble = mailboxMap,
+    .preamble_len = sizeof mailboxMap,
 };
 
 /* The VCU's own Housekeeping work: VBAT, from the ADC1 scan. */
@@ -113,7 +149,9 @@ void tasks_init(void)
     ok = shell_init() && ok;
     vcu_shell_register();
     ok = spi3_bus_init() && ok;
-    /* The rings before the Control step and the Event writer push. */
+    /* The rings before the Control step, the Event writer, the IMU task and
+       the DAQ bus tasks push. */
+    vcu_log_map_encode(mailboxMap);
     ok = data_log_init(&dataLogDef) && ok;
     ok = can_if_init(&daqPublisher, parameters_value(VCU_PARAM_CAN2_TERM) != 0) && ok;
     /* The analog inputs run from here on, the first scan discarded, so the
