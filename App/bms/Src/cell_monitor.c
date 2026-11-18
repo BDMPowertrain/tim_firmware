@@ -253,10 +253,12 @@ void cell_monitor_run(const bq_plan_t *plan, cell_monitor_result_t *out)
         } else {
             ok = read_command(cmd, cmd->append ? out->len : 0u, &out->len);
         }
-        if (ok && cmd->delay_ms != 0u) {
+        if (ok && cmd->delay_us >= BQ_DELAY_SLEEP_US) {
             /* osDelay(n) may end up to a tick early: one more makes it at
-               least delay_ms (bq_plan_worst_us() counts it). */
-            (void)osDelay((uint32_t)cmd->delay_ms + 1u);
+               least delay_us (bq_delay_worst_us() counts it). */
+            (void)osDelay(((uint32_t)cmd->delay_us + 999u) / 1000u + 1u);
+        } else if (ok && cmd->delay_us != 0u) {
+            delay_us(cmd->delay_us); /* shorter than a tick: waited out */
         }
     }
 

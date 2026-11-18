@@ -49,20 +49,30 @@
  *   - bridge: what the stack reported (FCOMM_DET), and its own register,
  *     system and power faults. Masked: the link's own faults, among them
  *     the Comm Clear the driver sends after a read that timed out.
- * The chips latch each fault until it is cleared; the firmware clears them
- * once per wake, after the comparators have started, so a fault the
- * comparators find later holds NFAULT low until the chain is woken again.
+ * The chips latch each fault until it is cleared. The firmware clears them
+ * once per wake, after the comparators have started, and again at the end
+ * of every open-wire check, once a second. A chip does not clear a fault
+ * whose cause remains (SLUSDS1A 7.3.3.1.2), so NFAULT stays low while a
+ * cause does and at most a second beyond it: nothing is latched in the
+ * firmware (spec #36); the shutdown board's latch keeps the Tractive
+ * System off (ADR 0007).
  *
  * The open-wire check (issue 64; EV.8.3.4 b; BQ79616-Q1 data sheet
  * SLUSE81F 7.3.6.4.6.4) is a plan of its own, asked for by the step after
- * its Sweep's work (bq_chain_plan_open_wire()): every VC pin's current
- * sink on, BQ_OPEN_WIRE_SETTLE_MS for an open wire to drain its filter
- * capacitors, then every cell compared with 2.3 V, the sinks off, and
- * each device asked whether it finished (ADC_STAT2[DRDY_VCOW]) and which
- * cells were under (FAULT_COMP_VCOW1..2). 2.3 V is under the UV
- * comparator's 2.4 V, so a cell read below it by a whole wire is a fault
- * already. A check that stopped part way may have left the sinks on, so the
- * next Sweep turns them off first.
+ * its Sweep's work (bq_chain_plan_open_wire()): the OV and UV comparators
+ * stopped, every VC pin's current sink on, BQ_OPEN_WIRE_SETTLE_MS for an
+ * open wire to drain its filter capacitors, then every cell compared with
+ * 2.3 V, the sinks off and the comparators on again, each device asked
+ * whether it finished (ADC_STAT2[DRDY_VCOW]) and which cells were under
+ * (FAULT_COMP_VCOW1..2), and every latched fault cleared. The sinks pull an
+ * open wire's cell under the UV comparator's 2.4 V and its neighbour up,
+ * which with the comparators running would take BMS_OK low through NFAULT
+ * on one check; stopped, only the firmware's two checks in a row decide.
+ * They are off for about 6 ms a second; the firmware's own judgement runs
+ * on every Sweep throughout. 2.3 V is under 2.4 V, so a whole wire to a
+ * cell read below it is a fault already. A check that stopped part way may
+ * have left the sinks on and the comparators stopped, so the next Sweep
+ * undoes both first.
  *
  * Any failure during the wake ends the attempt; the next wake ping goes a
  * second after the last one began, for as long as it takes. A running chain
@@ -107,9 +117,13 @@ typedef struct {
     /* A read's response goes after the one before it in the plan, not over
        it. */
     bool     append;
-    /* The link waits at least this long after the command. */
-    uint8_t  delay_ms;
+    /* The link waits at least this long after the command: asleep for a
+       wait of BQ_DELAY_SLEEP_US or more, on the cycle counter for less. */
+    uint16_t delay_us;
 } bq_command_t;
+
+/* A delay this long or longer sleeps whole RTOS ticks. */
+#define BQ_DELAY_SLEEP_US 1000u
 
 /* The most response bytes one plan brings back, appended reads together:
    the Sweep's. */
@@ -133,7 +147,7 @@ typedef struct {
     uint32_t wait_until_ms; /* end of BQ_CHAIN_STACK_WAIT */
     uint32_t attempts;      /* wake pings sent since power-on */
     uint32_t silent_sweeps; /* Sweeps in a row that read no device */
-    bool     sinks_maybe_on; /* an open-wire check stopped part way */
+    bool     check_unfinished; /* an open-wire check stopped part way */
 } bq_chain_t;
 
 void bq_chain_init(bq_chain_t *c);
@@ -193,6 +207,10 @@ uint32_t bq_read_timeout_us(size_t response_len);
    write's SPI_RDY wait (250 us, SLUSDS1A Fig 7-17) and clocking, each
    delay and a tick more, and the ping. */
 uint32_t bq_plan_worst_us(const bq_plan_t *plan);
+
+/* The longest a command's delay can take: exact under BQ_DELAY_SLEEP_US;
+   above it, whole ticks rounded up and one more. */
+uint32_t bq_delay_worst_us(uint16_t delay_us);
 
 /* The most response bytes the plan's reads leave in the buffer at once:
    each read's, after those it is appended to. */

@@ -197,7 +197,7 @@ static void phase_open_wire(control_step_ctx_t *ctx)
     if (!out.open_wire_due || !bq_chain_plan_open_wire(&chain, &plan)) {
         return;
     }
-    ctx->open_wire_ran = true; /* for the overrun Event */
+    ctx->extra_work_ran = true; /* the overrun Event says the check ran */
     cell_monitor_run(&plan, &link);
     bq_chain_open_wire_done(&chain, link.ok, link.resp, link.len, &openWire);
     openWireRan = true;

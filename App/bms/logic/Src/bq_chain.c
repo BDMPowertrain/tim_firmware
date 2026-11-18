@@ -70,14 +70,15 @@
 #define FAULT_RST_BRIDGE_ALL 0xFFu
 
 /* The open-wire check (issue 64), SLUSE81F 7.5.4.11. */
-#define FAULT_RST1_COMP     0x04u /* RST_COMP: the last check's result away */
+#define OVUV_STOP           0x04u /* OVUV_CTRL: GO with OVUV_MODE 00, do not run */
 #define OW_THR_2300_MV      0x06u /* 500 mV at 0, 300 mV steps */
 #define CTRL3_SINKS_OFF     0x00u
 #define CTRL3_VC_SINKS_ON   0x10u /* OW_SNK 01 */
 #define CTRL3_VC_COMPARE    0x15u /* OW_SNK 01, COMP_ADC_SEL 010, COMP_ADC_GO */
 #define ADC_STAT2_DRDY_VCOW 0x08u
-/* The comparison takes a Main ADC round robin, 192 us; a tick is ample. */
-#define OW_COMPARE_MS       1u
+/* The comparison takes a Main ADC round robin, 192 us (SLUSE81F
+   tMAIN_ADC_CYCLE); three are waited out. */
+#define OPEN_WIRE_COMPARE_US 600u
 
 #define DLL_SYNC_REGS 8u
 #define BRIDGE_ADDR   0u
@@ -211,10 +212,17 @@ static void plan_clear(bq_plan_t *plan)
     (void)add_byte(plan, BQ_SINGLE_WRITE, BRIDGE_ADDR, REG_BRIDGE_FAULT_RST, FAULT_RST_BRIDGE_ALL);
 }
 
+static void ovuv_restart(bq_plan_t *plan)
+{
+    (void)add_byte(plan, BQ_STACK_WRITE, 0u, REG_OVUV_CTRL, OVUV_OTUT_GO_RR);
+}
+
 static void plan_sweep(const bq_chain_t *c, bq_plan_t *plan)
 {
-    if (c->sinks_maybe_on) {
+    /* What an open-wire check that stopped part way may have left. */
+    if (c->check_unfinished) {
         sinks_off(plan);
+        ovuv_restart(plan);
     }
     (void)add_stack_read(plan, BQ_SWEEP_REG, BQ_SWEEP_COUNT);
     bq_command_t *bridge = add_bridge_read(plan, BQ_SWEEP_BRIDGE_REG, 1u);
@@ -321,7 +329,7 @@ bool bq_chain_done(bq_chain_t *c, uint32_t now_ms, bool ok, const uint8_t *resp,
         next = (ok && addresses_ok(resp, len)) ? BQ_CHAIN_CONFIGURE : BQ_CHAIN_RETRY_WAIT;
         break;
     case BQ_CHAIN_CONFIGURE:
-        c->sinks_maybe_on = false;
+        c->check_unfinished = false;
         next = ok ? BQ_CHAIN_PROTECT : BQ_CHAIN_RETRY_WAIT;
         break;
     case BQ_CHAIN_PROTECT:
@@ -333,7 +341,7 @@ bool bq_chain_done(bq_chain_t *c, uint32_t now_ms, bool ok, const uint8_t *resp,
         break;
     case BQ_CHAIN_RUNNING:
         if (ok) {
-            c->sinks_maybe_on = false; /* the sink-off write went, if planned */
+            c->check_unfinished = false; /* the writes that undo it went, if planned */
         }
         bq_sweep_decode(resp, len, sweep);
         if (sweep->devices_read != 0u) {
@@ -358,16 +366,26 @@ bool bq_chain_plan_open_wire(bq_chain_t *c, bq_plan_t *plan)
         return false;
     }
 
-    (void)add_byte(plan, BQ_STACK_WRITE, 0u, REG_FAULT_RST1, FAULT_RST1_COMP);
+    /* The sinks pull an open wire's cell under the UV threshold and its
+       neighbour up: OV and UV stop while they are on, or NFAULT would take
+       BMS_OK low on one check. OT keeps running; the sinks are on VC pins
+       only. */
+    (void)add_byte(plan, BQ_STACK_WRITE, 0u, REG_OVUV_CTRL, OVUV_STOP);
     bq_command_t *on = add_byte(plan, BQ_STACK_WRITE, 0u, REG_DIAG_COMP_CTRL3, CTRL3_VC_SINKS_ON);
     bq_command_t *go = add_byte(plan, BQ_STACK_WRITE, 0u, REG_DIAG_COMP_CTRL3, CTRL3_VC_COMPARE);
     sinks_off(plan);
+    ovuv_restart(plan);
     (void)add_stack_read(plan, REG_ADC_STAT2, 1u);
     bq_command_t *vcow = add_stack_read(plan, REG_FAULT_COMP_VCOW1, 2u);
+    /* Then every latched fault, this check's result included, as the wake
+       does (plan_clear()): a fault whose cause remains is not cleared
+       (SLUSDS1A 7.3.3.1.2), so the chips latch nothing for longer than a
+       second beyond its cause. */
+    plan_clear(plan);
 
     if (on != NULL && go != NULL && vcow != NULL) {
-        on->delay_ms = BQ_OPEN_WIRE_SETTLE_MS;
-        go->delay_ms = OW_COMPARE_MS;
+        on->delay_us = (uint16_t)(BQ_OPEN_WIRE_SETTLE_MS * 1000u);
+        go->delay_us = OPEN_WIRE_COMPARE_US;
         vcow->append = true;
     }
     return true;
@@ -404,7 +422,7 @@ void bq_chain_open_wire_done(bq_chain_t *c, bool ok, const uint8_t *resp, size_t
 
     memset(out, 0, sizeof *out);
     if (!ok) {
-        c->sinks_maybe_on = true;
+        c->check_unfinished = true;
     }
 
     /* ADC_STAT2's answers, then FAULT_COMP_VCOW1..2's, each top first.
@@ -471,11 +489,19 @@ uint32_t bq_plan_worst_us(const bq_plan_t *plan)
         us += (cmd->response_len == 0u)
                   ? WRITE_WORST_US
                   : READ_COMMAND_US + bq_read_timeout_us(cmd->response_len);
-        if (cmd->delay_ms != 0u) {
-            us += ((uint32_t)cmd->delay_ms + 1u) * 1000u;
-        }
+        us += bq_delay_worst_us(cmd->delay_us);
     }
     return us;
+}
+
+uint32_t bq_delay_worst_us(uint16_t delay_us)
+{
+    if (delay_us < BQ_DELAY_SLEEP_US) {
+        return delay_us; /* waited out exactly */
+    }
+    /* Whole ticks asleep, rounded up, and one more for the tick the wait
+       starts in. */
+    return ((delay_us + 999u) / 1000u + 1u) * 1000u;
 }
 
 size_t bq_plan_response_len(const bq_plan_t *plan)

@@ -824,13 +824,49 @@ static void test_a_bms_ok_read_back_wrong_for_5_sweeps_is_the_internal_fault(voi
 
 static void test_a_read_back_high_while_commanded_low_is_the_internal_fault(void)
 {
+    found.verdict = BQ_OPEN_WIRE_UNKNOWN; /* STARTUP: BMS_OK commanded low */
     holdReadBack = true;
-    in.bms_ok_fb = true; /* in STARTUP, BMS_OK commanded low */
-    in.swept = false;
+    in.bms_ok_fb = true;
     steps(BMS_FEEDBACK_SWEEPS - 1u);
     TEST_ASSERT_EQUAL_HEX16(0u, out.seen);
     step();
     TEST_ASSERT_TRUE(active(BMS_FAULT_INTERNAL));
+}
+
+/* "a mismatch for 5 sweeps": a step that took no Sweep neither counts one
+   nor ends the run. */
+static void test_the_read_back_check_counts_sweeps_not_steps(void)
+{
+    power_up();
+    holdReadBack = true;
+    in.bms_ok_fb = false;
+    steps(BMS_FEEDBACK_SWEEPS - 1u);
+    in.swept = false;
+    steps(3u);
+    TEST_ASSERT_FALSE(active(BMS_FAULT_INTERNAL));
+    in.swept = true;
+    step();
+    TEST_ASSERT_TRUE(active(BMS_FAULT_INTERNAL));
+}
+
+/* Firmware does not latch (spec #36): once the chips let NFAULT go (each
+   open-wire check clears what they latched, bq_chain.h), a second clean
+   ends the cell monitor fault. */
+static void test_a_comparator_trip_ends_a_second_after_nfault_rises(void)
+{
+    power_up();
+    in.nfault_ok = false;
+    sweep.bridge_fault = 0x04u;
+    steps(30u);
+    TEST_ASSERT_TRUE(active(BMS_FAULT_CELL_MONITOR));
+
+    in.nfault_ok = true;
+    sweep.bridge_fault = 0u;
+    steps(BMS_RECOVER_SWEEPS - 1u);
+    TEST_ASSERT_TRUE(active(BMS_FAULT_CELL_MONITOR));
+    step();
+    TEST_ASSERT_FALSE(active(BMS_FAULT_CELL_MONITOR));
+    TEST_ASSERT_EQUAL_UINT8(BMS_STATE_DRIVE, out.state);
 }
 
 /* A dead bridge reads "no fault" on NFAULT, through its pull-up (ADR
@@ -945,6 +981,8 @@ int main(void)
     RUN_TEST(test_nfault_low_while_the_chain_wakes_is_no_fault);
     RUN_TEST(test_a_bms_ok_read_back_wrong_for_5_sweeps_is_the_internal_fault);
     RUN_TEST(test_a_read_back_high_while_commanded_low_is_the_internal_fault);
+    RUN_TEST(test_the_read_back_check_counts_sweeps_not_steps);
+    RUN_TEST(test_a_comparator_trip_ends_a_second_after_nfault_rises);
     RUN_TEST(test_nfault_disagreeing_with_the_bridge_register_for_5_sweeps_is_internal);
     RUN_TEST(test_nfault_low_with_a_clear_register_is_internal_too);
     RUN_TEST(test_the_nfault_cross_check_waits_for_the_register);

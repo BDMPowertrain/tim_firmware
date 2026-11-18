@@ -214,12 +214,16 @@ static void judge_internal(bms_control_t *bc, const bms_control_in_t *in, judged
     const bool registerRead = in->swept && in->sweep->bridge_read;
     const uint8_t summary = registerRead ? in->sweep->bridge_fault : 0u;
 
-    /* BMS_OK is the AND of MCU_BMS_OK and NFAULT (ADR 0008). */
+    /* BMS_OK is the AND of MCU_BMS_OK and NFAULT (ADR 0008). Counted in
+       Sweeps (spec #36: "a mismatch for 5 sweeps"): a step that took none
+       neither counts nor ends a run. */
     const bool expected = bc->commanded && in->nfault_ok;
-    if (in->bms_ok_fb != expected) {
-        count_up(&bc->feedback_bad);
-    } else {
-        bc->feedback_bad = 0u;
+    if (in->swept) {
+        if (in->bms_ok_fb != expected) {
+            count_up(&bc->feedback_bad);
+        } else {
+            bc->feedback_bad = 0u;
+        }
     }
 
     if (registerRead) {

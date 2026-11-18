@@ -540,25 +540,56 @@ static void test_the_open_wire_check_is_planned_only_on_a_running_chain(void)
 
 static void test_the_open_wire_check_follows_ti(void)
 {
-    const uint8_t rstComp[] = {0x04};
     const uint8_t sinksOn[] = {0x10};
     const uint8_t compare[] = {0x15}; /* sinks on, VC OW check, COMP_ADC_GO */
     const uint8_t sinksOff[] = {0x00};
 
     plan_check();
 
-    TEST_ASSERT_EQUAL_UINT(6u, plan.count);
-    assert_write(0u, BQ_STACK_WRITE, 0u, 0x0331u, rstComp, 1u); /* the last result away */
     assert_write(1u, BQ_STACK_WRITE, 0u, 0x033Cu, sinksOn, 1u);
-    TEST_ASSERT_EQUAL_UINT8(BQ_OPEN_WIRE_SETTLE_MS, plan.cmd[1].delay_ms);
+    TEST_ASSERT_EQUAL_UINT16(BQ_OPEN_WIRE_SETTLE_MS * 1000u, plan.cmd[1].delay_us);
     assert_write(2u, BQ_STACK_WRITE, 0u, 0x033Cu, compare, 1u);
-    TEST_ASSERT_EQUAL_UINT8(1u, plan.cmd[2].delay_ms); /* a 192 us round robin, and more */
+    /* Three of the Main ADC's 192 us round robins. */
+    TEST_ASSERT_EQUAL_UINT16(600u, plan.cmd[2].delay_us);
     assert_write(3u, BQ_STACK_WRITE, 0u, 0x033Cu, sinksOff, 1u);
-    TEST_ASSERT_EQUAL_UINT8(0u, plan.cmd[3].delay_ms);
-    assert_read(4u, 0x0528u, 1u); /* ADC_STAT2 */
-    TEST_ASSERT_FALSE(plan.cmd[4].append);
-    assert_read(5u, 0x0548u, 2u); /* FAULT_COMP_VCOW1..2 */
-    TEST_ASSERT_TRUE(plan.cmd[5].append);
+    TEST_ASSERT_EQUAL_UINT16(0u, plan.cmd[3].delay_us);
+    assert_read(5u, 0x0528u, 1u); /* ADC_STAT2 */
+    TEST_ASSERT_FALSE(plan.cmd[5].append);
+    assert_read(6u, 0x0548u, 2u); /* FAULT_COMP_VCOW1..2 */
+    TEST_ASSERT_TRUE(plan.cmd[6].append);
+}
+
+/* The sinks pull an open wire's cell under the UV comparator's 2.4 V and
+   its neighbour up: the OV and UV comparators stop while they are on, or
+   one check would take BMS_OK low through NFAULT and the shutdown board
+   would latch, before two checks in a row had decided anything. */
+static void test_the_ov_and_uv_comparators_stop_while_the_sinks_are_on(void)
+{
+    const uint8_t stop[] = {0x04};    /* OVUV_CTRL: GO with "do not run" */
+    const uint8_t restart[] = {0x05}; /* OVUV_CTRL: GO, round robin */
+    const uint8_t sinksOff[] = {0x00};
+
+    plan_check();
+
+    assert_write(0u, BQ_STACK_WRITE, 0u, 0x032Cu, stop, 1u);
+    assert_write(3u, BQ_STACK_WRITE, 0u, 0x033Cu, sinksOff, 1u);
+    assert_write(4u, BQ_STACK_WRITE, 0u, 0x032Cu, restart, 1u);
+}
+
+/* Firmware does not latch (spec #36): each check ends by clearing what
+   the chips latched, the check's own result included. A fault whose cause
+   is still there is not cleared by the chip (SLUSDS1A 7.3.3.1.2), so NFAULT
+   stays low exactly as long as a cause does, and a second at most beyond. */
+static void test_each_check_ends_by_clearing_every_latched_fault(void)
+{
+    const uint8_t stackReset[] = {0xFF, 0x7F};
+    const uint8_t bridgeReset[] = {0xFF};
+
+    plan_check();
+
+    TEST_ASSERT_EQUAL_UINT(9u, plan.count);
+    assert_write(7u, BQ_STACK_WRITE, 0u, 0x0331u, stackReset, 2u);
+    assert_write(8u, BQ_SINGLE_WRITE, 0u, 0x2030u, bridgeReset, 1u);
 }
 
 /* An open wire drains the 0.47 uF filter capacitors on both sides of its
@@ -635,10 +666,12 @@ static void test_an_open_wire_seen_beside_a_silent_device_still_fails(void)
 }
 
 /* A check that stopped part way may have left the sinks on, which pull the
-   bottom and top cells' readings: the next Sweep turns them off first. */
+   bottom and top cells' readings, and the OV and UV comparators stopped:
+   the next Sweep turns the sinks off and the comparators on first. */
 static void test_after_a_check_that_stopped_the_next_sweep_turns_the_sinks_off_first(void)
 {
     const uint8_t sinksOff[] = {0x00};
+    const uint8_t restart[] = {0x05};
 
     bq_chain_init(&chain);
     uint32_t now = wake_from(0u) + STEP_MS;
@@ -647,9 +680,10 @@ static void test_after_a_check_that_stopped_the_next_sweep_turns_the_sinks_off_f
     TEST_ASSERT_EQUAL(BQ_OPEN_WIRE_UNKNOWN, check.verdict);
 
     bq_chain_plan(&chain, now, &plan);
-    TEST_ASSERT_EQUAL_UINT(3u, plan.count);
+    TEST_ASSERT_EQUAL_UINT(4u, plan.count);
     assert_write(0u, BQ_STACK_WRITE, 0u, 0x033Cu, sinksOff, 1u);
-    assert_read(1u, BQ_SWEEP_REG, BQ_SWEEP_COUNT);
+    assert_write(1u, BQ_STACK_WRITE, 0u, 0x032Cu, restart, 1u);
+    assert_read(2u, BQ_SWEEP_REG, BQ_SWEEP_COUNT);
     TEST_ASSERT_TRUE(bq_chain_done(&chain, now, true, resp, sweep_response(), &sweep));
     TEST_ASSERT_EQUAL_HEX16(0xFFFFu, sweep.devices_read);
 
@@ -675,13 +709,14 @@ static void test_a_sweep_and_the_open_wire_check_fit_in_one_step(void)
     TEST_ASSERT_TRUE(bq_plan_response_len(&plan) <= BQ_RESPONSE_MAX);
 }
 
-/* A delay of n ms is n whole ticks plus the one the wait starts in. */
+/* A delay of a millisecond or more sleeps whole ticks and one more for the
+   tick it starts in; a shorter one is waited out exactly. */
 static void test_a_delay_counts_in_the_worst_case(void)
 {
     plan_check();
-    /* 4 writes at 300 us; (5 + 1) and (1 + 1) ms of waits; ADC_STAT2's
+    /* 7 writes at 300 us; (5 + 1) ms asleep and 600 us waited; ADC_STAT2's
        read 50 + 1310 us and the VCOW read 50 + 1470 us. */
-    TEST_ASSERT_EQUAL_UINT32(1200u + 8000u + 1360u + 1520u, bq_plan_worst_us(&plan));
+    TEST_ASSERT_EQUAL_UINT32(2100u + 6000u + 600u + 1360u + 1520u, bq_plan_worst_us(&plan));
 }
 
 int main(void)
@@ -706,6 +741,8 @@ int main(void)
     RUN_TEST(test_no_step_of_the_wake_or_the_sweep_can_outlast_its_budget);
     RUN_TEST(test_the_open_wire_check_is_planned_only_on_a_running_chain);
     RUN_TEST(test_the_open_wire_check_follows_ti);
+    RUN_TEST(test_the_ov_and_uv_comparators_stop_while_the_sinks_are_on);
+    RUN_TEST(test_each_check_ends_by_clearing_every_latched_fault);
     RUN_TEST(test_the_sinks_are_on_long_enough_to_drain_an_open_wire);
     RUN_TEST(test_every_cell_above_the_threshold_on_every_device_is_a_pass);
     RUN_TEST(test_a_cell_under_the_threshold_fails_and_is_named);

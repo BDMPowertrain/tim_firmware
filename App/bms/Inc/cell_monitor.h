@@ -23,7 +23,8 @@
      buffers already read and sends a Comm Clear; it never reads while
      SPI_RDY is low.
    - A command with a delay (the open-wire check's, issue 64) is followed
-     by at least that many milliseconds asleep.
+     by at least that long: asleep for a millisecond or more, a wait on
+     the cycle counter for less.
 
    The calling task sleeps on thread flags during every transfer and every
    wait, set by the DMA completion and the SPI_RDY interrupts. Called only
