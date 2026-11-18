@@ -80,6 +80,7 @@ add_host_test(test_vcu_power_limiter_plant logic_vcu vcu/test_vcu_power_limiter_
 add_host_test(test_vcu_log logic_vcu vcu/test_vcu_log.c)
 add_host_test(test_vcu_imu_log logic_vcu vcu/test_vcu_imu_log.c)
 add_host_test(test_bms_tx logic_bms bms/test_bms_tx.c)
+add_host_test(test_bms_derate logic_bms bms/test_bms_derate.c)
 add_host_test(test_bms_params logic_bms bms/test_bms_params.c)
 add_host_test(test_bq_frame logic_bms bms/test_bq_frame.c)
 add_host_test(test_cell_temp logic_bms bms/test_cell_temp.c)

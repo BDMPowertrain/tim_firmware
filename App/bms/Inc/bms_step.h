@@ -5,14 +5,16 @@
    cell monitors (sleeping during the link exchange), snapshot the
    charger's mailbox, run the logic, write BMS_OK, send, publish. Before the
    chain is awake the Sweep step wakes it instead (bq_chain.h). The BMS
-   faults, the states and BMS_OK are judged by bms_control.h; BMS_Status
-   goes every step. When the logic asks, once a second, the open-wire check
-   runs last in the step, in a phase of its own (bq_chain.h). */
+   faults, the states, BMS_OK and the Discharge limit are judged by
+   bms_control.h; the frames go as bms_tx.h's send table says. When the
+   logic asks, once a second, the open-wire check runs last in the step,
+   in a phase of its own (bq_chain.h). */
 
 #include <stdbool.h>
 #include <stdint.h>
 
 #include "bms_adc.h"
+#include "bms_control.h"
 #include "bq_chain.h"
 #include "bq_sweep.h"
 #include "control_step.h"
@@ -35,6 +37,9 @@ typedef struct {
     uint16_t         faults_active;  /* bit (1 << bms_fault_t), bms_control.h */
     uint16_t         faults_seen;    /* since power-on */
     bool             under_low_voltage_limit;
+    uint16_t         discharge_limit_da; /* the Discharge limit sent, 0.1 A */
+    bms_current_t    pack_current;       /* as the step took it */
+    bms_pack_summary_t summary;          /* the last Sweep in brief */
     /* The second layers (issue 64), as this step read them. */
     bool             nfault_ok;      /* FB.NFAULT high */
     bool             bms_ok_fb;      /* FB.BMS_OK high */

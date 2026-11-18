@@ -48,6 +48,7 @@ void bms_control_init(bms_control_t *bc, const bms_control_config_t *config)
     memset(bc, 0, sizeof *bc);
     bc->config = *config;
     bc->state = BMS_STATE_STARTUP;
+    bms_derate_init(&bc->derate, &config->derate);
 }
 
 static uint16_t bit(bms_fault_t f)
@@ -85,8 +86,7 @@ static void unknown_unless_bad(judged_t *j)
 
 /* Judges this step's Sweep for every fault. A fault this function does not
    judge (#64, #65, #67, overcurrent) is clean. */
-static void judge(const bms_control_in_t *in, bool started_up, judged_t j[BMS_FAULT_COUNT],
-                  bool *low_voltage)
+static void judge(const bms_control_in_t *in, bool started_up, judged_t j[BMS_FAULT_COUNT])
 {
     memset(j, 0, sizeof(judged_t) * BMS_FAULT_COUNT);
 
@@ -105,7 +105,6 @@ static void judge(const bms_control_in_t *in, bool started_up, judged_t j[BMS_FA
 
     const bq_sweep_t *s = in->sweep;
     judged_t *meas = &j[BMS_FAULT_MEASUREMENT];
-    bool lv = false;
     bool cellMissing = false;
     bool tempMissing = false;
 
@@ -124,7 +123,6 @@ static void judge(const bms_control_in_t *in, bool started_up, judged_t j[BMS_FA
             judged_t *uv = &j[BMS_FAULT_UNDER_VOLTAGE];
             consider(ov, EVENT_BMS_CELL, i, v, v >= BMS_OV_MV, v > ov->mv);
             consider(uv, EVENT_BMS_CELL, i, v, v <= BMS_UV_MV, v < uv->mv);
-            lv = lv || v < BMS_LOW_VOLTAGE_MV;
         }
 
         if (!read || t < CELL_TEMP_MV_MIN || t > CELL_TEMP_MV_MAX) {
@@ -155,7 +153,6 @@ static void judge(const bms_control_in_t *in, bool started_up, judged_t j[BMS_FA
     if (!in->charge_mode) {
         j[BMS_FAULT_UNDER_TEMP].verdict = VERDICT_CLEAN;
     }
-    *low_voltage = lv;
 }
 
 /* The open-wire check handed in from the last step (issue 64). Bad only on
@@ -312,6 +309,16 @@ static uint8_t has(uint16_t bits, bms_fault_t f)
     return (bits & bit(f)) != 0u ? 1u : 0u;
 }
 
+/* The next frame of this step's. Never more than BMS_TX_FRAMES_MAX: the
+   send table puts three on a step (bms_tx.h). */
+static bms_tx_frame_t *next_frame(bms_control_out_t *out)
+{
+    return &out->frames[out->frame_count++];
+}
+
+_Static_assert(BMS_TX_FRAMES_MAX >= 3u,
+               "BMS_Status, BMS_Power and one slower frame fit on a step");
+
 static void build_status(bms_control_t *bc, const bms_control_in_t *in, bms_control_out_t *out)
 {
     const uint16_t a = out->active;
@@ -349,8 +356,7 @@ static void build_status(bms_control_t *bc, const bms_control_in_t *in, bms_cont
         .receive_overflow = in->rx_overflowed ? 1u : 0u,
     };
 
-    bms_tx_build_status(&st, &bc->status_tx, out->status);
-    out->send_status = true;
+    bms_tx_build_status(&st, &bc->e2e, next_frame(out));
 }
 
 void bms_control_step(bms_control_t *bc, const bms_control_in_t *in, bms_control_out_t *out)
@@ -367,9 +373,7 @@ void bms_control_step(bms_control_t *bc, const bms_control_in_t *in, bms_control
     bc->started = true;
 
     const bool startedUp = bc->state != BMS_STATE_STARTUP;
-    bool lv = bc->under_low_voltage_limit; /* held over a step with no Sweep */
-    judge(in, startedUp, j, &lv);
-    bc->under_low_voltage_limit = lv;
+    judge(in, startedUp, j);
     judge_open_wire(bc, in, &j[BMS_FAULT_OPEN_WIRE]);
     judge_cell_monitor(in, startedUp, &j[BMS_FAULT_CELL_MONITOR]);
     judge_internal(bc, in, &j[BMS_FAULT_INTERNAL]);
@@ -452,8 +456,20 @@ void bms_control_step(bms_control_t *bc, const bms_control_in_t *in, bms_control
     out->bms_ok = bc->state == BMS_STATE_DRIVE || bc->state == BMS_STATE_CHARGE;
     out->active = bc->active;
     out->seen = bc->seen;
-    out->under_low_voltage_limit = bc->under_low_voltage_limit;
     bc->commanded = out->bms_ok;
+
+    /* Derating (bms_derate.h), on this Sweep's lowest cell and hottest
+       sensor; 0 A while BMS_OK is low. A step with no Sweep, or one that
+       read no cell or no sensor, holds it. */
+    if (in->swept) {
+        bms_tx_summarise(in->sweep, &bc->summary);
+    }
+    const bool swept = in->swept && bc->summary.cells != 0u && bc->summary.temps != 0u;
+    out->discharge_limit_da = bms_derate_step(&bc->derate, in->now_ms, swept,
+                                              bc->summary.min_mv, bc->summary.max_dc,
+                                              in->pack_current, out->bms_ok);
+    out->under_low_voltage_limit = bms_derate_under_low_voltage_limit(&bc->derate);
+    out->summary = bc->summary;
 
     /* The open-wire check: after a Sweep, never in place of one; the first
        at once, then once a second (spec #36). */
@@ -466,9 +482,24 @@ void bms_control_step(bms_control_t *bc, const bms_control_in_t *in, bms_control
     /* The heartbeat's 5 Hz (issue 47): a BMS fault, or a blocked start-up. */
     out->fault_active = bc->active != 0u || bc->state == BMS_STATE_FAULT ||
                         bc->state == BMS_STATE_FAULT_HELD || !in->startup_ok || !in->can_running;
-    /* Built only when it goes, so its E2E counter counts frames sent. */
+
+    /* The send table (bms_tx.h). Each frame is built only when it goes, so
+       its E2E counter counts frames sent. */
+    const bms_tx_values_t values = {
+        .summary = &bc->summary,
+        .pack_current = in->pack_current,
+        .discharge_limit_da = out->discharge_limit_da,
+        .charge_limit_da = 0u, /* 0 A out of Charge mode (#67) */
+    };
     if (bms_tx_status_due(in->step_count)) {
         build_status(bc, in, out);
+    }
+    if (bms_tx_power_due(in->step_count)) {
+        bms_tx_build_power(&values, &bc->e2e, next_frame(out));
+    }
+    const bms_tx_slow_t slow = bms_tx_slow_due(in->step_count);
+    if (slow != BMS_TX_SLOW_NONE) {
+        bms_tx_build_slow(slow, &values, &bc->e2e, next_frame(out));
     }
 }
 

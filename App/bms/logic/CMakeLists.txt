@@ -7,6 +7,7 @@ add_logic_library(logic_bms
         logic_common
     SOURCES
         Src/bms_control.c
+        Src/bms_derate.c
         Src/bms_daq.c
         Src/bms_params.c
         Src/bms_tx.c

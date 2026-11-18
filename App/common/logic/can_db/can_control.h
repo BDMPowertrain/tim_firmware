@@ -551,7 +551,7 @@ struct can_control_bms_status_t {
     uint8_t bms_ok;
 
     /**
-     * A cell is under the Low-voltage limit (3.0 V) and the Discharge limit is being derated. Not a fault.
+     * The sag-compensated minimum cell voltage is under the Low-voltage limit (the voltage taper's 100% point, discharge_v_full, 3.0 V unset) and the Discharge limit is being derated. Not a fault.
      *
      * Range: 0..1 (0..1 -)
      * Scale: 1
