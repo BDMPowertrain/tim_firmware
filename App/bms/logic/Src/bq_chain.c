@@ -6,8 +6,11 @@
 
 /* Registers (BQ79616-Q1 data sheet SLUSE81F 7.5.4; the bridge's CONTROL1
    is at the same address, BQ79600-Q1 data sheet SLUSDS1A 7.5.1). */
+#define REG_DEV_CONF        0x0002u
 #define REG_ACTIVE_CELL     0x0003u
+#define REG_OV_THRESH       0x0009u /* then UV_THRESH, OTUT_THRESH */
 #define REG_GPIO_CONF1      0x000Eu /* GPIO_CONF1..4, two GPIOs each */
+#define REG_FAULT_MSK1      0x0016u /* then FAULT_MSK2 */
 #define REG_DIR0_ADDR       0x0306u
 #define REG_COMM_CTRL       0x0308u
 #define REG_CONTROL1        0x0309u
@@ -15,18 +18,66 @@
 #define REG_ADC_CTRL1       0x030Du
 #define REG_CB_CELL16_CTRL  0x0318u /* to CB_CELL9_CTRL at 0x031F */
 #define REG_CB_CELL8_CTRL   0x0320u /* to CB_CELL1_CTRL at 0x0327 */
+#define REG_OVUV_CTRL       0x032Cu /* then OTUT_CTRL */
 #define REG_BAL_CTRL2       0x032Fu
+#define REG_FAULT_RST1      0x0331u /* then FAULT_RST2 */
+#define REG_DIAG_COMP_CTRL2 0x033Bu
+#define REG_DIAG_COMP_CTRL3 0x033Cu
 #define REG_OTP_ECC_DATAIN1 0x0343u /* to DATAIN8 at 0x034A */
+#define REG_ADC_STAT2       0x0528u
+#define REG_FAULT_COMP_VCOW1 0x0548u /* then VCOW2 */
+
+/* The bridge's (BQ79600-Q1 data sheet SLUSDS1A 7.5). */
+#define REG_BRIDGE_DEV_CONF1  0x2001u
+#define REG_BRIDGE_FAULT_MSK  0x2020u
+#define REG_BRIDGE_FAULT_RST  0x2030u
 
 #define CONTROL1_ADDR_WR    0x01u
 #define CONTROL1_SEND_WAKE  0x20u
 #define COMM_CTRL_STACK     0x02u
 #define COMM_CTRL_TOP       0x03u /* stack device and top of stack */
-#define BAL_CTRL2_BAL_GO    0x02u /* manual balancing, sample the timers */
+/* Manual balancing, sample the timers, and stop it on any unmasked fault
+   (the chip's stop-on-fault, issue 64). */
+#define BAL_CTRL2_BAL_GO    0x22u
 #define ACTIVE_CELL_8S      0x02u
-#define GPIO_PAIR_ADC_ONLY  0x12u /* 010 = "as ADC only input", both GPIOs */
+#define GPIO_PAIR_ADC_OTUT  0x09u /* 001 = "as ADC and OTUT inputs", both GPIOs */
 #define CONTROL2_TSREF_EN   0x01u
 #define ADC_CTRL1_CONTINUOUS_GO 0x06u /* MAIN_MODE continuous, MAIN_GO */
+
+/* The comparators (issue 64), SLUSE81F 7.5.4.8. */
+#define OV_THR_4225_MV      0x24u /* 0x22 is 4175 mV, 25 mV steps */
+#define UV_THR_2400_MV      0x18u /* 0x00 is 1200 mV, 50 mV steps */
+/* UT_THR[7:5] 111 = 80 % (the least sensitive; UT is masked), OT_THR[4:0]
+   20 = 30 % of TSREF (10 % at 0, 1 % steps): 1500 mV of 5 V, 61.7 C on the
+   Enepaq table, where 60 C is 1510 mV and 31 % (1550 mV) is 55 C. */
+#define OTUT_THR_OT_30PCT   0xF4u
+#define OVUV_OTUT_GO_RR     0x05u /* round robin on every active input, GO */
+
+/* NFAULT (bq_chain.h). FAULT_MSK1: MSK_UT 0x40, MSK_COMP 0x04. FAULT_MSK2:
+   MSK_COMM3_FCOMM, _FTONE, _HB, MSK_COMM2, MSK_COMM1. */
+#define FAULT_MSK1_STACK    0x44u
+#define FAULT_MSK2_STACK    0x1Fu
+/* DEV_CONF: NO_ADJ_CB, FCOMM_EN, NFAULT_EN, its reset value, written so
+   no OTP setting can differ. */
+#define DEV_CONF_STACK      0x54u
+/* Bridge DEV_CONF1: FCOMM_EN, NFAULT_EN, its reset value. FAULT_MSK:
+   MSK_COML_H, MSK_UART_SPI, MSK_FTONE_DET, MSK_HB. */
+#define DEV_CONF1_BRIDGE    0x14u
+#define FAULT_MSK_BRIDGE    0xD8u
+/* Every fault reset (FAULT_RST2 bit 7 is reserved). */
+#define FAULT_RST1_ALL      0xFFu
+#define FAULT_RST2_ALL      0x7Fu
+#define FAULT_RST_BRIDGE_ALL 0xFFu
+
+/* The open-wire check (issue 64), SLUSE81F 7.5.4.11. */
+#define FAULT_RST1_COMP     0x04u /* RST_COMP: the last check's result away */
+#define OW_THR_2300_MV      0x06u /* 500 mV at 0, 300 mV steps */
+#define CTRL3_SINKS_OFF     0x00u
+#define CTRL3_VC_SINKS_ON   0x10u /* OW_SNK 01 */
+#define CTRL3_VC_COMPARE    0x15u /* OW_SNK 01, COMP_ADC_SEL 010, COMP_ADC_GO */
+#define ADC_STAT2_DRDY_VCOW 0x08u
+/* The comparison takes a Main ADC round robin, 192 us; a tick is ample. */
+#define OW_COMPARE_MS       1u
 
 #define DLL_SYNC_REGS 8u
 #define BRIDGE_ADDR   0u
@@ -44,31 +95,56 @@
 #define WRITE_WORST_US  300u  /* 250 us for SPI_RDY, then 14 bytes */
 #define READ_COMMAND_US 50u   /* the read command itself */
 
-static void add_write(bq_plan_t *plan, bq_request_t type, uint8_t dev, uint16_t reg,
-                      const uint8_t *data, size_t n)
+/* The plan's next command, cleared; NULL if the plan is full. */
+static bq_command_t *next_command(bq_plan_t *plan)
 {
     if (plan->count >= BQ_PLAN_MAX) {
-        return;
+        return NULL;
     }
     bq_command_t *cmd = &plan->cmd[plan->count++];
-    cmd->len = (uint8_t)bq_frame_write(cmd->frame, type, dev, reg, data, n);
-    cmd->response_len = 0u;
+    memset(cmd, 0, sizeof *cmd);
+    return cmd;
 }
 
-static void add_byte(bq_plan_t *plan, bq_request_t type, uint8_t dev, uint16_t reg,
-                     uint8_t value)
+static bq_command_t *add_write(bq_plan_t *plan, bq_request_t type, uint8_t dev, uint16_t reg,
+                               const uint8_t *data, size_t n)
 {
-    add_write(plan, type, dev, reg, &value, 1u);
-}
-
-static void add_stack_read(bq_plan_t *plan, uint16_t reg, size_t count)
-{
-    if (plan->count >= BQ_PLAN_MAX) {
-        return;
+    bq_command_t *cmd = next_command(plan);
+    if (cmd != NULL) {
+        cmd->len = (uint8_t)bq_frame_write(cmd->frame, type, dev, reg, data, n);
     }
-    bq_command_t *cmd = &plan->cmd[plan->count++];
-    cmd->len = (uint8_t)bq_frame_read(cmd->frame, BQ_STACK_READ, 0u, reg, count);
-    cmd->response_len = (uint16_t)(BQ_SWEEP_DEVICES * (count + BQ_RESPONSE_OVERHEAD));
+    return cmd;
+}
+
+static bq_command_t *add_byte(bq_plan_t *plan, bq_request_t type, uint8_t dev, uint16_t reg,
+                              uint8_t value)
+{
+    return add_write(plan, type, dev, reg, &value, 1u);
+}
+
+static bq_command_t *add_stack_read(bq_plan_t *plan, uint16_t reg, size_t count)
+{
+    bq_command_t *cmd = next_command(plan);
+    if (cmd != NULL) {
+        cmd->len = (uint8_t)bq_frame_read(cmd->frame, BQ_STACK_READ, 0u, reg, count);
+        cmd->response_len = (uint16_t)(BQ_SWEEP_DEVICES * (count + BQ_RESPONSE_OVERHEAD));
+    }
+    return cmd;
+}
+
+static bq_command_t *add_bridge_read(bq_plan_t *plan, uint16_t reg, size_t count)
+{
+    bq_command_t *cmd = next_command(plan);
+    if (cmd != NULL) {
+        cmd->len = (uint8_t)bq_frame_read(cmd->frame, BQ_SINGLE_READ, BRIDGE_ADDR, reg, count);
+        cmd->response_len = (uint16_t)(count + BQ_RESPONSE_OVERHEAD);
+    }
+    return cmd;
+}
+
+static void sinks_off(bq_plan_t *plan)
+{
+    (void)add_byte(plan, BQ_STACK_WRITE, 0u, REG_DIAG_COMP_CTRL3, CTRL3_SINKS_OFF);
 }
 
 static void plan_address(bq_plan_t *plan)
@@ -95,16 +171,56 @@ static void plan_address(bq_plan_t *plan)
 
 static void plan_configure(bq_plan_t *plan)
 {
-    static const uint8_t gpioConf[4] = {GPIO_PAIR_ADC_ONLY, GPIO_PAIR_ADC_ONLY,
-                                        GPIO_PAIR_ADC_ONLY, GPIO_PAIR_ADC_ONLY};
+    static const uint8_t gpioConf[4] = {GPIO_PAIR_ADC_OTUT, GPIO_PAIR_ADC_OTUT,
+                                        GPIO_PAIR_ADC_OTUT, GPIO_PAIR_ADC_OTUT};
+    static const uint8_t thresholds[3] = {OV_THR_4225_MV, UV_THR_2400_MV, OTUT_THR_OT_30PCT};
+    static const uint8_t masks[2] = {FAULT_MSK1_STACK, FAULT_MSK2_STACK};
 
-    add_byte(plan, BQ_STACK_WRITE, 0u, REG_ACTIVE_CELL, ACTIVE_CELL_8S);
-    add_write(plan, BQ_STACK_WRITE, 0u, REG_GPIO_CONF1, gpioConf, sizeof gpioConf);
+    (void)add_byte(plan, BQ_STACK_WRITE, 0u, REG_ACTIVE_CELL, ACTIVE_CELL_8S);
+    /* A device that kept power through an MCU reset may have been mid-check. */
+    sinks_off(plan);
+    (void)add_write(plan, BQ_STACK_WRITE, 0u, REG_GPIO_CONF1, gpioConf, sizeof gpioConf);
+    (void)add_write(plan, BQ_STACK_WRITE, 0u, REG_OV_THRESH, thresholds, sizeof thresholds);
+    (void)add_write(plan, BQ_STACK_WRITE, 0u, REG_FAULT_MSK1, masks, sizeof masks);
+    (void)add_byte(plan, BQ_STACK_WRITE, 0u, REG_DEV_CONF, DEV_CONF_STACK);
+    (void)add_byte(plan, BQ_STACK_WRITE, 0u, REG_DIAG_COMP_CTRL2, OW_THR_2300_MV);
     /* TSREF biases the temperature sensors (research for issue 3, "How the
-       boards are wired"); it settles in 6 ms, well before the first Sweep a
-       step later. */
-    add_byte(plan, BQ_STACK_WRITE, 0u, REG_CONTROL2, CONTROL2_TSREF_EN);
-    add_byte(plan, BQ_STACK_WRITE, 0u, REG_ADC_CTRL1, ADC_CTRL1_CONTINUOUS_GO);
+       boards are wired"); it settles in 6 ms, a step before the OT
+       comparator starts and the first Sweep. */
+    (void)add_byte(plan, BQ_STACK_WRITE, 0u, REG_CONTROL2, CONTROL2_TSREF_EN);
+    (void)add_byte(plan, BQ_STACK_WRITE, 0u, REG_ADC_CTRL1, ADC_CTRL1_CONTINUOUS_GO);
+    (void)add_byte(plan, BQ_SINGLE_WRITE, BRIDGE_ADDR, REG_BRIDGE_DEV_CONF1, DEV_CONF1_BRIDGE);
+    (void)add_byte(plan, BQ_SINGLE_WRITE, BRIDGE_ADDR, REG_BRIDGE_FAULT_MSK, FAULT_MSK_BRIDGE);
+}
+
+/* OVUV_CTRL and OTUT_CTRL: both protectors round robin, started. */
+static void plan_protect(bq_plan_t *plan)
+{
+    static const uint8_t go[2] = {OVUV_OTUT_GO_RR, OVUV_OTUT_GO_RR};
+
+    (void)add_write(plan, BQ_STACK_WRITE, 0u, REG_OVUV_CTRL, go, sizeof go);
+}
+
+/* The post-wake faults (spec #36): the stack's first, as a stack fault
+   left latched would report itself up the chain again. */
+static void plan_clear(bq_plan_t *plan)
+{
+    static const uint8_t resets[2] = {FAULT_RST1_ALL, FAULT_RST2_ALL};
+
+    (void)add_write(plan, BQ_STACK_WRITE, 0u, REG_FAULT_RST1, resets, sizeof resets);
+    (void)add_byte(plan, BQ_SINGLE_WRITE, BRIDGE_ADDR, REG_BRIDGE_FAULT_RST, FAULT_RST_BRIDGE_ALL);
+}
+
+static void plan_sweep(const bq_chain_t *c, bq_plan_t *plan)
+{
+    if (c->sinks_maybe_on) {
+        sinks_off(plan);
+    }
+    (void)add_stack_read(plan, BQ_SWEEP_REG, BQ_SWEEP_COUNT);
+    bq_command_t *bridge = add_bridge_read(plan, BQ_SWEEP_BRIDGE_REG, 1u);
+    if (bridge != NULL) {
+        bridge->append = true;
+    }
 }
 
 void bq_chain_init(bq_chain_t *c)
@@ -146,8 +262,14 @@ void bq_chain_plan(bq_chain_t *c, uint32_t now_ms, bq_plan_t *plan)
     case BQ_CHAIN_CONFIGURE:
         plan_configure(plan);
         break;
+    case BQ_CHAIN_PROTECT:
+        plan_protect(plan);
+        break;
+    case BQ_CHAIN_CLEAR:
+        plan_clear(plan);
+        break;
     case BQ_CHAIN_RUNNING:
-        add_stack_read(plan, BQ_SWEEP_REG, BQ_SWEEP_COUNT);
+        plan_sweep(c, plan);
         break;
     case BQ_CHAIN_STACK_WAIT:
     case BQ_CHAIN_RETRY_WAIT:
@@ -199,10 +321,20 @@ bool bq_chain_done(bq_chain_t *c, uint32_t now_ms, bool ok, const uint8_t *resp,
         next = (ok && addresses_ok(resp, len)) ? BQ_CHAIN_CONFIGURE : BQ_CHAIN_RETRY_WAIT;
         break;
     case BQ_CHAIN_CONFIGURE:
+        c->sinks_maybe_on = false;
+        next = ok ? BQ_CHAIN_PROTECT : BQ_CHAIN_RETRY_WAIT;
+        break;
+    case BQ_CHAIN_PROTECT:
+        next = ok ? BQ_CHAIN_CLEAR : BQ_CHAIN_RETRY_WAIT;
+        break;
+    case BQ_CHAIN_CLEAR:
         c->silent_sweeps = 0u;
         next = ok ? BQ_CHAIN_RUNNING : BQ_CHAIN_RETRY_WAIT;
         break;
     case BQ_CHAIN_RUNNING:
+        if (ok) {
+            c->sinks_maybe_on = false; /* the sink-off write went, if planned */
+        }
         bq_sweep_decode(resp, len, sweep);
         if (sweep->devices_read != 0u) {
             c->silent_sweeps = 0u;
@@ -217,6 +349,97 @@ bool bq_chain_done(bq_chain_t *c, uint32_t now_ms, bool ok, const uint8_t *resp,
     }
     c->state = next;
     return false;
+}
+
+bool bq_chain_plan_open_wire(bq_chain_t *c, bq_plan_t *plan)
+{
+    memset(plan, 0, sizeof *plan);
+    if (c->state != BQ_CHAIN_RUNNING) {
+        return false;
+    }
+
+    (void)add_byte(plan, BQ_STACK_WRITE, 0u, REG_FAULT_RST1, FAULT_RST1_COMP);
+    bq_command_t *on = add_byte(plan, BQ_STACK_WRITE, 0u, REG_DIAG_COMP_CTRL3, CTRL3_VC_SINKS_ON);
+    bq_command_t *go = add_byte(plan, BQ_STACK_WRITE, 0u, REG_DIAG_COMP_CTRL3, CTRL3_VC_COMPARE);
+    sinks_off(plan);
+    (void)add_stack_read(plan, REG_ADC_STAT2, 1u);
+    bq_command_t *vcow = add_stack_read(plan, REG_FAULT_COMP_VCOW1, 2u);
+
+    if (on != NULL && go != NULL && vcow != NULL) {
+        on->delay_ms = BQ_OPEN_WIRE_SETTLE_MS;
+        go->delay_ms = OW_COMPARE_MS;
+        vcow->append = true;
+    }
+    return true;
+}
+
+/* Each device's one-register answer from reg, into value[d - 1]; a bit in
+   the result for each device whose frame came whole. */
+static uint16_t read_each(const uint8_t *resp, size_t len, size_t *pos, uint16_t reg,
+                          size_t count, uint8_t value[BQ_SWEEP_DEVICES])
+{
+    uint16_t read = 0u;
+    bq_response_t r;
+
+    size_t at = *pos;
+    while (bq_response_next(resp, len, &at, &r) == BQ_RESPONSE_OK) {
+        if (r.reg != reg) {
+            break; /* the next read's answer: left for it */
+        }
+        *pos = at;
+        if (r.dev >= 1u && r.dev <= BQ_SWEEP_DEVICES && r.len == count) {
+            value[r.dev - 1u] = r.data[count - 1u]; /* the last byte */
+            read |= (uint16_t)(1u << (r.dev - 1u));
+        }
+    }
+    return read;
+}
+
+void bq_chain_open_wire_done(bq_chain_t *c, bool ok, const uint8_t *resp, size_t len,
+                             bq_open_wire_t *out)
+{
+    uint8_t stat[BQ_SWEEP_DEVICES] = {0};
+    uint8_t vcow[BQ_SWEEP_DEVICES] = {0};
+    size_t pos = 0u;
+
+    memset(out, 0, sizeof *out);
+    if (!ok) {
+        c->sinks_maybe_on = true;
+    }
+
+    /* ADC_STAT2's answers, then FAULT_COMP_VCOW1..2's, each top first.
+       VCOW2, the last byte, holds cells 1 to 8; VCOW1, cells 9 to 16, is
+       never set with 8 active cells. A frame cut short ends the decoding,
+       as nothing after it can be framed. */
+    const uint16_t statRead = read_each(resp, len, &pos, REG_ADC_STAT2, 1u, stat);
+    const uint16_t vcowRead = read_each(resp, len, &pos, REG_FAULT_COMP_VCOW1, 2u, vcow);
+    out->devices_read = statRead & vcowRead;
+
+    for (uint8_t d = 1u; d <= BQ_SWEEP_DEVICES; d++) {
+        const uint16_t bit = (uint16_t)(1u << (d - 1u));
+        bool failed = false;
+        uint16_t cell = 0u;
+
+        if ((vcowRead & bit) != 0u && vcow[d - 1u] != 0u) {
+            failed = true;
+            for (uint16_t k = 0u; k < BQ_SWEEP_CELLS_PER_DEVICE && cell == 0u; k++) {
+                if ((vcow[d - 1u] & (1u << k)) != 0u) {
+                    cell = (uint16_t)((d - 1u) * BQ_SWEEP_CELLS_PER_DEVICE + k + 1u);
+                }
+            }
+        } else if ((out->devices_read & bit) != 0u && (stat[d - 1u] & ADC_STAT2_DRDY_VCOW) == 0u) {
+            failed = true; /* did not finish: nothing shown whole */
+        }
+        if (failed) {
+            out->verdict = BQ_OPEN_WIRE_FAIL;
+            out->device = d;
+            out->cell = cell;
+            return;
+        }
+    }
+    out->verdict = (out->devices_read == (uint16_t)((1u << BQ_SWEEP_DEVICES) - 1u))
+                       ? BQ_OPEN_WIRE_PASS
+                       : BQ_OPEN_WIRE_UNKNOWN;
 }
 
 bq_chain_state_t bq_chain_state(const bq_chain_t *c)
@@ -248,6 +471,24 @@ uint32_t bq_plan_worst_us(const bq_plan_t *plan)
         us += (cmd->response_len == 0u)
                   ? WRITE_WORST_US
                   : READ_COMMAND_US + bq_read_timeout_us(cmd->response_len);
+        if (cmd->delay_ms != 0u) {
+            us += ((uint32_t)cmd->delay_ms + 1u) * 1000u;
+        }
     }
     return us;
+}
+
+size_t bq_plan_response_len(const bq_plan_t *plan)
+{
+    size_t end = 0u;
+    size_t most = 0u;
+
+    for (size_t i = 0u; i < plan->count; i++) {
+        const bq_command_t *cmd = &plan->cmd[i];
+        if (cmd->response_len != 0u) {
+            end = (cmd->append ? end : 0u) + cmd->response_len;
+            most = (end > most) ? end : most;
+        }
+    }
+    return most;
 }

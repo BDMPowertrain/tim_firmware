@@ -24,13 +24,18 @@ typedef struct {
 } judged_t;
 
 /* Bad Sweeps in a row to raise each fault, by bms_fault_t; 0: not judged
-   here. */
+   here. The open-wire and internal faults count their own way (their
+   checks, or the self-checks' own counts) and are bad only once those
+   have run out. */
 static const uint16_t raiseAt[BMS_FAULT_COUNT] = {
     [BMS_FAULT_OVER_VOLTAGE]  = BMS_OV_SWEEPS,
     [BMS_FAULT_UNDER_VOLTAGE] = BMS_UV_SWEEPS,
     [BMS_FAULT_OVER_TEMP]     = BMS_TEMP_SWEEPS,
     [BMS_FAULT_UNDER_TEMP]    = BMS_TEMP_SWEEPS,
     [BMS_FAULT_MEASUREMENT]   = BMS_MEAS_SWEEPS,
+    [BMS_FAULT_OPEN_WIRE]     = 1u,
+    [BMS_FAULT_CELL_MONITOR]  = BMS_CELL_MONITOR_SWEEPS,
+    [BMS_FAULT_INTERNAL]      = 1u,
 };
 
 void bms_control_init(bms_control_t *bc, const bms_control_config_t *config)
@@ -148,6 +153,114 @@ static void judge(const bms_control_in_t *in, bool started_up, judged_t j[BMS_FA
     *low_voltage = lv;
 }
 
+/* The open-wire check handed in from the last step (issue 64). Bad only on
+   the check that makes BMS_OPEN_WIRE_CHECKS failures in a row; clean while
+   the last check that judged passed; otherwise unknown. */
+static void judge_open_wire(bms_control_t *bc, const bms_control_in_t *in, judged_t *j)
+{
+    bool raise = false;
+
+    if (in->open_wire_ran) {
+        switch (in->open_wire.verdict) {
+        case BQ_OPEN_WIRE_PASS:
+            bc->ow_fails = 0u;
+            bc->ow_passed = true;
+            break;
+        case BQ_OPEN_WIRE_FAIL:
+            bc->ow_passed = false;
+            bc->ow_failed = in->open_wire;
+            if (bc->ow_fails < UINT8_MAX) {
+                bc->ow_fails++;
+            }
+            raise = bc->ow_fails >= BMS_OPEN_WIRE_CHECKS;
+            break;
+        default: /* could not judge: the run neither grows nor ends */
+            break;
+        }
+    }
+
+    if (raise) {
+        const bq_open_wire_t *f = &bc->ow_failed;
+        *j = (judged_t){
+            .verdict = VERDICT_BAD,
+            .where = (f->cell != 0u) ? EVENT_BMS_CELL : EVENT_BMS_DEVICE,
+            .index = (f->cell != 0u) ? f->cell : f->device,
+        };
+    } else {
+        j->verdict = bc->ow_passed ? VERDICT_CLEAN : VERDICT_UNKNOWN;
+    }
+}
+
+/* NFAULT and the bridge's FAULT_SUMMARY (issue 64). NFAULT means nothing
+   before the chain has been woken and cleared, so in STARTUP it is judged
+   only with a Sweep. */
+static void judge_cell_monitor(const bms_control_in_t *in, bool started_up, judged_t *j)
+{
+    const bool registerRead = in->swept && in->sweep->bridge_read;
+    const uint8_t summary = registerRead ? in->sweep->bridge_fault : 0u;
+
+    if (!in->nfault_ok && (in->swept || started_up)) {
+        *j = (judged_t){ .verdict = VERDICT_BAD, .where = EVENT_BMS_NFAULT, .mv = summary };
+    } else if (registerRead && summary != 0u) {
+        *j = (judged_t){ .verdict = VERDICT_BAD, .where = EVENT_BMS_BRIDGE, .mv = summary };
+    } else {
+        j->verdict = registerRead ? VERDICT_CLEAN : VERDICT_UNKNOWN;
+    }
+}
+
+/* The BMS's own output path (issue 64; spec #36, the self-checks). */
+static void judge_internal(bms_control_t *bc, const bms_control_in_t *in, judged_t *j)
+{
+    const bool registerRead = in->swept && in->sweep->bridge_read;
+    const uint8_t summary = registerRead ? in->sweep->bridge_fault : 0u;
+
+    /* BMS_OK is the AND of MCU_BMS_OK and NFAULT (ADR 0008). */
+    const bool expected = bc->commanded && in->nfault_ok;
+    if (in->bms_ok_fb != expected) {
+        count_up(&bc->feedback_bad);
+    } else {
+        bc->feedback_bad = 0u;
+    }
+
+    if (registerRead) {
+        if (in->nfault_ok != (summary == 0u)) {
+            count_up(&bc->nfault_check_bad);
+        } else {
+            bc->nfault_check_bad = 0u;
+        }
+    }
+
+    uint32_t lowMs = 0u;
+    if (!in->bms_ok_fb && in->sdc_closed) {
+        if (!bc->sense_timing) {
+            bc->sense_timing = true;
+            bc->sense_since_ms = in->now_ms;
+        }
+        lowMs = in->now_ms - bc->sense_since_ms;
+    } else {
+        bc->sense_timing = false;
+    }
+
+    if (bc->feedback_bad >= BMS_FEEDBACK_SWEEPS) {
+        const uint16_t bits = (uint16_t)((in->bms_ok_fb ? 1u : 0u) | (bc->commanded ? 2u : 0u) |
+                                         (in->nfault_ok ? 4u : 0u));
+        *j = (judged_t){ .verdict = VERDICT_BAD, .where = EVENT_BMS_FEEDBACK, .mv = bits };
+    } else if (bc->nfault_check_bad >= BMS_FEEDBACK_SWEEPS) {
+        *j = (judged_t){ .verdict = VERDICT_BAD, .where = EVENT_BMS_NFAULT_CHECK, .mv = summary };
+    } else if (bc->sense_timing && lowMs >= BMS_SDC_SENSE_MS) {
+        *j = (judged_t){
+            .verdict = VERDICT_BAD,
+            .where = EVENT_BMS_SDC_SENSE,
+            .mv = (uint16_t)((lowMs < UINT16_MAX) ? lowMs : UINT16_MAX),
+        };
+    } else if (bc->feedback_bad == 0u && registerRead && bc->nfault_check_bad == 0u &&
+               !bc->sense_timing) {
+        j->verdict = VERDICT_CLEAN;
+    } else {
+        j->verdict = VERDICT_UNKNOWN;
+    }
+}
+
 static uint8_t next_state(const bms_control_t *bc, const bms_control_in_t *in)
 {
     const uint8_t run = in->charge_mode ? BMS_STATE_CHARGE : BMS_STATE_DRIVE;
@@ -161,11 +274,13 @@ static uint8_t next_state(const bms_control_t *bc, const bms_control_in_t *in)
     if (bc->active != 0u) {
         return BMS_STATE_FAULT;
     }
+    /* BMS_OK rises only while the last open-wire check that judged passed
+       (spec #36: one has passed before it first rises). */
     switch (bc->state) {
     case BMS_STATE_STARTUP:
-        return (bc->all_clean >= BMS_POWERUP_SWEEPS) ? run : BMS_STATE_STARTUP;
+        return (bc->all_clean >= BMS_POWERUP_SWEEPS && bc->ow_passed) ? run : BMS_STATE_STARTUP;
     case BMS_STATE_FAULT:
-        return (bc->all_clean >= BMS_RECOVER_SWEEPS) ? run : BMS_STATE_FAULT;
+        return (bc->all_clean >= BMS_RECOVER_SWEEPS && bc->ow_passed) ? run : BMS_STATE_FAULT;
     default:
         return run;
     }
@@ -239,9 +354,13 @@ void bms_control_step(bms_control_t *bc, const bms_control_in_t *in, bms_control
     }
     bc->started = true;
 
+    const bool startedUp = bc->state != BMS_STATE_STARTUP;
     bool lv = bc->under_low_voltage_limit; /* held over a step with no Sweep */
-    judge(in, bc->state != BMS_STATE_STARTUP, j, &lv);
+    judge(in, startedUp, j, &lv);
     bc->under_low_voltage_limit = lv;
+    judge_open_wire(bc, in, &j[BMS_FAULT_OPEN_WIRE]);
+    judge_cell_monitor(in, startedUp, &j[BMS_FAULT_CELL_MONITOR]);
+    judge_internal(bc, in, &j[BMS_FAULT_INTERNAL]);
 
     /* A chain that has brought back no Sweep for 2 s in STARTUP: the
        measurement fault at once (spec #36). */
@@ -267,7 +386,11 @@ void bms_control_step(bms_control_t *bc, const bms_control_in_t *in, bms_control
             bc->clean[f] = 0u;
             break;
         }
-        allClean = allClean && j[f].verdict == VERDICT_CLEAN;
+        /* The open-wire check judges once a second, not each Sweep: it
+           gates BMS_OK in next_state() instead. */
+        if (f != BMS_FAULT_OPEN_WIRE) {
+            allClean = allClean && j[f].verdict == VERDICT_CLEAN;
+        }
 
         if (raiseAt[f] != 0u && (bc->active & bit(f)) == 0u && bc->bad[f] >= raiseAt[f]) {
             bc->active |= bit(f);
@@ -305,7 +428,8 @@ void bms_control_step(bms_control_t *bc, const bms_control_in_t *in, bms_control
                 .where = j[f].where,
                 .index = j[f].index,
                 .reading_mv = j[f].mv,
-                .devices_read = devicesRead,
+                .devices_read = (f == BMS_FAULT_OPEN_WIRE) ? bc->ow_failed.devices_read
+                                                           : devicesRead,
             };
             add_event(out, &e);
         }
@@ -316,6 +440,16 @@ void bms_control_step(bms_control_t *bc, const bms_control_in_t *in, bms_control
     out->active = bc->active;
     out->seen = bc->seen;
     out->under_low_voltage_limit = bc->under_low_voltage_limit;
+    bc->commanded = out->bms_ok;
+
+    /* The open-wire check: after a Sweep, never in place of one; the first
+       at once, then once a second (spec #36). */
+    if (in->swept &&
+        (!bc->ow_asked || (uint32_t)(in->now_ms - bc->ow_asked_ms) >= BMS_OPEN_WIRE_PERIOD_MS)) {
+        bc->ow_asked = true;
+        bc->ow_asked_ms = in->now_ms;
+        out->open_wire_due = true;
+    }
     /* The heartbeat's 5 Hz (issue 47): a BMS fault, or a blocked start-up. */
     out->fault_active = bc->active != 0u || bc->state == BMS_STATE_FAULT ||
                         bc->state == BMS_STATE_FAULT_HELD || !in->startup_ok || !in->can_running;

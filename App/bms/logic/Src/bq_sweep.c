@@ -33,9 +33,20 @@ void bq_sweep_decode(const uint8_t *resp, size_t len, bq_sweep_t *out)
 {
     memset(out, 0, sizeof *out);
 
+    const size_t stackLen = (len < BQ_SWEEP_RESPONSE_LEN) ? len : BQ_SWEEP_RESPONSE_LEN;
     size_t pos = 0u;
     bq_response_t r;
-    while (bq_response_next(resp, len, &pos, &r) == BQ_RESPONSE_OK) {
+
+    /* The bridge's answer, only ever where the stack's whole one ends. */
+    size_t bridgePos = BQ_SWEEP_RESPONSE_LEN;
+    if (len > BQ_SWEEP_RESPONSE_LEN
+        && bq_response_next(resp, len, &bridgePos, &r) == BQ_RESPONSE_OK && r.dev == 0u
+        && r.reg == BQ_SWEEP_BRIDGE_REG && r.len == 1u) {
+        out->bridge_read = true;
+        out->bridge_fault = r.data[0];
+    }
+
+    while (bq_response_next(resp, stackLen, &pos, &r) == BQ_RESPONSE_OK) {
         if (r.dev < 1u || r.dev > BQ_SWEEP_DEVICES || r.reg != BQ_SWEEP_REG
             || r.len != BQ_SWEEP_COUNT) {
             continue;
