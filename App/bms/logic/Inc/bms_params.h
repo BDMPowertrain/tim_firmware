@@ -34,7 +34,7 @@ typedef enum {
 
 /* The cell datasheet's maximum discharge current, 0.1 A: the full
    discharge limit's cap (ADR 0018). PLACEHOLDER: 250 A until the
-   datasheet figure is in. */
+   datasheet figure is in (issue 93). */
 #define BMS_FULL_DISCHARGE_LIMIT_MAX_DA 2500
 
 extern const param_table_t bms_param_table;
