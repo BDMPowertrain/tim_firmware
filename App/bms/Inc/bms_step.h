@@ -4,9 +4,9 @@
 /* The BMS's Control step (ADR 0010): every 20 ms, take one Sweep of the
    cell monitors (sleeping during the link exchange), snapshot the
    charger's mailbox, run the logic, write BMS_OK, send, publish. Before the
-   chain is awake the Sweep step wakes it instead (bq_chain.h). No fault
-   is judged yet (#63), so the BMS stays in STARTUP with BMS_OK low and
-   sends BMS_Status every step. */
+   chain is awake the Sweep step wakes it instead (bq_chain.h). The BMS
+   faults, the states and BMS_OK are judged by bms_control.h; BMS_Status
+   goes every step. */
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -31,6 +31,9 @@ typedef struct {
        step that took none: the chain was waking. */
     bq_sweep_t       sweep;
     bms_adc_counts_t adc;            /* the newest analog counts */
+    uint16_t         faults_active;  /* bit (1 << bms_fault_t), bms_control.h */
+    uint16_t         faults_seen;    /* since power-on */
+    bool             low_voltage_limit;
 } bms_pack_t;
 
 /* Sets up the Control bus for the one frame the BMS reads, the charger's

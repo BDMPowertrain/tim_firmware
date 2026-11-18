@@ -5,16 +5,19 @@
 #include <stddef.h>
 #include <string.h>
 
+#include "bms_control.h"
 #include "bms_params.h"
-#include "bms_tx.h"
 #include "bus_term.h"
 #include "can_control.h"
 #include "cell_monitor.h"
 #include "control_bus.h"
-#include "e2e_p11.h"
+#include "events.h"
+#include "flash_bank2.h"
 #include "main.h"
 #include "masked_copy.h"
 #include "parameters.h"
+#include "reset_cause.h"
+#include "reset_info.h"
 
 #define BMS_STEP_PERIOD_MS 20u
 
@@ -35,20 +38,36 @@ static const control_bus_rx_t bmsRx[] = {
     { CONTROL_RX_CHG_STATUS, CONTROL_BUS_FIFO0 },
 };
 
-/* Owned by the step; nothing else touches them. */
+/* Owned by the step; nothing else touches them. Static, not on the step's
+   stack: the output holds the Events. */
 static bool canStarted;
-static e2e_p11_tx_t statusTx;
 static bq_chain_t chain;
+static bms_control_t control;
+static bms_control_in_t in;
+static bms_control_out_t out;
 static bq_plan_t plan;   /* static: about 600 bytes, off the step's stack */
 static bms_pack_t pack;  /* this step's, published at its end */
 static uint32_t sweeps;
 static uint32_t sweepsMissing;
+static bool swept; /* this step took a Sweep */
 
 /* Read by the shell. */
 static bms_pack_t published;
 
 bool bms_step_init(void)
 {
+    /* Fixed until the next reset (ADR 0015). Static: this runs on
+       initTask's small stack (tasks.c). The Held fault is decided by #65:
+       until then no reset holds BMS_OK low. */
+    static bms_control_config_t config;
+
+    config = (bms_control_config_t){
+        .held = false,
+        .params_defaulted = parameters_defaulted(),
+        .not_dual_bank = flash_bank2_get() == NULL,
+        .last_reset_not_power_on = !reset_cause_is_power_on(reset_info_report()->cause),
+    };
+    bms_control_init(&control, &config);
     bq_chain_init(&chain);
     return control_bus_init(bmsRx, sizeof(bmsRx) / sizeof(bmsRx[0]),
                             parameters_value(BMS_PARAM_CAN1_TERM) != 0);
@@ -65,7 +84,8 @@ static void phase_sweep(control_step_ctx_t *ctx)
     cell_monitor_run(&plan, &link);
 
     memset(&pack.sweep, 0, sizeof pack.sweep);
-    if (bq_chain_done(&chain, ctx->now_ms, link.ok, link.resp, link.len, &pack.sweep)) {
+    swept = bq_chain_done(&chain, ctx->now_ms, link.ok, link.resp, link.len, &pack.sweep);
+    if (swept) {
         sweeps++;
         if (pack.sweep.devices_read != (uint16_t)((1u << BQ_SWEEP_DEVICES) - 1u)) {
             sweepsMissing++;
@@ -87,67 +107,66 @@ static void phase_input(control_step_ctx_t *ctx)
        are skipped until the restart and the Sweep carries on. The latch
        needs no mailbox to clear, since the charger is absent in the car. */
     control_bus_update(ctx->now_ms, true);
+
+    const control_bus_health_t bus = control_bus_health();
+
+    in.now_ms = ctx->now_ms;
+    in.step_count = ctx->step_count;
+    in.startup_ok = ctx->startup_ok;
+    in.can_running = canStarted;
+    in.swept = swept;
+    in.sweep = &pack.sweep;
+    in.charge_mode = false; /* #67 */
+    /* Active low, like the VCU's SDC_MON_N (issue 19: SDC_OK_N taps the
+       end of the shutdown loop). A status bit only until #64 checks it
+       against BMS_OK. */
+    in.sdc_closed = HAL_GPIO_ReadPin(SDC_OK_N_GPIO_Port, SDC_OK_N_Pin) == GPIO_PIN_RESET;
+    in.bus_off_latched = bus.latched;
+    in.error_passive = bus.error_passive;
+    in.rx_overflowed = bus.rx_overflowed;
 }
 
+/* Judge (bms_control.h): the state, BMS_OK and BMS_Status from this
+   step's Sweep. */
 static void phase_logic(control_step_ctx_t *ctx)
 {
-    /* No Sweep or logic yet: the BMS stays in STARTUP. A blocked start-up
-       (a task or queue missing, or CAN1 refused) is the only fault so far:
-       the heartbeat shows it at 5 Hz. BMS faults join it with their logic
-       (#63, #65). */
-    ctx->state = CAN_CONTROL_BMS_STATUS_STATE_STARTUP_CHOICE;
-    ctx->fault_active = !ctx->startup_ok || !canStarted;
+    bms_control_step(&control, &in, &out);
+    ctx->state = out.state;
+    ctx->fault_active = out.fault_active;
 }
 
+/* Write BMS_OK, send, publish, in that order (spec #36). */
 static void phase_output(control_step_ctx_t *ctx)
 {
-    /* BMS_OK stays low until the faults and its rise conditions exist
-       (#63): written every step, as the step is its only writer. */
-    HAL_GPIO_WritePin(MCU_BMS_OK_GPIO_Port, MCU_BMS_OK_Pin, GPIO_PIN_RESET);
+    /* Written every step, as the step is its only writer; high = no fault. */
+    HAL_GPIO_WritePin(MCU_BMS_OK_GPIO_Port, MCU_BMS_OK_Pin,
+                      out.bms_ok ? GPIO_PIN_SET : GPIO_PIN_RESET);
 
-    if (bms_tx_status_due(ctx->step_count)) {
-        /* BMS_OK is commanded low in STARTUP: every fault signal is 0. */
-        const control_bus_health_t bus = control_bus_health();
-        struct can_control_bms_status_t status = {
-            .state = ctx->state,
-            .parameters_defaulted = parameters_defaulted() ? 1u : 0u,
-            .bus_off_latched = bus.latched ? 1u : 0u,
-            .error_passive = bus.error_passive ? 1u : 0u,
-            .receive_overflow = bus.rx_overflowed ? 1u : 0u,
-        };
-        uint8_t frame[CAN_CONTROL_BMS_STATUS_LENGTH];
-
-        bms_tx_build_status(&status, &statusTx, frame);
+    if (out.send_status) {
         (void)control_bus_send(CAN_CONTROL_BMS_STATUS_FRAME_ID,
-                               CAN_CONTROL_BMS_STATUS_IS_EXTENDED != 0, frame,
-                               (uint8_t)sizeof(frame));
+                               CAN_CONTROL_BMS_STATUS_IS_EXTENDED != 0, out.status,
+                               (uint8_t)sizeof(out.status));
+    }
+    /* The Event queue never waits; a full one drops and counts (events.h). */
+    for (size_t i = 0; i < out.event_count; i++) {
+        (void)events_post(out.events[i].code, out.events[i].data);
     }
 
-    /* Publish, last (spec, issue 36: sweep, judge, BMS_OK, send, publish). */
     pack.step_count = ctx->step_count;
     pack.chain_state = bq_chain_state(&chain);
     pack.wake_attempts = bq_chain_attempts(&chain);
     pack.sweeps = sweeps;
     pack.sweeps_missing = sweepsMissing;
     pack.link_timeouts = cell_monitor_timeouts();
+    pack.faults_active = out.active;
+    pack.faults_seen = out.seen;
+    pack.low_voltage_limit = out.low_voltage_limit;
     masked_copy(&published, &pack, sizeof published);
 }
 
-void bms_step_read_pack(bms_pack_t *out)
+void bms_step_read_pack(bms_pack_t *dst)
 {
-    masked_copy(out, &published, sizeof *out);
-}
-
-static const char *bms_state_name(uint8_t state)
-{
-    switch (state) {
-    case CAN_CONTROL_BMS_STATUS_STATE_STARTUP_CHOICE:    return "STARTUP";
-    case CAN_CONTROL_BMS_STATUS_STATE_DRIVE_CHOICE:      return "DRIVE";
-    case CAN_CONTROL_BMS_STATUS_STATE_CHARGE_CHOICE:     return "CHARGE";
-    case CAN_CONTROL_BMS_STATUS_STATE_FAULT_CHOICE:      return "FAULT";
-    case CAN_CONTROL_BMS_STATUS_STATE_FAULT_HELD_CHOICE: return "FAULT_HELD";
-    default:                                             return "?";
-    }
+    masked_copy(dst, &published, sizeof *dst);
 }
 
 static const control_phase_t bmsPhases[] = {
@@ -162,5 +181,5 @@ const control_step_def_t bms_step_def = {
     .period_ms = BMS_STEP_PERIOD_MS,
     .phases = bmsPhases,
     .phase_count = sizeof(bmsPhases) / sizeof(bmsPhases[0]),
-    .state_name = bms_state_name,
+    .state_name = bms_control_state_name,
 };
