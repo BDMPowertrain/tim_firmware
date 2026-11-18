@@ -22,6 +22,8 @@
      tWAIT_READ_MAX has passed (Fig 7-16). A read that times out keeps the
      buffers already read and sends a Comm Clear; it never reads while
      SPI_RDY is low.
+   - A command with a delay (the open-wire check's, issue 64) is followed
+     by at least that many milliseconds asleep.
 
    The calling task sleeps on thread flags during every transfer and every
    wait, set by the DMA completion and the SPI_RDY interrupts. Called only
@@ -35,7 +37,9 @@
 
 typedef struct {
     bool           ok;   /* the ping and every command went; every read came in whole */
-    const uint8_t *resp; /* the last read's bytes, valid until the next run */
+    /* The last read's bytes, after those of the reads it is appended to
+       (bq_command_t.append); valid until the next run. */
+    const uint8_t *resp;
     size_t         len;
 } cell_monitor_result_t;
 

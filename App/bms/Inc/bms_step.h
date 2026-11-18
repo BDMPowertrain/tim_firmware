@@ -6,7 +6,8 @@
    charger's mailbox, run the logic, write BMS_OK, send, publish. Before the
    chain is awake the Sweep step wakes it instead (bq_chain.h). The BMS
    faults, the states and BMS_OK are judged by bms_control.h; BMS_Status
-   goes every step. */
+   goes every step. When the logic asks, once a second, the open-wire check
+   runs last in the step, in a phase of its own (bq_chain.h). */
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -34,6 +35,13 @@ typedef struct {
     uint16_t         faults_active;  /* bit (1 << bms_fault_t), bms_control.h */
     uint16_t         faults_seen;    /* since power-on */
     bool             under_low_voltage_limit;
+    /* The second layers (issue 64), as this step read them. */
+    bool             nfault_ok;      /* FB.NFAULT high */
+    bool             bms_ok_fb;      /* FB.BMS_OK high */
+    bool             sdc_closed;     /* the Shutdown Circuit sense energised */
+    uint32_t         open_wire_checks; /* run since power-on */
+    uint32_t         open_wire_fails;  /* of them, failed */
+    bq_open_wire_t   open_wire;      /* the last one's result */
 } bms_pack_t;
 
 /* Sets up the Control bus for the one frame the BMS reads, the charger's

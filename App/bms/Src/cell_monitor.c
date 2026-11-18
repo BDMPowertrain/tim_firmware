@@ -38,8 +38,9 @@ static const uint8_t read_filler[CHUNK] = {
     [0 ... CHUNK - 1u] = 0xFFu,
 };
 
-/* What the last read brought back. The Sweep's response is the longest. */
-static uint8_t response[BQ_SWEEP_RESPONSE_LEN];
+/* What the plan's reads brought back, each at the start or after the one
+   before it (bq_command_t.append). The Sweep's two are the longest. */
+static uint8_t response[BQ_RESPONSE_MAX];
 
 static volatile osThreadId_t waiter;
 static volatile bool dmaFailed;
@@ -181,17 +182,18 @@ static uint32_t ticks_for_us(uint32_t us)
     return (us + 999u) / 1000u + 1u;
 }
 
-/* Sends a read and takes in its response, 128 bytes per SPI_RDY. Returns
-   true if all of it came in; *len is what did. */
-static bool read_command(const bq_command_t *cmd, size_t *len)
+/* Sends a read and takes in its response, 128 bytes per SPI_RDY, into
+   response from offset on. Returns true if all of it came in; *len is
+   offset plus what did. */
+static bool read_command(const bq_command_t *cmd, size_t offset, size_t *len)
 {
-    const size_t expected = (cmd->response_len < sizeof response) ? cmd->response_len
-                                                                  : sizeof response;
+    const size_t room = sizeof response - offset;
+    const size_t expected = (cmd->response_len < room) ? cmd->response_len : room;
     const uint32_t start = osKernelGetTickCount();
     const uint32_t limit = ticks_for_us(bq_read_timeout_us(expected));
     size_t got = 0u;
 
-    *len = 0u;
+    *len = offset;
     if (!wait_ready_for_command()) {
         return false;
     }
@@ -221,14 +223,14 @@ static bool read_command(const bq_command_t *cmd, size_t *len)
            byte goes out and the next edge may come at once. */
         (void)osThreadFlagsClear(FLAG_SPI_RDY);
         select();
-        const bool moved = transfer(read_filler, &response[got], n);
+        const bool moved = transfer(read_filler, &response[offset + got], n);
         deselect();
         if (!moved) {
             comm_clear();
             return false;
         }
         got += n;
-        *len = got;
+        *len = offset + got;
     }
     return true;
 }
@@ -249,7 +251,12 @@ void cell_monitor_run(const bq_plan_t *plan, cell_monitor_result_t *out)
         if (cmd->response_len == 0u) {
             ok = write_command(cmd);
         } else {
-            ok = read_command(cmd, &out->len);
+            ok = read_command(cmd, cmd->append ? out->len : 0u, &out->len);
+        }
+        if (ok && cmd->delay_ms != 0u) {
+            /* osDelay(n) may end up to a tick early: one more makes it at
+               least delay_ms (bq_plan_worst_us() counts it). */
+            (void)osDelay((uint32_t)cmd->delay_ms + 1u);
         }
     }
 
