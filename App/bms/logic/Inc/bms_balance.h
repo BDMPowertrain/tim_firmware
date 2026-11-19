@@ -49,7 +49,8 @@
  *
  * The Balancing gate is BMS_BALANCE_GATE_MV under the Charge target. It
  * latches for the charge (until a power cycle) on the first settled Sweep
- * whose highest cell reaches it; before that the state is WAITING_FOR_GATE.
+ * whose highest cell reaches it; before that, and before the interlock
+ * has first held (below), the state is WAITING_FOR_GATE.
  *
  * The interlock (EV.8.3.3): the BMS state CHARGE, the Shutdown Circuit
  * sense closed, BMS_OK high with no BMS fault and the charger heard (its
@@ -59,6 +60,9 @@
  * SENSE_OPEN, BMS_FAULT or CHARGER_SILENT, in that order. Balancing
  * resumes at the first decision after all have held for
  * BMS_BALANCE_RESTART_MS. A silent charger is a pause like the others.
+ * The first start of the charge waits the same 3 s (the BMS powers up in
+ * STARTUP, not CHARGE), shown as WAITING_FOR_GATE and not as a pause:
+ * nothing has broken the interlock yet.
  * Out of the CHARGE state (STARTUP, FAULT, FAULT_HELD) the interlock is
  * false, and outside Charge mode (DRIVE) the state is OFF: in every such
  * state no FET is commanded on, and one that may be on gets the stop.
@@ -226,6 +230,7 @@ typedef struct {
     bool     allowed_timing;
     uint32_t allowed_since_ms;
     uint8_t  interlock_reason; /* the last condition found false */
+    bool     interlock_met;    /* it has held for the 3 s once */
     /* The FETs. */
     bool     maybe_on;     /* a set or the FET check may have a FET on */
     bool     stop_due;     /* a FET may be on that must not be: stop first */

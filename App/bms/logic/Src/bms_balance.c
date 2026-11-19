@@ -14,9 +14,6 @@ void bms_balance_init(bms_balance_t *b, uint16_t target_mv)
     b->state = BMS_BALANCE_OFF;
     b->reason = BMS_BALANCE_NONE;
     b->sent.op = BQ_BALANCE_NONE;
-    /* The BMS starts in STARTUP, not CHARGE: the interlock's 3 s count
-       from the first step it holds. */
-    b->interlock_reason = BMS_BALANCE_BMS_FAULT;
 }
 
 static void add_event(bms_balance_out_t *out, const event_balancing_t *e)
@@ -416,13 +413,17 @@ void bms_balance_step(bms_balance_t *b, const bms_balance_in_t *in, bms_balance_
                                 &b->allowed_timing, &b->allowed_since_ms, in->now_ms,
                                 BMS_BALANCE_RESTART_MS);
 
+    if (interlock) {
+        b->interlock_met = true;
+    }
     const bool mayRun = in->charge_mode && b->gate && b->state != BMS_BALANCE_STOPPED &&
                          !b->ended && interlock;
     if (!in->charge_mode) {
         change(b, out, BMS_BALANCE_OFF, BMS_BALANCE_NONE, 0u);
     } else if (b->state == BMS_BALANCE_STOPPED || b->ended) {
         /* final: STOPPED, or DONE when the time ran out */
-    } else if (!b->gate) {
+    } else if (!b->gate || !b->interlock_met) {
+        /* Not started yet: the gate, or the interlock's first 3 s. */
         change(b, out, BMS_BALANCE_WAITING, BMS_BALANCE_NONE, 0u);
     } else if (!interlock) {
         change(b, out, BMS_BALANCE_PAUSED, b->interlock_reason, 0u);

@@ -270,6 +270,7 @@ static void test_the_gate_is_100_mv_under_the_target_and_latches_for_the_charge(
     sweep.cell_mv[7] = 4000u; /* the highest cell reaches 4.000 V */
     step();
     TEST_ASSERT_TRUE(b.gate);
+    steps(BMS_BALANCE_RESTART_MS + 2000u);
     TEST_ASSERT_NOT_EQUAL(BMS_BALANCE_WAITING, out.state);
 
     cells_all(3950u); /* the cells fall back */
@@ -534,6 +535,45 @@ static void test_leaving_the_charge_state_stops_balancing_in_the_same_step(void)
 static void test_a_silent_charger_pauses_balancing(void)
 {
     check_interlock(silent, heard, BMS_BALANCE_CHARGER_SILENT);
+}
+
+/* At the start of a charge the interlock's 3 s apply too, but nothing
+   has broken it yet: balancing shows WAITING_FOR_GATE, not a pause. */
+static void test_before_the_interlock_first_holds_it_waits_and_shows_no_pause(void)
+{
+    spread_pack(); /* past the gate from the first Sweep */
+    for (uint32_t t = 0u; t < BMS_BALANCE_RESTART_MS; t += STEP_MS) {
+        step();
+        TEST_ASSERT_EQUAL_UINT8(BMS_BALANCE_WAITING, out.state);
+        TEST_ASSERT_EQUAL_UINT8(BMS_BALANCE_NONE, out.reason);
+        TEST_ASSERT_EQUAL_INT(BQ_BALANCE_NONE, out.command.op);
+    }
+    /* Charge mode began: OFF to WAITING_FOR_GATE, the one Event. */
+    TEST_ASSERT_EQUAL_UINT(1u, eventsSeen);
+    TEST_ASSERT_EQUAL_UINT8(BMS_BALANCE_WAITING, lastEvent.to);
+    step_until_state(BMS_BALANCE_BALANCING);
+
+    /* Once it has held, a break is a pause with its reason. */
+    in.charger_heard = false;
+    step();
+    TEST_ASSERT_EQUAL_UINT8(BMS_BALANCE_PAUSED, out.state);
+    TEST_ASSERT_EQUAL_UINT8(BMS_BALANCE_CHARGER_SILENT, out.reason);
+}
+
+/* The start of the charge in STARTUP (not CHARGE): still only waiting. */
+static void test_a_bms_starting_up_in_charge_mode_waits_without_a_pause(void)
+{
+    spread_pack();
+    in.state_charge = false;
+    in.bms_ok = false;
+    steps(2000u);
+    TEST_ASSERT_EQUAL_UINT8(BMS_BALANCE_WAITING, out.state);
+    TEST_ASSERT_EQUAL_UINT(1u, eventsSeen); /* OFF to WAITING_FOR_GATE only */
+    in.state_charge = true;
+    in.bms_ok = true;
+    steps(BMS_BALANCE_RESTART_MS - STEP_MS);
+    TEST_ASSERT_EQUAL_UINT8(BMS_BALANCE_WAITING, out.state);
+    step_until_state(BMS_BALANCE_BALANCING);
 }
 
 static void test_a_break_during_the_3_s_starts_it_again(void)
@@ -805,6 +845,8 @@ int main(void)
     RUN_TEST(test_a_bms_fault_stops_balancing_in_the_same_step);
     RUN_TEST(test_leaving_the_charge_state_stops_balancing_in_the_same_step);
     RUN_TEST(test_a_silent_charger_pauses_balancing);
+    RUN_TEST(test_before_the_interlock_first_holds_it_waits_and_shows_no_pause);
+    RUN_TEST(test_a_bms_starting_up_in_charge_mode_waits_without_a_pause);
     RUN_TEST(test_a_break_during_the_3_s_starts_it_again);
     RUN_TEST(test_the_sense_opening_during_the_fet_check_stops_it);
     RUN_TEST(test_a_stop_that_failed_goes_again);
