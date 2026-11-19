@@ -194,6 +194,79 @@ bool bq_chain_plan_open_wire(bq_chain_t *c, bq_plan_t *plan);
 void bq_chain_open_wire_done(bq_chain_t *c, bool ok, const uint8_t *resp, size_t len,
                              bq_open_wire_t *out);
 
+/*
+ * Balancing (issue 68; ADR 0020): the commands bms_balance.h asks for, each
+ * a plan of its own run after the step's Sweep, never in the step that runs
+ * the open-wire check. Manual balancing only (BAL_CTRL2[AUTO_BAL] = 0): the
+ * chip's auto mode and its voltage stop are not used. Every BAL_GO carries
+ * the chip's stop-on-fault (FLTSTOP_EN). The stack's DEV_CONF[NO_ADJ_CB] is
+ * set, so a device refuses a set with two neighbours on
+ * (BAL_STAT[INVALID_CBCONF]); the SET reads that back.
+ *
+ *   STOP         every balancing timer to 0 s and BAL_GO, and the FET
+ *                check's FETs off (DIAG_CBFET_CTRL1..2 cleared,
+ *                CBFET_CTRL_GO); then each device's DIETEMP1, the
+ *                temperature the next choice pauses a board on.
+ *   SET          each device's CB_CELL8..1_CTRL, 10 s (the chip's shortest
+ *                timer) on each cell in cells[d - 1] and 0 s on the rest,
+ *                then BAL_GO, then each device's BAL_STAT. Every device is
+ *                written, so the set is whole whatever went before.
+ *   FET_ON       the FET check (SLUSE81F 7.3.6.4.6.3), run with no
+ *                balancing: the AUX ADC continuous over every active cell,
+ *                the FETs in fet_cells on, on every device.
+ *   FET_COMPARE  the CBFET comparison started (COMP_ADC_SEL 100).
+ *   FET_READ     the check's FETs off first, then each device's ADC_STAT2
+ *                (DRDY_CBFET) and FAULT_COMP_CBFET1..2. The off goes before
+ *                the reads so a read that times out leaves no FET on.
+ */
+typedef enum {
+    BQ_BALANCE_NONE,
+    BQ_BALANCE_STOP,
+    BQ_BALANCE_SET,
+    BQ_BALANCE_FET_ON,
+    BQ_BALANCE_FET_COMPARE,
+    BQ_BALANCE_FET_READ,
+} bq_balance_op_t;
+
+typedef struct {
+    bq_balance_op_t op;
+    /* SET: bit k set, cell k + 1 of device d bleeds (cells[d - 1]). */
+    uint8_t cells[BQ_SWEEP_DEVICES];
+    /* FET_ON, FET_READ: the cells under test, the same on every device. */
+    uint8_t fet_cells;
+} bq_balance_cmd_t;
+
+/* The chip's CB_CELLn_CTRL TIME code for 10 s (SLUSE81F 7.5.4.7.1). */
+#define BQ_BALANCE_TIMER_10S 0x01u
+
+typedef enum {
+    BQ_FET_CHECK_PASS,    /* every device finished and no FET under test failed */
+    BQ_FET_CHECK_FAIL,    /* a FET failed, or a device did not finish */
+    BQ_FET_CHECK_UNKNOWN, /* a device did not answer, and none failed */
+} bq_fet_check_verdict_t;
+
+typedef struct {
+    bool     ok;           /* every command went and every read came back whole */
+    uint16_t devices_read; /* bit d - 1 set: device d answered every read */
+    /* STOP: DIETEMP1 of each device read, 0.1 C (0.025 C a count). */
+    int16_t  die_dc[BQ_SWEEP_DEVICES];
+    /* SET: bit d - 1 set, device d refused the set (INVALID_CBCONF). */
+    uint16_t rejected;
+    /* FET_READ. */
+    bq_fet_check_verdict_t fet;
+    uint8_t  fet_device;   /* the first that failed, 1 to 16; 0 for none */
+    uint16_t fet_cell;     /* its first FET failed, 1 to 128; 0 if it did not finish */
+} bq_balance_result_t;
+
+/* The plan for cmd, for after this step's Sweep. False, with an empty
+   plan, unless the chain is running or for BQ_BALANCE_NONE. */
+bool bq_chain_plan_balance(const bq_chain_t *c, const bq_balance_cmd_t *cmd, bq_plan_t *plan);
+
+/* Reports cmd's plan carried out, as bq_chain_done() does, and decodes
+   what it read into *out. */
+void bq_chain_balance_done(const bq_balance_cmd_t *cmd, bool ok, const uint8_t *resp, size_t len,
+                           bq_balance_result_t *out);
+
 bq_chain_state_t bq_chain_state(const bq_chain_t *c);
 bool bq_chain_running(const bq_chain_t *c);
 uint32_t bq_chain_attempts(const bq_chain_t *c);

@@ -12,8 +12,9 @@
  * repeats, delaying the others by one step.
  * In the BMS state CHARGE the charger request (CHG_Request, 0x1806E5F4)
  * takes the 0x202 slot on one step in fifty (bms_tx_charger_request_due(),
- * issue 67), so it goes once a second; can/control.dbc gives step 26 of
- * the fifty to the balancing status frame, which is not built yet.
+ * issue 67), so it goes once a second, and in Charge mode the balancing
+ * status (BMS_Balancing, 0x600) takes it on step 26 of the fifty
+ * (bms_tx_balancing_due(), issue 68; can/control.dbc).
  *
  * Every frame's layout and units are can/control.dbc's; this module is the
  * only place that fills one. The values come in as bms_tx_values_t, the
@@ -98,6 +99,15 @@ bms_tx_slow_t bms_tx_slow_due(uint32_t step_count);
 /* The 0x202 slot of step 1 of each 50-step second: the charger request's,
    in CHARGE. */
 bool bms_tx_charger_request_due(uint32_t step_count);
+
+/* The 0x202 slot of step 26 of each 50-step second: BMS_Balancing's, in
+   Charge mode. */
+bool bms_tx_balancing_due(uint32_t step_count);
+
+/* BMS_Balancing (0x600): the balancing state and reason (bms_balance.h)
+   and the Cell spread, mV. No E2E. */
+void bms_tx_build_balancing(uint8_t state, uint8_t reason, uint16_t spread_mv,
+                            bms_tx_frame_t *f);
 
 /* CHG_Request, 29-bit, in the charger's big-endian format; no E2E. */
 void bms_tx_build_charger_request(const struct can_control_chg_request_t *r,

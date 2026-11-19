@@ -51,7 +51,12 @@ void bms_control_init(bms_control_t *bc, const bms_control_config_t *config)
     bc->state = BMS_STATE_STARTUP;
     bms_derate_init(&bc->derate, &config->derate);
     bms_charge_init(&bc->charge, &config->charge);
+    bms_balance_init(&bc->balance, config->charge.target_mv);
 }
+
+/* The balancing second is the open-wire check's (bms_balance.h). */
+_Static_assert(BMS_BALANCE_PERIOD_MS == BMS_OPEN_WIRE_PERIOD_MS,
+               "balancing decides on the open-wire check's Sweep");
 
 static uint16_t bit(bms_fault_t f)
 {
@@ -315,6 +320,15 @@ static uint8_t next_state(const bms_control_t *bc, const bms_control_in_t *in, b
     }
 }
 
+static void add_balance_events(bms_control_out_t *out, const bms_balance_out_t *bo)
+{
+    for (size_t i = 0; i < bo->event_count && out->event_count < BMS_CONTROL_EVENTS_MAX; i++) {
+        bms_event_t *ev = &out->events[out->event_count++];
+        ev->code = bo->events[i].code;
+        memcpy(ev->data, bo->events[i].data, EVENT_DATA_SIZE);
+    }
+}
+
 static void add_charge_events(bms_control_out_t *out, const bms_charge_events_t *ce)
 {
     for (size_t i = 0; i < ce->count && out->event_count < BMS_CONTROL_EVENTS_MAX; i++) {
@@ -376,6 +390,7 @@ static void build_status(bms_control_t *bc, const bms_control_in_t *in, bms_cont
         .overcurrent_seen = has(s, BMS_FAULT_OVERCURRENT),
         .bms_ok = out->bms_ok ? 1u : 0u,
         .charge_complete = (out->charge == BMS_CHARGE_COMPLETE) ? 1u : 0u,
+        .balancing_stopped = bms_balance_stopped(&bc->balance) ? 1u : 0u,
         .low_voltage_limit = out->under_low_voltage_limit ? 1u : 0u,
         .shutdown_circuit_closed = in->sdc_closed ? 1u : 0u,
         .parameters_defaulted = bc->config.params_defaulted ? 1u : 0u,
@@ -508,11 +523,47 @@ void bms_control_step(bms_control_t *bc, const bms_control_in_t *in, bms_control
     out->under_low_voltage_limit = bms_derate_under_low_voltage_limit(&bc->derate);
     out->summary = bc->summary;
 
-    /* The charge (bms_charge.h), on the same Sweep, BMS_OK as written. */
+    /* Balancing (bms_balance.h), BMS_OK as written; the charge state is
+       the last step's. Its second is the open-wire check's: the check may
+       go on a step with a Sweep, once a second, unless balancing holds it. */
+    const bool checkDue =
+        in->swept &&
+        (!bc->ow_asked || (uint32_t)(in->now_ms - bc->ow_asked_ms) >= BMS_OPEN_WIRE_PERIOD_MS);
+    const bms_balance_in_t balanceIn = {
+        .now_ms = in->now_ms,
+        .charge_mode = heard.charge_mode,
+        .charge_complete = bms_charge_state(&bc->charge) == BMS_CHARGE_COMPLETE,
+        .state_charge = bc->state == BMS_STATE_CHARGE,
+        .sdc_closed = in->sdc_closed,
+        .bms_ok = out->bms_ok,
+        .fault_active = bc->active != 0u,
+        .charger_heard = in->charger->state == MAILBOX_VALID,
+        .swept = in->swept,
+        .sweep = in->sweep,
+        .check_due = checkDue,
+        .checked = bc->ow_asked,
+        .last_check_ms = bc->ow_asked_ms,
+        .ran = in->balance_ran,
+        .result = &in->balance_result,
+    };
+    const bms_balance_out_t *balance = &bc->balance_out;
+    bms_balance_step(&bc->balance, &balanceIn, &bc->balance_out);
+    out->balance_command = balance->command;
+    out->balance_state = balance->state;
+    out->balance_reason = balance->reason;
+    out->cell_spread_mv = balance->spread_mv;
+    memcpy(out->bleeding, balance->on, sizeof out->bleeding);
+
+    /* The charge (bms_charge.h), on the last settled Sweep only (ADR
+       0020), BMS_OK as written. */
+    if (in->swept && balance->settled) {
+        bc->settled = bc->summary;
+    }
     const bms_charge_in_t chargeIn = {
         .now_ms = in->now_ms,
-        .swept = swept,
-        .summary = &bc->summary,
+        .swept = in->swept && balance->settled && bc->settled.cells != 0u &&
+                 bc->settled.temps != 0u,
+        .summary = &bc->settled,
         .bms_ok = out->bms_ok,
         .fault_active = bc->active != 0u,
         .sdc_closed = in->sdc_closed,
@@ -520,11 +571,12 @@ void bms_control_step(bms_control_t *bc, const bms_control_in_t *in, bms_control
     out->charge_limit_da = bms_charge_step(&bc->charge, &chargeIn, &chargeEvents);
     out->charge = bms_charge_state(&bc->charge);
     add_charge_events(out, &chargeEvents);
+    add_balance_events(out, balance);
 
-    /* The open-wire check: after a Sweep, never in place of one; the first
-       at once, then once a second (spec #36). */
-    if (in->swept &&
-        (!bc->ow_asked || (uint32_t)(in->now_ms - bc->ow_asked_ms) >= BMS_OPEN_WIRE_PERIOD_MS)) {
+    /* The open-wire check: after a Sweep, never in place of one, never
+       with a balancing command; the first at once, then once a second
+       (spec #36). */
+    if (checkDue && !balance->hold_check) {
         bc->ow_asked = true;
         bc->ow_asked_ms = in->now_ms;
         out->open_wire_due = true;
@@ -553,6 +605,10 @@ void bms_control_step(bms_control_t *bc, const bms_control_in_t *in, bms_control
         struct can_control_chg_request_t req;
         bms_charge_request(&bc->charge, in->now_ms, &req);
         bms_tx_build_charger_request(&req, next_frame(out));
+    } else if (heard.charge_mode && bms_tx_balancing_due(in->step_count)) {
+        /* In place of 0x202, in Charge mode only (bms_tx.h). */
+        bms_tx_build_balancing(out->balance_state, out->balance_reason, out->cell_spread_mv,
+                               next_frame(out));
     } else if (slow != BMS_TX_SLOW_NONE) {
         bms_tx_build_slow(slow, &values, &bc->e2e, next_frame(out));
     }

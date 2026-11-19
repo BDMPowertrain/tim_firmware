@@ -6,6 +6,7 @@ add_logic_library(logic_bms
     DEPENDS
         logic_common
     SOURCES
+        Src/bms_balance.c
         Src/bms_charge.c
         Src/bms_control.c
         Src/bms_derate.c

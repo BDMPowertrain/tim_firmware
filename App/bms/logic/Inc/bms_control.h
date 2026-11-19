@@ -97,6 +97,17 @@
  * with no valid cell or no valid sensor, holds the limit: the measurement
  * fault takes BMS_OK, and so the limit, to zero within 150 ms.
  *
+ * Balancing (issue 68, ADR 0020) is bms_balance.h's, run after the state
+ * and BMS_OK, before the charge: only a settled Sweep (taken with every
+ * FET off) feeds the charge taper and the end-of-charge test, while every
+ * Sweep is judged for the BMS faults and feeds Derating and the frames.
+ * Its chain command (out.balance_command) runs after the step's work, as
+ * the open-wire check does, and never in the same step: a step whose
+ * balancing sends a command, or whose FET check is under way, puts the
+ * open-wire check off to the next step with a Sweep. Its result comes back
+ * on the next step (in.balance_ran, in.balance_result). No balancing
+ * failure is a BMS fault: a STOPPED balancing is a BMS_Status bit.
+ *
  * The frames (bms_tx.h: the send table): BMS_Status and BMS_Power every
  * step, one slower frame a step. BMS_Power, BMS_Limits and the summaries
  * carry the last Sweep's readings, over the cells and sensors it read
@@ -120,6 +131,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "bms_balance.h"
 #include "bms_charge.h"
 #include "bms_derate.h"
 #include "bms_tx.h"
@@ -202,6 +214,10 @@ typedef struct {
                                         within one second (control_step.h) */
     bool              open_wire_ran; /* the last step ran the open-wire check */
     bq_open_wire_t    open_wire;     /* its result, when it did */
+    /* The last step's out.balance_command: ran, false if it could not be
+       planned (the chain not running), and its result. */
+    bool              balance_ran;
+    bq_balance_result_t balance_result;
     bool              bus_off_latched;
     bool              error_passive;
     bool              rx_overflowed;
@@ -213,8 +229,9 @@ typedef struct {
     uint8_t  data[EVENT_DATA_SIZE];
 } bms_event_t;
 
-/* One per fault, all raised in one step at most, and charge control's. */
-#define BMS_CONTROL_EVENTS_MAX ((size_t)BMS_FAULT_COUNT + BMS_CHARGE_EVENTS_MAX)
+/* One per fault, all raised in one step at most, charge control's and
+   balancing's. */
+#define BMS_CONTROL_EVENTS_MAX     ((size_t)BMS_FAULT_COUNT + BMS_CHARGE_EVENTS_MAX + BMS_BALANCE_EVENTS_MAX)
 
 typedef struct {
     uint8_t  state;
@@ -226,6 +243,9 @@ typedef struct {
     /* Run the open-wire check after this step's work, and hand its result
        in on the next step. */
     bool     open_wire_due;
+    /* Or, never with it, this balancing command (bq_chain.h);
+       BQ_BALANCE_NONE: none. */
+    bq_balance_cmd_t balance_command;
 
     /* The frames due on this step, built (bms_tx.h says which), to send in
        this order. */
@@ -235,6 +255,14 @@ typedef struct {
     uint16_t discharge_limit_da; /* the Discharge limit sent, 0.1 A */
     uint16_t charge_limit_da;    /* the Charge limit sent, 0.1 A */
     bms_charge_state_t charge;   /* the charge (bms_charge.h) */
+    /* Balancing (bms_balance.h): BMS_Balancing's State and Reason, the
+       last settled Sweep's Cell spread, and the cells commanded on (bit
+       k of bleeding[d - 1]: cell k + 1 of device d), the DAQ bus's bleed
+       flags. */
+    uint8_t  balance_state;
+    uint8_t  balance_reason;
+    uint16_t cell_spread_mv;
+    uint8_t  bleeding[BQ_SWEEP_DEVICES];
     bms_pack_summary_t summary;  /* the last Sweep's, for the snapshot */
 
     size_t      event_count;
@@ -255,7 +283,10 @@ typedef struct {
     bms_tx_e2e_t e2e;
     bms_derate_t derate;
     bms_charge_t charge;
+    bms_balance_t balance;
+    bms_balance_out_t balance_out; /* this step's: here, off the step's stack */
     bms_pack_summary_t summary;    /* the last Sweep's */
+    bms_pack_summary_t settled;    /* the last settled Sweep's: the charge's */
     /* The self-checks. */
     bool         commanded;        /* BMS_OK as last written; low from reset */
     uint16_t     feedback_bad;     /* read-back wrong, Sweeps in a row */

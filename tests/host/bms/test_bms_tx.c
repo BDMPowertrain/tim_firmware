@@ -68,6 +68,36 @@ static void test_the_charger_request_is_due_in_the_0x202_slot_once_in_fifty_step
     TEST_ASSERT_EQUAL_UINT(10u, due);
 }
 
+/* Issue 68: BMS_Balancing takes the 0x202 slot on step 26 of each second
+   (can/control.dbc), never the charger request's. */
+static void test_the_balancing_frame_is_due_in_the_0x202_slot_on_step_26_of_fifty(void)
+{
+    unsigned due = 0u;
+    for (uint32_t n = 0u; n < 500u; n++) {
+        if (bms_tx_balancing_due(n)) {
+            due++;
+            TEST_ASSERT_EQUAL_UINT32(26u, n % 50u);
+            TEST_ASSERT_EQUAL(BMS_TX_SLOW_INVERTER_LIMITS, bms_tx_slow_due(n));
+            TEST_ASSERT_FALSE(bms_tx_charger_request_due(n));
+        }
+    }
+    TEST_ASSERT_EQUAL_UINT(10u, due);
+}
+
+/* can/control.dbc BMS_Balancing (0x600): State bits 0-3, Reason byte 1,
+   CellSpread bytes 2-3 in mV, little-endian. */
+static void test_the_balancing_frame_carries_state_reason_and_spread(void)
+{
+    const uint8_t want[8] = { 3, 5, 0x34, 0x12, 0, 0, 0, 0 };
+    bms_tx_frame_t f;
+
+    bms_tx_build_balancing(3u, 5u, 0x1234u, &f);
+    TEST_ASSERT_EQUAL_HEX32(0x600u, f.id);
+    TEST_ASSERT_FALSE(f.extended);
+    TEST_ASSERT_EQUAL_UINT8(8u, f.len);
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(want, f.data, 8u);
+}
+
 /* Elcon CAN Specification p.2, Message 1: 29-bit 0x1806E5F4, big-endian;
    BYTE1-2 voltage 0.1 V, BYTE3-4 current 0.1 A, BYTE5 control. */
 static void test_the_charger_request_is_the_elcon_message_1_layout(void)
@@ -162,6 +192,8 @@ int main(void)
     UNITY_BEGIN();
     RUN_TEST(test_the_charger_request_is_due_in_the_0x202_slot_once_in_fifty_steps);
     RUN_TEST(test_the_charger_request_is_the_elcon_message_1_layout);
+    RUN_TEST(test_the_balancing_frame_is_due_in_the_0x202_slot_on_step_26_of_fifty);
+    RUN_TEST(test_the_balancing_frame_carries_state_reason_and_spread);
     RUN_TEST(test_bms_status_is_due_on_every_step);
     RUN_TEST(test_a_startup_bms_status_says_startup_bms_ok_low_and_passes_its_e2e_check);
     RUN_TEST(test_bms_power_is_due_on_every_step);

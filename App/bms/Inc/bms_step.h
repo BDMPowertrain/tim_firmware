@@ -8,7 +8,9 @@
    faults, the states, BMS_OK and the Discharge limit are judged by
    bms_control.h; the frames go as bms_tx.h's send table says. When the
    logic asks, once a second, the open-wire check runs last in the step,
-   in a phase of its own (bq_chain.h). */
+   in a phase of its own (bq_chain.h); in Charge mode balancing's chain
+   commands run there too, never in the same step as the check
+   (bms_balance.h). */
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -50,6 +52,13 @@ typedef struct {
     uint32_t         open_wire_checks; /* run since power-on */
     uint32_t         open_wire_fails;  /* of them, failed */
     bq_open_wire_t   open_wire;      /* the last one's result */
+    /* Balancing (issue 68, bms_balance.h). */
+    uint8_t          balance_state;  /* BMS_Balancing State */
+    uint8_t          balance_reason;
+    uint16_t         cell_spread_mv; /* the last settled Sweep's */
+    /* Bit k of bleeding[d - 1]: cell k + 1 of device d commanded on, the
+       DAQ bus's per-cell bleed flags. */
+    uint8_t          bleeding[BQ_SWEEP_DEVICES];
 } bms_pack_t;
 
 /* Sets up the Control bus for the one frame the BMS reads, the charger's

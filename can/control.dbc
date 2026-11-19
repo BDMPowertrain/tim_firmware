@@ -67,6 +67,7 @@ BO_ 128 BMS_Status: 8 BMS
  SG_ ParametersDefaulted : 52|1@1+ (1,0) [0|1] "" VCU
  SG_ NotDualBank : 53|1@1+ (1,0) [0|1] "" VCU
  SG_ LastResetNotPowerOn : 54|1@1+ (1,0) [0|1] "" VCU
+ SG_ BalancingStopped : 55|1@1+ (1,0) [0|1] "" VCU
  SG_ BusOffLatched : 56|1@1+ (1,0) [0|1] "" VCU
  SG_ ErrorPassive : 57|1@1+ (1,0) [0|1] "" VCU
  SG_ ReceiveOverflow : 58|1@1+ (1,0) [0|1] "" VCU
@@ -269,6 +270,7 @@ CM_ SG_ 128 ChargeComplete "Charge complete: lasts until a power cycle.";
 CM_ SG_ 128 ParametersDefaulted "No valid stored parameters were found; running on defaults.";
 CM_ SG_ 128 NotDualBank "The MCU is not in dual-bank mode; nothing is written to flash.";
 CM_ SG_ 128 LastResetNotPowerOn "The last reset was not a power-on reset.";
+CM_ SG_ 128 BalancingStopped "Balancing STOPPED until a power cycle: a failed FET check, a rejected configuration, the lowest cell too far under the target, or no convergence in the 12 hours after Charge complete. The reason is in BMS_Balancing and the Event log. Not a BMS fault (ADR 0020).";
 CM_ SG_ 128 BusOffLatched "Third bus-off without 1 s clean; retrying once per second.";
 CM_ SG_ 128 ErrorPassive "The CAN1 controller is error-passive.";
 CM_ SG_ 128 ReceiveOverflow "A CAN1 receive FIFO has overflowed since power-up.";

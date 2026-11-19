@@ -248,6 +248,26 @@ static void test_the_charge_rested_event(void)
     TEST_ASSERT_EQUAL_STRING("charge rested cells", event_code_name(EVENT_CHARGE_RESTED));
 }
 
+/* Issue 68, ADR 0020: balancing changed state, here stopped for a failed
+   FET check on device 3's FET 4. */
+static void test_the_balancing_event(void)
+{
+    const event_balancing_t b = {
+        .from = 2u, .to = 5u, .reason = 8u, .spread_mv = 0x0021u,
+        .cells = { .highest_mv = 0x1004u, .highest = 0x0080u, .lowest_mv = 0x0F05u, .lowest = 1u },
+        .detail = 0x0304u,
+    };
+    const uint8_t want[EVENT_DATA_SIZE] = {
+        2, 5, 8, 0, 0x04, 0x10, 0x80, 0x00, 0x05, 0x0F, 0x01, 0x00, 0x21, 0x00, 0x04, 0x03,
+    };
+    uint8_t data[EVENT_DATA_SIZE];
+
+    memset(data, 0xAA, sizeof data);
+    event_data_balancing(data, &b);
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(want, data, EVENT_DATA_SIZE);
+    TEST_ASSERT_EQUAL_STRING("balancing", event_code_name(EVENT_BALANCING));
+}
+
 /* Issue 67: the charger's status flags changed. */
 static void test_the_charger_flags_event(void)
 {
@@ -297,6 +317,7 @@ int main(void)
     RUN_TEST(test_the_data_log_card_event);
     RUN_TEST(test_the_charge_event);
     RUN_TEST(test_the_charge_rested_event);
+    RUN_TEST(test_the_balancing_event);
     RUN_TEST(test_the_charger_flags_event);
     RUN_TEST(test_names);
     return UNITY_END();

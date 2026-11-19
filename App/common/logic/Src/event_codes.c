@@ -56,6 +56,7 @@ const char *event_code_name(uint16_t code)
     case EVENT_CHARGE:             return "charge";
     case EVENT_CHARGE_RESTED:      return "charge rested cells";
     case EVENT_CHARGER_FLAGS:      return "charger flags";
+    case EVENT_BALANCING:          return "balancing";
     default:                       return "?";
     }
 }
@@ -272,6 +273,17 @@ void event_data_charge_rested(uint8_t data[EVENT_DATA_SIZE], const event_charge_
     memset(data, 0, EVENT_DATA_SIZE);
     put_cells(&data[0], cells);
     put_u32(&data[8], since_stop_ms);
+}
+
+void event_data_balancing(uint8_t data[EVENT_DATA_SIZE], const event_balancing_t *b)
+{
+    memset(data, 0, EVENT_DATA_SIZE);
+    data[0] = b->from;
+    data[1] = b->to;
+    data[2] = b->reason;
+    put_cells(&data[4], &b->cells);
+    put_u16(&data[12], b->spread_mv);
+    put_u16(&data[14], b->detail);
 }
 
 void event_data_charger_flags(uint8_t data[EVENT_DATA_SIZE], const event_charger_flags_t *flags)

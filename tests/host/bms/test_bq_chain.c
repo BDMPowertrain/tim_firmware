@@ -27,6 +27,15 @@
  *   for an open wire's filter capacitor to drain, compare every cell with
  *   the threshold, sinks off, then read whether each device finished and
  *   what it found.
+ *
+ * Issue 68 (ADR 0020), balancing's chain commands (SLUSE81F 7.3.3,
+ * 7.3.6.4.6.3, 7.5.4.7):
+ * - "Each bleeding channel is armed with the chip's 10 s timer"; manual
+ *   balancing, the chip's auto mode not used; a rejected configuration
+ *   (BAL_STAT[INVALID_CBCONF]) is reported.
+ * - The stop: every timer to 0 s with BAL_GO, and the die temperature
+ *   each board's pause is judged on.
+ * - The balancing-FET check, odd and even FETs in turn.
  */
 #include <string.h>
 
@@ -719,9 +728,273 @@ static void test_a_delay_counts_in_the_worst_case(void)
     TEST_ASSERT_EQUAL_UINT32(2100u + 6000u + 600u + 1360u + 1520u, bq_plan_worst_us(&plan));
 }
 
+/* ---- balancing (issue 68; ADR 0020) ------------------------------------- */
+
+static bq_balance_cmd_t bal;
+static bq_balance_result_t balResult;
+
+/* Wakes the chain and plans op on it. */
+static void plan_balance(bq_balance_op_t op)
+{
+    bq_chain_init(&chain);
+    (void)wake_from(0u);
+    bal.op = op;
+    TEST_ASSERT_TRUE(bq_chain_plan_balance(&chain, &bal, &plan));
+}
+
+/* Each device's answer of n bytes from reg, top first; data[d - 1] is
+   device d's, and a device in missing does not answer. */
+static size_t each_answers(size_t at, uint16_t reg, const uint8_t data[16][2], size_t n,
+                           uint16_t missing)
+{
+    size_t len = at;
+    for (uint8_t dev = 16u; dev >= 1u; dev--) {
+        if ((missing & (1u << (dev - 1u))) == 0u) {
+            len += put_frame(&resp[len], dev, reg, data[dev - 1u], n);
+        }
+    }
+    return len;
+}
+
+static void test_balancing_is_planned_only_on_a_running_chain(void)
+{
+    bq_chain_init(&chain);
+    bal.op = BQ_BALANCE_STOP;
+    TEST_ASSERT_FALSE(bq_chain_plan_balance(&chain, &bal, &plan));
+    TEST_ASSERT_EQUAL_UINT(0u, plan.count);
+
+    (void)wake_from(0u);
+    bal.op = BQ_BALANCE_NONE;
+    TEST_ASSERT_FALSE(bq_chain_plan_balance(&chain, &bal, &plan));
+    TEST_ASSERT_EQUAL_UINT(0u, plan.count);
+}
+
+/* The stop (SLUSE81F 7.3.3.3.2): every timer to 0 s with BAL_GO, the FET
+   check's FETs off, then each device's die temperature. */
+static void test_the_stop_zeroes_every_timer_turns_the_check_fets_off_and_reads_die_temps(void)
+{
+    const uint8_t zeros[8] = {0};
+    const uint8_t balGo[] = {0x22};      /* FLTSTOP_EN, BAL_GO, manual */
+    const uint8_t cbfetOff[] = {0x00, 0x00};
+    const uint8_t cbfetGo[] = {0x40};    /* CBFET_CTRL_GO with none set */
+
+    plan_balance(BQ_BALANCE_STOP);
+
+    TEST_ASSERT_EQUAL_UINT(6u, plan.count);
+    assert_write(0u, BQ_BROADCAST_WRITE, 0u, 0x0318u, zeros, 8u);
+    assert_write(1u, BQ_BROADCAST_WRITE, 0u, 0x0320u, zeros, 8u);
+    assert_write(2u, BQ_BROADCAST_WRITE, 0u, 0x032Fu, balGo, 1u);
+    assert_write(3u, BQ_STACK_WRITE, 0u, 0x0338u, cbfetOff, 2u);
+    assert_write(4u, BQ_STACK_WRITE, 0u, 0x033Cu, cbfetGo, 1u);
+    assert_read(5u, 0x05AEu, 2u); /* DIETEMP1_HI/LO */
+}
+
+/* DIETEMP1 counts 0.025 C, signed, 0 at 0 C; 0x8000 is no conversion yet. */
+static void test_the_stop_reads_each_boards_die_temperature_in_tenths(void)
+{
+    uint8_t die[16][2] = {{0}};
+    die[0][0] = 0x0E; die[0][1] = 0xD8; /* 3800: 95.0 C */
+    die[1][0] = 0xFF; die[1][1] = 0x9C; /* -100: -2.5 C */
+    die[2][0] = 0x80; die[2][1] = 0x00; /* not converted */
+
+    plan_balance(BQ_BALANCE_STOP);
+    bq_chain_balance_done(&bal, true, resp, each_answers(0u, 0x05AEu, die, 2u, 0x0008u),
+                          &balResult);
+
+    TEST_ASSERT_TRUE(balResult.ok);
+    TEST_ASSERT_EQUAL_INT16(950, balResult.die_dc[0]);
+    TEST_ASSERT_EQUAL_INT16(-25, balResult.die_dc[1]);
+    /* Device 3 not converted and device 4 silent: neither read. */
+    TEST_ASSERT_EQUAL_HEX16(0xFFF3u, balResult.devices_read);
+}
+
+/* Manual balancing with the 10 s timer: CB_CELL8..1_CTRL, cell 8 first. */
+static void test_the_set_writes_each_devices_timers_then_bal_go_then_reads_bal_stat(void)
+{
+    const uint8_t balGo[] = {0x22};
+    const uint8_t dev1[8] = {0, 0x01, 0, 0x01, 0, 0x01, 0, 0x01}; /* cells 7, 5, 3, 1 */
+    const uint8_t dev2[8] = {0x01, 0, 0, 0, 0, 0, 0x01, 0};       /* cells 8 and 2 */
+    const uint8_t none[8] = {0};
+
+    memset(&bal, 0, sizeof bal);
+    bal.cells[0] = 0x55u;
+    bal.cells[1] = 0x82u;
+    plan_balance(BQ_BALANCE_SET);
+
+    TEST_ASSERT_EQUAL_UINT(18u, plan.count);
+    assert_write(0u, BQ_SINGLE_WRITE, 1u, 0x0320u, dev1, 8u);
+    assert_write(1u, BQ_SINGLE_WRITE, 2u, 0x0320u, dev2, 8u);
+    for (size_t d = 3u; d <= 16u; d++) {
+        assert_write(d - 1u, BQ_SINGLE_WRITE, (uint8_t)d, 0x0320u, none, 8u);
+    }
+    assert_write(16u, BQ_BROADCAST_WRITE, 0u, 0x032Fu, balGo, 1u);
+    assert_read(17u, 0x052Bu, 1u); /* BAL_STAT */
+}
+
+static void test_a_set_a_device_refuses_is_reported(void)
+{
+    uint8_t stat[16][2] = {{0}};
+    stat[4][0] = 0x88; /* INVALID_CBCONF (and CB_RUN) on device 5 */
+
+    memset(&bal, 0, sizeof bal);
+    plan_balance(BQ_BALANCE_SET);
+    bq_chain_balance_done(&bal, true, resp, each_answers(0u, 0x052Bu, stat, 1u, 0u),
+                          &balResult);
+
+    TEST_ASSERT_TRUE(balResult.ok);
+    TEST_ASSERT_EQUAL_HEX16(0x0010u, balResult.rejected);
+    TEST_ASSERT_EQUAL_HEX16(0xFFFFu, balResult.devices_read);
+}
+
+/* The FET check (SLUSE81F 7.3.6.4.6.3): the AUX ADC over every active
+   cell, the FETs under test on, then the comparison. */
+static void test_the_fet_check_turns_the_cells_under_test_on_then_compares(void)
+{
+    const uint8_t aux[] = {0x00, 0x06};   /* ADC_CTRL2 all cells; ADC_CTRL3 continuous, AUX_GO */
+    const uint8_t odd[] = {0x00, 0x55};   /* DIAG_CBFET_CTRL1..2 */
+    const uint8_t cbfetGo[] = {0x40};
+    const uint8_t compare[] = {0x09};     /* COMP_ADC_SEL 100, COMP_ADC_GO */
+
+    memset(&bal, 0, sizeof bal);
+    bal.fet_cells = 0x55u;
+    plan_balance(BQ_BALANCE_FET_ON);
+    TEST_ASSERT_EQUAL_UINT(3u, plan.count);
+    assert_write(0u, BQ_STACK_WRITE, 0u, 0x030Eu, aux, 2u);
+    assert_write(1u, BQ_STACK_WRITE, 0u, 0x0338u, odd, 2u);
+    assert_write(2u, BQ_STACK_WRITE, 0u, 0x033Cu, cbfetGo, 1u);
+
+    plan_balance(BQ_BALANCE_FET_COMPARE);
+    TEST_ASSERT_EQUAL_UINT(1u, plan.count);
+    assert_write(0u, BQ_STACK_WRITE, 0u, 0x033Cu, compare, 1u);
+}
+
+/* The FETs go off before the results are read, so a read that times out
+   leaves none on. */
+static void test_the_fet_check_turns_its_fets_off_before_reading_the_results(void)
+{
+    const uint8_t cbfetOff[] = {0x00, 0x00};
+    const uint8_t cbfetGo[] = {0x40};
+
+    memset(&bal, 0, sizeof bal);
+    bal.fet_cells = 0xAAu;
+    plan_balance(BQ_BALANCE_FET_READ);
+
+    TEST_ASSERT_EQUAL_UINT(4u, plan.count);
+    assert_write(0u, BQ_STACK_WRITE, 0u, 0x0338u, cbfetOff, 2u);
+    assert_write(1u, BQ_STACK_WRITE, 0u, 0x033Cu, cbfetGo, 1u);
+    assert_read(2u, 0x0528u, 1u); /* ADC_STAT2 */
+    TEST_ASSERT_FALSE(plan.cmd[2].append);
+    assert_read(3u, 0x054Eu, 2u); /* FAULT_COMP_CBFET1..2 */
+    TEST_ASSERT_TRUE(plan.cmd[3].append);
+}
+
+/* ADC_STAT2[DRDY_CBFET] on every device, and FAULT_COMP_CBFET2 (cells 1
+   to 8) clear. */
+static size_t fet_check_response(const uint8_t stat[16][2], const uint8_t fails[16][2],
+                                 uint16_t missing)
+{
+    const size_t len = each_answers(0u, 0x0528u, stat, 1u, missing);
+    return each_answers(len, 0x054Eu, fails, 2u, missing);
+}
+
+static uint8_t fetDone[16][2];
+static uint8_t fetFails[16][2];
+
+static void fet_read(uint8_t cells)
+{
+    for (size_t d = 0u; d < 16u; d++) {
+        fetDone[d][0] = 0x02;
+    }
+    memset(fetFails, 0, sizeof fetFails);
+    memset(&bal, 0, sizeof bal);
+    bal.fet_cells = cells;
+    plan_balance(BQ_BALANCE_FET_READ);
+}
+
+static void test_every_fet_under_test_passing_on_every_device_is_a_pass(void)
+{
+    fet_read(0x55u);
+    bq_chain_balance_done(&bal, true, resp, fet_check_response(fetDone, fetFails, 0u),
+                          &balResult);
+    TEST_ASSERT_EQUAL(BQ_FET_CHECK_PASS, balResult.fet);
+    TEST_ASSERT_EQUAL_HEX16(0xFFFFu, balResult.devices_read);
+}
+
+static void test_a_fet_under_test_that_fails_is_named(void)
+{
+    fet_read(0xAAu);
+    fetFails[2][1] = 0x08; /* device 3, FET 4 */
+    fetFails[0][1] = 0x01; /* device 1, FET 1: not under test */
+    bq_chain_balance_done(&bal, true, resp, fet_check_response(fetDone, fetFails, 0u),
+                          &balResult);
+    TEST_ASSERT_EQUAL(BQ_FET_CHECK_FAIL, balResult.fet);
+    TEST_ASSERT_EQUAL_UINT8(3u, balResult.fet_device);
+    TEST_ASSERT_EQUAL_UINT16(2u * 8u + 4u, balResult.fet_cell);
+}
+
+/* An aborted comparison sets every fail bit (SLUSE81F 7.3.6.4.6.3). */
+static void test_a_device_that_did_not_finish_or_aborted_fails(void)
+{
+    fet_read(0x55u);
+    fetDone[6][0] = 0x00;
+    bq_chain_balance_done(&bal, true, resp, fet_check_response(fetDone, fetFails, 0u),
+                          &balResult);
+    TEST_ASSERT_EQUAL(BQ_FET_CHECK_FAIL, balResult.fet);
+    TEST_ASSERT_EQUAL_UINT8(7u, balResult.fet_device);
+    TEST_ASSERT_EQUAL_UINT16(0u, balResult.fet_cell);
+
+    fet_read(0x55u);
+    fetFails[9][0] = 0xFF;
+    fetFails[9][1] = 0xFF;
+    bq_chain_balance_done(&bal, true, resp, fet_check_response(fetDone, fetFails, 0u),
+                          &balResult);
+    TEST_ASSERT_EQUAL(BQ_FET_CHECK_FAIL, balResult.fet);
+    TEST_ASSERT_EQUAL_UINT8(10u, balResult.fet_device);
+}
+
+static void test_a_device_that_does_not_answer_leaves_the_fet_check_unknown(void)
+{
+    fet_read(0x55u);
+    bq_chain_balance_done(&bal, false, resp, fet_check_response(fetDone, fetFails, 0x0100u),
+                          &balResult);
+    TEST_ASSERT_FALSE(balResult.ok);
+    TEST_ASSERT_EQUAL(BQ_FET_CHECK_UNKNOWN, balResult.fet);
+    TEST_ASSERT_EQUAL_HEX16(0xFEFFu, balResult.devices_read);
+}
+
+/* Each balancing plan runs after the step's Sweep, never with the
+   open-wire check: the two together fit inside the 20 ms step. */
+static void test_a_sweep_and_any_balancing_plan_fit_in_one_step(void)
+{
+    static const bq_balance_op_t ops[] = {BQ_BALANCE_STOP, BQ_BALANCE_SET, BQ_BALANCE_FET_ON,
+                                          BQ_BALANCE_FET_COMPARE, BQ_BALANCE_FET_READ};
+    bq_plan_t sweepPlan;
+
+    for (size_t i = 0u; i < sizeof ops / sizeof ops[0]; i++) {
+        memset(&bal, 0, sizeof bal);
+        plan_balance(ops[i]);
+        bq_chain_plan(&chain, 10000u, &sweepPlan);
+        TEST_ASSERT_TRUE(bq_plan_worst_us(&plan) <= BQ_PLAN_BUDGET_US);
+        TEST_ASSERT_TRUE(bq_plan_worst_us(&sweepPlan) + bq_plan_worst_us(&plan) < 20000u);
+        TEST_ASSERT_TRUE(bq_plan_response_len(&plan) <= BQ_RESPONSE_MAX);
+    }
+}
+
 int main(void)
 {
     UNITY_BEGIN();
+    RUN_TEST(test_balancing_is_planned_only_on_a_running_chain);
+    RUN_TEST(test_the_stop_zeroes_every_timer_turns_the_check_fets_off_and_reads_die_temps);
+    RUN_TEST(test_the_stop_reads_each_boards_die_temperature_in_tenths);
+    RUN_TEST(test_the_set_writes_each_devices_timers_then_bal_go_then_reads_bal_stat);
+    RUN_TEST(test_a_set_a_device_refuses_is_reported);
+    RUN_TEST(test_the_fet_check_turns_the_cells_under_test_on_then_compares);
+    RUN_TEST(test_the_fet_check_turns_its_fets_off_before_reading_the_results);
+    RUN_TEST(test_every_fet_under_test_passing_on_every_device_is_a_pass);
+    RUN_TEST(test_a_fet_under_test_that_fails_is_named);
+    RUN_TEST(test_a_device_that_did_not_finish_or_aborted_fails);
+    RUN_TEST(test_a_device_that_does_not_answer_leaves_the_fet_check_unknown);
+    RUN_TEST(test_a_sweep_and_any_balancing_plan_fit_in_one_step);
     RUN_TEST(test_the_first_step_sends_the_wake_ping_and_nothing_else);
     RUN_TEST(test_the_next_step_wakes_the_stack_through_the_bridge);
     RUN_TEST(test_nothing_goes_up_the_stack_until_its_wake_tone_has_passed);

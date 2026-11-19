@@ -37,6 +37,8 @@
 #define BQ_SWEEP_DEVICES          16u
 #define BQ_SWEEP_CELLS_PER_DEVICE 8u
 #define BQ_SWEEP_CELLS            (BQ_SWEEP_DEVICES * BQ_SWEEP_CELLS_PER_DEVICE)
+/* devices_read with every device read. */
+#define BQ_SWEEP_ALL_DEVICES      ((uint16_t)((1u << BQ_SWEEP_DEVICES) - 1u))
 
 #define BQ_SWEEP_REG   0x0578u /* VCELL8_HI */
 #define BQ_SWEEP_COUNT 38u     /* to GPIO8_LO */
