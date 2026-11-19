@@ -148,7 +148,7 @@ The BMS condition after a charge has reached the **Charge target** and the BMS h
 _Avoid_: Full, charged, end of charge (that is the moment, not the condition)
 
 **Charging Shutdown Circuit**:
-The hand cart's counterpart of the Shutdown Circuit: the Charger Shutdown Button, BMS_OK and the insulation monitor in series, holding the charging isolation relays closed. It is separate hardware from the car's Shutdown Circuit and only one of the two is ever connected to the pack.
+The hand cart's counterpart of the Shutdown Circuit: the Charger Shutdown Button, BMS_OK and the insulation monitor in series, holding the charging isolation relays closed and the charger's Enable pin on. It is separate hardware from the car's Shutdown Circuit and only one of the two is ever connected to the pack.
 _Avoid_: Charge SDC, charger interlock
 
 **Balancing**:
