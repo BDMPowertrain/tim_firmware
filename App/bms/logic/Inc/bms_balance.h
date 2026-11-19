@@ -123,10 +123,11 @@
 #define BMS_BALANCE_PAUSE_MS         60u
 #define BMS_BALANCE_BOARD_HOT_DC     950  /* die temperature: pause the board */
 #define BMS_BALANCE_BOARD_COOL_DC    850  /* resume it at or under */
-#define BMS_BALANCE_CELLS_HOT_DC     450  /* hottest sensor: pause every board */
-/* Resume under: 2 C under the pause, so a reading on the line does not
-   pause and resume every second. */
-#define BMS_BALANCE_CELLS_COOL_DC    430
+/* Hottest sensor: pause every board at the charge's hot taper zero (the
+   unset 55 C, ADR 0019), resume under its full point (50 C), so balancing
+   stops where charging does. Under the 58 C over-temperature fault. */
+#define BMS_BALANCE_CELLS_HOT_DC     550
+#define BMS_BALANCE_CELLS_COOL_DC    500
 /* The FET check (SLUSE81F 7.3.6.4.6.3): the AUX ADC takes every cell once
    before the comparison (4.3 ms each to settle, 8 cells), then the
    comparison over every cell. To be confirmed on the bench. */

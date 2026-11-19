@@ -18,7 +18,8 @@
  *   balancing must stop when the Shutdown Circuit (or the Charging
  *   Shutdown Circuit) is open; about 40 ms (user story 20).
  * - "Balancing limits: pause a board at 95 C die temperature (resume 85 C);
- *   pause all at 45 C cell temperature; stop for the session if the lowest
+ *   pause all at 45 C cell temperature [55 C, resume under 50 C: in line
+ *   with the charge's hot taper, decided on issue 68]; stop for the session if the lowest
  *   cell is more than 200 mV under the target or 12 hours after Charge
  *   complete. A failed FET check, a rejected configuration or
  *   non-convergence stops balancing and is logged."
@@ -37,9 +38,9 @@
 #define STEP_MS   20u
 #define TARGET_MV 4100u
 #define MV_25C    1860u /* the Enepaq sensor at 25 C */
-#define MV_45C    1630u
-#define MV_44C    1640u
-#define MV_43C    1650u
+#define MV_55C    1550u
+#define MV_54C    1558u
+#define MV_50C    1590u
 
 static bms_balance_t b;
 static bms_balance_in_t in;
@@ -672,17 +673,20 @@ static void test_every_hot_board_is_paused_board_hot(void)
     TEST_ASSERT_EQUAL_UINT(0u, sets);
 }
 
-static void test_every_board_pauses_at_45_c_cell_temperature(void)
+static void test_every_board_pauses_at_55_c_cell_temperature_until_under_50_c(void)
 {
     run_to_first_set();
-    sweep.temp_mv[77] = MV_45C;
+    sweep.temp_mv[77] = MV_54C; /* 54 C: still balancing */
+    steps(3000u);
+    TEST_ASSERT_EQUAL_UINT8(BMS_BALANCE_BALANCING, out.state);
+    sweep.temp_mv[77] = MV_55C;
     step_until_state(BMS_BALANCE_PAUSED);
     TEST_ASSERT_EQUAL_UINT8(BMS_BALANCE_CELLS_HOT, out.reason);
     clear_counts();
-    sweep.temp_mv[77] = MV_44C;
+    sweep.temp_mv[77] = MV_50C; /* 50.0 C: not under it yet */
     steps(3000u);
     TEST_ASSERT_EQUAL_UINT(0u, sets);
-    sweep.temp_mv[77] = MV_43C + 1u; /* just under 43 C */
+    sweep.temp_mv[77] = MV_50C + 1u; /* 49.9 C */
     step_until(BQ_BALANCE_SET);
     TEST_ASSERT_EQUAL_UINT8(BMS_BALANCE_BALANCING, out.state);
 }
@@ -853,7 +857,7 @@ int main(void)
     RUN_TEST(test_a_set_that_failed_is_stopped);
     RUN_TEST(test_a_board_pauses_at_95_c_die_temperature_and_resumes_at_85_c);
     RUN_TEST(test_every_hot_board_is_paused_board_hot);
-    RUN_TEST(test_every_board_pauses_at_45_c_cell_temperature);
+    RUN_TEST(test_every_board_pauses_at_55_c_cell_temperature_until_under_50_c);
     RUN_TEST(test_the_lowest_cell_more_than_200_mv_under_the_target_stops_it);
     RUN_TEST(test_an_invalid_sensor_does_not_hold_off_the_low_cell_stop);
     RUN_TEST(test_a_failed_fet_check_stops_balancing_with_the_fet_named);
