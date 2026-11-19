@@ -59,6 +59,9 @@ static bool openWireRan;
 static bq_open_wire_t openWire;
 static uint32_t openWireChecks;
 static uint32_t openWireFails;
+/* The balancing command run at the end of the last step, for this one. */
+static bool balanceRan;
+static bq_balance_result_t balanceResult;
 
 /* Read by the shell. */
 static bms_pack_t published;
@@ -171,6 +174,9 @@ static void phase_input(control_step_ctx_t *ctx)
     in.open_wire_ran = openWireRan;
     in.open_wire = openWire;
     openWireRan = false;
+    in.balance_ran = balanceRan;
+    in.balance_result = balanceResult;
+    balanceRan = false;
     in.bus_off_latched = bus.latched;
     in.error_passive = bus.error_passive;
     in.rx_overflowed = bus.rx_overflowed;
@@ -224,22 +230,48 @@ static void phase_output(control_step_ctx_t *ctx)
     pack.open_wire_checks = openWireChecks;
     pack.open_wire_fails = openWireFails;
     pack.open_wire = openWire;
+    pack.balance_state = out.balance_state;
+    pack.balance_reason = out.balance_reason;
+    pack.cell_spread_mv = out.cell_spread_mv;
+    memcpy(pack.bleeding, out.bleeding, sizeof pack.bleeding);
     masked_copy(&published, &pack, sizeof published);
 }
 
-/* The open-wire check (bq_chain.h), when the logic asks: after the step's
-   Sweep, judgement, BMS_OK, frames and snapshot, so a check never delays
-   or replaces any of them (spec #36). The sinks are off again before the
-   next Sweep. Its result goes to the logic on the next step, and to the
-   snapshot then. */
-static void phase_open_wire(control_step_ctx_t *ctx)
+/* Balancing's command (bq_chain.h, bms_balance.h), when the logic gives
+   one: never on the step with the open-wire check (bms_control.h). A
+   command the chain cannot take (not running) is reported as not run. */
+static void run_balance_command(control_step_ctx_t *ctx)
 {
     cell_monitor_result_t link;
 
+    balanceRan = false;
+    if (!bq_chain_plan_balance(&chain, &out.balance_command, &plan)) {
+        return;
+    }
+    ctx->extra_work_ran = true;
+    cell_monitor_run(&plan, &link);
+    bq_chain_balance_done(&out.balance_command, link.ok, link.resp, link.len, &balanceResult);
+    balanceRan = true;
+}
+
+/* The open-wire check (bq_chain.h), or balancing's command, when the logic
+   asks: after the step's Sweep, judgement, BMS_OK, frames and snapshot, so
+   neither delays or replaces any of them (spec #36). The sinks are off
+   again before the next Sweep. The result goes to the logic on the next
+   step, and to the snapshot then. The overrun Event's flag says that one
+   of the two ran. */
+static void phase_chain(control_step_ctx_t *ctx)
+{
+    cell_monitor_result_t link;
+
+    if (out.balance_command.op != BQ_BALANCE_NONE) {
+        run_balance_command(ctx);
+        return;
+    }
     if (!out.open_wire_due || !bq_chain_plan_open_wire(&chain, &plan)) {
         return;
     }
-    ctx->extra_work_ran = true; /* the overrun Event says the check ran */
+    ctx->extra_work_ran = true;
     cell_monitor_run(&plan, &link);
     bq_chain_open_wire_done(&chain, link.ok, link.resp, link.len, &openWire);
     openWireRan = true;
@@ -259,7 +291,7 @@ static const control_phase_t bmsPhases[] = {
     { "input",  phase_input },
     { "logic",  phase_logic },
     { "output", phase_output },
-    { "openwire", phase_open_wire },
+    { "chain",  phase_chain },
 };
 
 /* The runner runs no phase past STEP_PHASE_MAX. */

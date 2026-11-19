@@ -62,6 +62,17 @@
  *   on one step in fifty; no request is ever sent outside CHARGE.
  * - Charger disobeys is a BMS fault. No charger flag is one.
  * - Charge complete is a BMS_Status bit.
+ *
+ * Issue 68 (ADR 0020): balancing through the step. The balancing logic
+ * itself is test_bms_balance.c's.
+ * - Only the paused (settled) Sweep feeds the charge taper and the
+ *   end-of-charge test; every Sweep is still judged for the BMS faults.
+ * - The open-wire check never runs in a step with a balancing command.
+ * - The stop goes in the step BMS_OK goes low or the sense opens
+ *   (EV.8.3.3); no FET is commanded on out of CHARGE.
+ * - BMS_Balancing (0x600) every 1 s in Charge mode only, in the 0x202
+ *   slot on step 26 of fifty; a STOPPED balancing is a BMS_Status bit and
+ *   never a BMS fault.
  */
 #include <string.h>
 
@@ -91,6 +102,10 @@ static bq_sweep_t sweep;
 static mailbox_t charger;
 static uint16_t chargerDa; /* its reported output current, 0.1 A */
 static uint8_t chargerFlags;
+
+/* The chain carries out every balancing command: each board's die at
+   40 C, every FET checked good. */
+static bq_balance_result_t balanceDone;
 
 /* What the open-wire check finds whenever a step runs it. */
 static bq_open_wire_t found;
@@ -123,6 +138,11 @@ void setUp(void)
     chargerFlags = 0u;
     good_sweep();
     found = (bq_open_wire_t){ .verdict = BQ_OPEN_WIRE_PASS, .devices_read = 0xFFFFu };
+    balanceDone = (bq_balance_result_t){
+        .ok = true, .devices_read = 0xFFFFu, .fet = BQ_FET_CHECK_PASS,
+        .die_dc = {400, 400, 400, 400, 400, 400, 400, 400,
+                   400, 400, 400, 400, 400, 400, 400, 400},
+    };
     commanded = false;
     holdReadBack = false;
     loopClosed = false;
@@ -171,6 +191,10 @@ static void step(void)
     commanded = out.bms_ok;
     in.open_wire_ran = out.open_wire_due;
     in.open_wire = found;
+    /* Never both in one step: their worst cases together could outlast it. */
+    TEST_ASSERT_FALSE(out.open_wire_due && out.balance_command.op != BQ_BALANCE_NONE);
+    in.balance_ran = out.balance_command.op != BQ_BALANCE_NONE;
+    in.balance_result = balanceDone;
     in.now_ms += STEP_MS;
     in.step_count++;
 }
@@ -1399,7 +1423,138 @@ static void test_in_charge_the_request_goes_once_a_second_in_the_0x202_slot(void
         inverter += (sent(0x202u) != NULL) ? 1u : 0u;
     }
     TEST_ASSERT_EQUAL_UINT(3u, requests);
-    TEST_ASSERT_EQUAL_UINT(27u, inverter);
+    TEST_ASSERT_EQUAL_UINT(24u, inverter); /* and three BMS_Balancing */
+}
+
+/* ---- balancing (issue 68) ----------------------------------------------- */
+
+#define BALANCING_ID 0x600u
+
+/* Near the Charge target with a 20 mV spread: past the Balancing gate. */
+static void spread_cells(void)
+{
+    for (size_t i = 0; i < BQ_SWEEP_CELLS; i++) {
+        sweep.cell_mv[i] = 4070u;
+    }
+    sweep.cell_mv[0] = 4050u;
+}
+
+static bool bleeding(void)
+{
+    for (size_t d = 0; d < BQ_SWEEP_DEVICES; d++) {
+        if (out.bleeding[d] != 0u) {
+            return true;
+        }
+    }
+    return false;
+}
+
+/* Charging, then on until a cell bleeds; fails rather than hangs. */
+static void charge_until_bleeding(void)
+{
+    spread_cells();
+    (void)start_charge();
+    for (unsigned i = 0; i < 1000u && !bleeding(); i++) {
+        step();
+    }
+    TEST_ASSERT_TRUE(bleeding());
+}
+
+static void test_balancing_status_goes_once_a_second_in_charge_mode_only(void)
+{
+    power_up();
+    for (unsigned i = 0; i < 500u; i++) {
+        step();
+        TEST_ASSERT_NULL(sent(BALANCING_ID));
+    }
+
+    setUp();
+    spread_cells();
+    power_up_charge();
+    unsigned n = 0u;
+    for (unsigned i = 0; i < 3u * CHG_PERIOD_STEPS; i++) {
+        const uint32_t count = in.step_count;
+        step();
+        TEST_ASSERT_LESS_OR_EQUAL_size_t(3u, out.frame_count);
+        if (sent(BALANCING_ID) != NULL) {
+            n++;
+            TEST_ASSERT_EQUAL_UINT32(26u, count % CHG_PERIOD_STEPS);
+            struct can_control_bms_balancing_t f;
+            TEST_ASSERT_EQUAL_INT(0, can_control_bms_balancing_unpack(&f, frame(BALANCING_ID), 8u));
+            TEST_ASSERT_EQUAL_UINT8(out.balance_state, f.state);
+            TEST_ASSERT_EQUAL_UINT16(20u, f.cell_spread);
+        }
+    }
+    TEST_ASSERT_EQUAL_UINT(3u, n);
+}
+
+/* EV.8.3.3: the stop goes in the step the sense opens or BMS_OK goes low,
+   and while out of CHARGE no FET is commanded on. */
+static void test_balancing_stops_in_the_step_the_sense_opens(void)
+{
+    charge_until_bleeding();
+    loopClosed = false;
+    in.sdc_closed = false;
+    step();
+    TEST_ASSERT_EQUAL_INT(BQ_BALANCE_STOP, out.balance_command.op);
+    TEST_ASSERT_EQUAL_UINT8(BMS_BALANCE_PAUSED, out.balance_state);
+    TEST_ASSERT_EQUAL_UINT8(BMS_BALANCE_SENSE_OPEN, out.balance_reason);
+}
+
+static void test_balancing_stops_in_the_step_a_bms_fault_takes_bms_ok_low(void)
+{
+    charge_until_bleeding();
+    sweep.devices_read = 0x7FFFu; /* a device missing: the measurement fault */
+    for (unsigned i = 0; i < BMS_MEAS_SWEEPS && out.state == BMS_STATE_CHARGE; i++) {
+        step();
+    }
+    TEST_ASSERT_EQUAL_UINT8(BMS_STATE_FAULT, out.state);
+    TEST_ASSERT_EQUAL_INT(BQ_BALANCE_STOP, out.balance_command.op);
+    TEST_ASSERT_EQUAL_UINT8(BMS_BALANCE_BMS_FAULT, out.balance_reason);
+    step();
+    TEST_ASSERT_FALSE(bleeding());
+    for (unsigned i = 0; i < 200u; i++) {
+        step();
+        TEST_ASSERT_NOT_EQUAL(BQ_BALANCE_SET, out.balance_command.op);
+        TEST_ASSERT_NOT_EQUAL(BQ_BALANCE_FET_ON, out.balance_command.op);
+    }
+}
+
+/* Only the paused Sweep feeds the charge: a highest cell that reads at
+   the target only while cells bleed does not move the Charge limit. */
+static void test_the_charge_sees_only_the_settled_sweep(void)
+{
+    charge_until_bleeding();
+    step();
+    const uint16_t limit = out.charge_limit_da;
+    sweep.cell_mv[100] = 4100u;
+    unsigned unsettled = 0u;
+    while (bleeding()) {
+        step();
+        TEST_ASSERT_EQUAL_UINT16(limit, out.charge_limit_da);
+        unsettled++;
+    }
+    TEST_ASSERT_TRUE(unsettled > 40u);
+    for (unsigned i = 0; i < 5u; i++) {
+        step(); /* the pause, then the settled Sweep */
+    }
+    TEST_ASSERT_TRUE(out.charge_limit_da < limit);
+}
+
+static void test_a_stopped_balancing_is_a_status_bit_and_no_bms_fault(void)
+{
+    spread_cells();
+    sweep.cell_mv[0] = 3890u; /* more than 200 mV under the 4.10 V target */
+    power_up_charge();
+    for (unsigned i = 0; i < 500u && out.balance_state != BMS_BALANCE_STOPPED; i++) {
+        step();
+    }
+    TEST_ASSERT_EQUAL_UINT8(BMS_BALANCE_STOPPED, out.balance_state);
+    TEST_ASSERT_EQUAL_UINT8(BMS_BALANCE_LOW_CELL, out.balance_reason);
+    TEST_ASSERT_EQUAL_UINT8(1u, status().balancing_stopped);
+    TEST_ASSERT_EQUAL_UINT8(BMS_STATE_CHARGE, out.state);
+    TEST_ASSERT_TRUE(out.bms_ok);
+    TEST_ASSERT_EQUAL_HEX16(0u, out.seen);
 }
 
 /* "No request is ever sent outside CHARGE": in DRIVE, in STARTUP with the
@@ -1672,6 +1827,11 @@ int main(void)
     RUN_TEST(test_the_discharge_limit_is_zero_until_bms_ok_is_up);
     RUN_TEST(test_hearing_the_charger_is_charge_mode_until_a_power_cycle);
     RUN_TEST(test_in_charge_the_request_goes_once_a_second_in_the_0x202_slot);
+    RUN_TEST(test_balancing_status_goes_once_a_second_in_charge_mode_only);
+    RUN_TEST(test_balancing_stops_in_the_step_the_sense_opens);
+    RUN_TEST(test_balancing_stops_in_the_step_a_bms_fault_takes_bms_ok_low);
+    RUN_TEST(test_the_charge_sees_only_the_settled_sweep);
+    RUN_TEST(test_a_stopped_balancing_is_a_status_bit_and_no_bms_fault);
     RUN_TEST(test_no_charger_request_is_ever_sent_outside_charge);
     RUN_TEST(test_no_charger_request_is_sent_in_fault_held);
     RUN_TEST(test_a_silent_charger_gets_stop_every_second_and_its_return_restarts_the_charge);

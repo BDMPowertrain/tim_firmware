@@ -35,6 +35,16 @@ bool bms_tx_charger_request_due(uint32_t step_count)
     return step_count % CHARGER_REQUEST_PERIOD == CHARGER_REQUEST_STEP;
 }
 
+#define BALANCING_STEP 26u /* can/control.dbc, BMS_Balancing */
+_Static_assert(BALANCING_STEP % BMS_TX_SLOW_COUNT == BMS_TX_SLOW_INVERTER_LIMITS,
+               "the balancing status takes a 0x202 slot");
+_Static_assert(BALANCING_STEP != CHARGER_REQUEST_STEP, "not the charger request's");
+
+bool bms_tx_balancing_due(uint32_t step_count)
+{
+    return step_count % CHARGER_REQUEST_PERIOD == BALANCING_STEP;
+}
+
 /* The lowest and highest of a run of readings, and where they are. */
 typedef struct {
     uint16_t n;
@@ -164,6 +174,18 @@ void bms_tx_build_charger_request(const struct can_control_chg_request_t *r,
     uint8_t *d = start(f, CAN_CONTROL_CHG_REQUEST_FRAME_ID, CAN_CONTROL_CHG_REQUEST_LENGTH);
     f->extended = true;
     (void)can_control_chg_request_pack(d, r, f->len);
+}
+
+void bms_tx_build_balancing(uint8_t state, uint8_t reason, uint16_t spread_mv,
+                            bms_tx_frame_t *f)
+{
+    const struct can_control_bms_balancing_t b = {
+        .state = state,
+        .reason = reason,
+        .cell_spread = spread_mv,
+    };
+    uint8_t *d = start(f, CAN_CONTROL_BMS_BALANCING_FRAME_ID, CAN_CONTROL_BMS_BALANCING_LENGTH);
+    (void)can_control_bms_balancing_pack(d, &b, f->len);
 }
 
 void bms_tx_build_slow(bms_tx_slow_t slow, const bms_tx_values_t *v, bms_tx_e2e_t *e2e,

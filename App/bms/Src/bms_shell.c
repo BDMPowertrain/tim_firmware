@@ -90,6 +90,17 @@ static int cmd_cells(int argc, char **argv)
                  bms_charge_state_name(pack.charge), (unsigned)(pack.charge_limit_da / 10u),
                  (unsigned)(pack.charge_limit_da % 10u),
                  pack.charger_heard ? "heard" : "not heard");
+    /* Balancing (issue 68, ADR 0020). */
+    unsigned bleeding = 0u;
+    for (size_t d = 0u; d < BQ_SWEEP_DEVICES; d++) {
+        for (unsigned k = 0u; k < BQ_SWEEP_CELLS_PER_DEVICE; k++) {
+            bleeding += (pack.bleeding[d] >> k) & 1u;
+        }
+    }
+    shell_printf("balancing %s (%s), cell spread %u mV, %u cells bleeding\r\n",
+                 bms_balance_state_name(pack.balance_state),
+                 bms_balance_reason_name(pack.balance_reason), (unsigned)pack.cell_spread_mv,
+                 bleeding);
     /* The second layers (issue 64). */
     shell_printf("NFAULT %s, BMS_OK read-back %s, shutdown sense %s, bridge FAULT_SUMMARY ",
                  pack.nfault_ok ? "high" : "LOW", pack.bms_ok_fb ? "high" : "low",
@@ -114,7 +125,7 @@ static int cmd_cells(int argc, char **argv)
         return 0;
     }
 
-    shell_printf("dev    cell 1..8 (mV) / sensor 1..8 (C)\r\n");
+    shell_printf("dev    cell 1..8 (mV, * bleeding) / sensor 1..8 (C)\r\n");
     for (unsigned d = 0u; d < BQ_SWEEP_DEVICES; d++) {
         if ((pack.sweep.devices_read & (1u << d)) == 0u) {
             shell_printf("%3u  missing\r\n", d + 1u);
@@ -125,8 +136,10 @@ static int cmd_cells(int argc, char **argv)
         int n = snprintf(line, sizeof line, "%3u  mV", d + 1u);
         for (size_t c = 0u; c < BQ_SWEEP_CELLS_PER_DEVICE && n > 0 && (size_t)n < sizeof line;
              c++) {
-            n += snprintf(&line[n], sizeof line - (size_t)n, " %5u",
-                          (unsigned)pack.sweep.cell_mv[base + c]);
+            /* '*': the cell is bleeding. */
+            n += snprintf(&line[n], sizeof line - (size_t)n, " %5u%c",
+                          (unsigned)pack.sweep.cell_mv[base + c],
+                          ((pack.bleeding[d] >> c) & 1u) != 0u ? '*' : ' ');
         }
         shell_printf("%s\r\n", line);
 
@@ -135,7 +148,7 @@ static int cmd_cells(int argc, char **argv)
              c++) {
             char t[8];
             put_temp(t, sizeof t, pack.sweep.temp_mv[base + c]);
-            n += snprintf(&line[n], sizeof line - (size_t)n, "%s", t);
+            n += snprintf(&line[n], sizeof line - (size_t)n, "%s ", t); /* under the cells */
         }
         shell_printf("%s\r\n", line);
     }
