@@ -180,7 +180,7 @@ The once-per-board setup of a TIM's MCU option settings, done before any **Image
 _Avoid_: First-time setup, board init, commissioning (that is the inverter's)
 
 **Lamp check**:
-An indicator being held on for a few seconds after GLV comes on so that a person can see it works.
+The rules sequence (EV.6.3) that proves the four identified indicators work: the Tractive System Status Indicator, the Ready to Move Light, the BMS Indicator Light and the IMD Indicator Light, held on together, starting within 1 s of GLV coming on, for 2 to 6 s. The fault LED's own few seconds on after a reset copy this timing but are not a Lamp check.
 _Avoid_: Bulb check, LED test, self-test
 
 **Kick**:
