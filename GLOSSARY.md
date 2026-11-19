@@ -183,6 +183,14 @@ _Avoid_: First-time setup, board init, commissioning (that is the inverter's)
 The rules sequence (EV.6.3) that proves the four identified indicators work: the Tractive System Status Indicator, the Ready to Move Light, the BMS Indicator Light and the IMD Indicator Light, held on together, starting within 1 s of GLV coming on, for 2 to 6 s. The fault LED's own few seconds on after a reset copy this timing but are not a Lamp check.
 _Avoid_: Bulb check, LED test, self-test
 
+**Cooling demand**:
+How hard the VCU runs the radiator fan and the coolant pump, each from off to full, judged on the hottest of the coolant temperature, the inverter's coolant estimate, its hot spot and the motor temperature. A temperature the VCU cannot trust counts as too hot.
+_Avoid_: Fan speed, cooling level, thermal management
+
+**Pump run-on**:
+The coolant pump running on after the Tractive System goes off, for a fixed time or until the coolant has cooled, whichever is later, while GLV stays on. A pump forced on from the shell to bleed the loop is not a run-on.
+_Avoid_: Afterrun, cool-down, overrun (an **Overrun** is a late step)
+
 **Kick**:
 The **Control step** telling the MCU's watchdog that it is alive and finished its last step properly. If the kicks stop, the watchdog resets the MCU.
 _Avoid_: Feed, pet, refresh, service the watchdog
