@@ -7,6 +7,7 @@
 
 #include "bms_charge.h"
 #include "bms_control.h"
+#include "bms_log.h"
 #include "bms_params.h"
 #include "bus_term.h"
 #include "cell_monitor.h"
@@ -286,6 +287,28 @@ void bms_step_read_pack(bms_pack_t *dst)
     masked_copy(dst, &published, sizeof *dst);
 }
 
+_Static_assert(BMS_LOG_SNAPSHOT_SIZE <= CONTROL_STEP_RECORD_MAX,
+               "the BMS's snapshot Record fits the runner's buffer");
+
+/* The step Record (issue 69, bms_log.h): the pack Record every step, the
+   snapshot in its place every fifth Sweep, from the step's own statics,
+   after the last phase. */
+static uint16_t step_record(const data_log_step_t *step, uint8_t *buf, size_t cap,
+                            uint8_t *type)
+{
+    if (cap < BMS_LOG_SNAPSHOT_SIZE) {
+        return 0u;
+    }
+    if (bms_log_snapshot_due(swept, sweeps)) {
+        bms_log_snapshot_encode(buf, step, bq_chain_state(&chain), &in, &out);
+        *type = DATA_LOG_BMS_SNAPSHOT;
+        return (uint16_t)BMS_LOG_SNAPSHOT_SIZE;
+    }
+    bms_log_pack_encode(buf, step, bq_chain_state(&chain), &in, &out);
+    *type = DATA_LOG_BMS_PACK;
+    return (uint16_t)BMS_LOG_PACK_SIZE;
+}
+
 static const control_phase_t bmsPhases[] = {
     { "sweep",  phase_sweep },
     { "input",  phase_input },
@@ -304,4 +327,5 @@ const control_step_def_t bms_step_def = {
     .phases = bmsPhases,
     .phase_count = sizeof(bmsPhases) / sizeof(bmsPhases[0]),
     .state_name = bms_control_state_name,
+    .record = step_record,
 };

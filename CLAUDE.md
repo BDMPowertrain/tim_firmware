@@ -191,7 +191,8 @@ undo provisioning.
   only FatFS caller; it starts when the step leaves STARTUP. The file
   format is
   App/common/logic/Inc/data_log_record.h, with the VCU's step Record in
-  App/vcu/logic/Inc/vcu_log.h, and tools/data_log_decode.py turns a file
+  App/vcu/logic/Inc/vcu_log.h and the BMS's pack and snapshot Records in
+  App/bms/logic/Inc/bms_log.h, and tools/data_log_decode.py turns a file
   into CSV: change them together (host tests check they agree; they need
   Python 3.10 or later and, for the DBC decoding, cantools from
   requirements.txt). If logging costs too much CPU, the retreat order is

@@ -89,8 +89,9 @@ typedef struct {
                                    uint8_t *type);
 } control_step_def_t;
 
-/* The longest step Record the runner takes from the image. */
-#define CONTROL_STEP_RECORD_MAX 256u
+/* The longest step Record the runner takes from the image: the BMS's
+   snapshot Record (580 bytes) is the longest today. */
+#define CONTROL_STEP_RECORD_MAX 600u
 
 /* The argument of control_step_task(). Must outlive the task. */
 typedef struct {

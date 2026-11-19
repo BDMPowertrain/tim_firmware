@@ -359,6 +359,22 @@ static void publish(void)
     };
     publisher->build_status(&status, frame.data);
     tx_queue_push(&frame);
+
+    /* The image's own frames, which it builds from its own copy of the
+       snapshot. Static: daqTask's alone, about 1 KB. */
+    static can_frame_t frames[CAN_IF_PUBLISH_FRAMES_MAX];
+    const size_t n = (publisher->build_frames != NULL)
+                         ? publisher->build_frames(published, frames, CAN_IF_PUBLISH_FRAMES_MAX)
+                         : 0u;
+    for (size_t i = 0; i < n && i < CAN_IF_PUBLISH_FRAMES_MAX; i++) {
+        if (!fdCapable && frames[i].len > 8u) {
+            txRejected++;
+            continue;
+        }
+        frames[i].is_fd = fdCapable; /* can/daq.dbc: StandardCAN_FD */
+        frames[i].is_brs = fdCapable;
+        tx_queue_push(&frames[i]);
+    }
     published++;
 }
 

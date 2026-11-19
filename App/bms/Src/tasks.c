@@ -15,6 +15,7 @@
 
 #include "bms_adc.h"
 #include "bms_daq.h"
+#include "bms_log.h"
 #include "bms_params.h"
 #include "bms_shell.h"
 #include "bms_step.h"
@@ -57,13 +58,17 @@ static const events_task_args_t eventTaskArgs = {
     .image = PARAMS_IMAGE_BMS,
 };
 
-/* The Data log's step ring (ADR 0021): 64 of today's step Records, 1.28 s
-   of 20 ms steps. The full cell snapshot (16 deep, every fifth Sweep)
-   replaces it with its own ticket. */
-#define STEP_RECORDS 64u
+/* The Data log's step ring (ADR 0021, issue 69): 16 full snapshots deep.
+   Each slot holds one step's Record, a pack Record or, every fifth Sweep,
+   a snapshot (bms_log.h), so the ring holds 320 ms of 20 ms steps. About
+   9.5 KB. */
+#define STEP_RECORDS 16u
 
-static uint32_t stepRecords[RECORD_RING_STORAGE_SIZE(STEP_RECORDS, DATA_LOG_STEP_SIZE) /
+static uint32_t stepRecords[RECORD_RING_STORAGE_SIZE(STEP_RECORDS, BMS_LOG_SNAPSHOT_SIZE) /
                             sizeof(uint32_t)];
+
+_Static_assert(BMS_LOG_SNAPSHOT_SIZE <= DATA_LOG_PAYLOAD_MAX,
+               "the logger takes the BMS's snapshot Record");
 
 /* Read by the Data log for as long as it runs. Logging starts when the
    step leaves STARTUP: BMS_OK has first risen, or a BMS fault came first. */
@@ -71,7 +76,7 @@ static const data_log_def_t dataLogDef = {
     .image = PARAMS_IMAGE_BMS,
     .startup_state = CAN_CONTROL_BMS_STATUS_STATE_STARTUP_CHOICE,
     .rings = {
-        [DATA_LOG_RING_STEP] = {stepRecords, sizeof stepRecords, DATA_LOG_STEP_SIZE},
+        [DATA_LOG_RING_STEP] = {stepRecords, sizeof stepRecords, BMS_LOG_SNAPSHOT_SIZE},
     },
 };
 
@@ -80,11 +85,26 @@ static const housekeeping_def_t housekeepingDef = {
     .poll = bms_adc_poll_vbat,
 };
 
+/* The module summaries and cell dump (bms_daq.h), run by daqTask at each
+   publish from its own copy of the published snapshot. Static: about
+   550 bytes, daqTask's alone. */
+static size_t build_daq_frames(uint32_t publish, can_frame_t *out, size_t max)
+{
+    static bms_pack_t pack;
+
+    bms_step_read_pack(&pack);
+    return bms_daq_build_frames(publish, &pack.sweep, pack.bleeding, out, max);
+}
+
+_Static_assert(BMS_DAQ_FRAMES_MAX <= CAN_IF_PUBLISH_FRAMES_MAX,
+               "one publish's frames fit the DAQ send queue with the status frame");
+
 /* What the DAQ publisher sends from the BMS (can/daq.dbc). */
 static const can_if_publisher_t daqPublisher = {
     .status_frame_id = CAN_DAQ_BMS_DAQ_STATUS_FRAME_ID,
     .status_frame_len = CAN_DAQ_BMS_DAQ_STATUS_LENGTH,
     .build_status = bms_daq_build_status,
+    .build_frames = build_daq_frames,
 };
 
 void tasks_init(void)

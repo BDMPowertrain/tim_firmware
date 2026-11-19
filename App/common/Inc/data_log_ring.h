@@ -10,7 +10,8 @@
    One ring (record_ring.h) per producer, each with that one writer and the
    logger as its one reader, no lock and no masked section:
    - STEP, written by the Control step once per step: the third way out of
-     the step (ADR 0010). 64 Records on the VCU (640 ms).
+     the step (ADR 0010). 64 Records on the VCU (640 ms), 16 on the BMS
+     (320 ms, each slot sized for its snapshot Record).
    - EVENT, written by the Event writer with a copy of each Event as
      stored (event_log_encode()), DATA_LOG_EVENT_RING_DEPTH deep. Its
      storage is this file's own.
