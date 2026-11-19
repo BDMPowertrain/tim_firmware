@@ -21,8 +21,8 @@
 #include "bq_sweep.h"
 #include "control_step.h"
 
-/* What the step publishes about the pack each step, for the shell and
-   later the Data log and the DAQ bus. Copied with interrupts masked (ADR
+/* What the step publishes about the pack each step, for the shell and the
+   DAQ publisher (bms_daq.h). Copied with interrupts masked (ADR
    0010: the BMS published snapshot; about 550 bytes, a little over that
    ADR's 500-byte estimate). */
 typedef struct {

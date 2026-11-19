@@ -12,23 +12,38 @@
      and returns: it never waits. A full queue drops its oldest frame.
    - the DAQ publisher runs inside daqTask every 100 ms. It copies the
      Control step's published snapshot (control_step_read()) and sends the
-     image's status frame. The step itself never calls anything here.
+     image's status frame, then the image's own frames, which the image
+     builds from its own copy of the snapshot (the BMS: its module
+     summaries and cell dump). The step itself never calls anything here.
    - CAN2's interrupts sit at priority 7, below CAN1's 5 (tim.ioc).
    - a bus-off is retried once per second forever (daq_retry.h) and
      affects nothing else. */
 
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 
 #include "can_frame.h"
 #include "daq_status.h"
+#include "frame_queue.h"
+
+/* The most frames build_frames may give at one publish: the send queue's
+   depth less the status frame, so a publish never pushes out its own
+   frames. */
+#define CAN_IF_PUBLISH_FRAMES_MAX (FRAME_QUEUE_DEPTH - 1u)
 
 /* What the image publishes: its own status frame (VCU_DaqStatus or
-   BMS_DaqStatus, the same 8-byte layout, can/daq.dbc). */
+   BMS_DaqStatus, the same 8-byte layout, can/daq.dbc) and, if
+   build_frames is set, the frames it gives at each publish. */
 typedef struct {
     uint32_t status_frame_id;
     uint8_t  status_frame_len; /* the frame's LENGTH in can_daq.h */
     void   (*build_status)(const daq_status_t *in, uint8_t *frame);
+    /* Optional, run by daqTask at each publish after the status frame:
+       fills out (ID, length, data) with at most max frames for the
+       publish'th publish (0 the first), and returns how many. Frames
+       longer than 8 bytes are not sent on a classic bus. */
+    size_t (*build_frames)(uint32_t publish, can_frame_t *out, size_t max);
 } can_if_publisher_t;
 
 typedef struct {
@@ -47,7 +62,7 @@ typedef struct {
     uint32_t tx_queue_dropped; /* oldest frames pushed out of the send queue */
     uint32_t tx_rejected;      /* refused by can_send(): FD frame on a classic
                                    bus, or too long for its format */
-    uint32_t published;        /* status frames queued by the publisher */
+    uint32_t published;        /* publishes, each one status frame queued */
     uint32_t bus_offs;         /* bus-offs seen by daqTask since power-on */
     uint32_t restarts;         /* bus-off restarts, once per second while off */
 } can_status_t;

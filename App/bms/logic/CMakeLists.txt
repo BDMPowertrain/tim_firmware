@@ -11,6 +11,7 @@ add_logic_library(logic_bms
         Src/bms_control.c
         Src/bms_derate.c
         Src/bms_daq.c
+        Src/bms_log.c
         Src/bms_params.c
         Src/bms_tx.c
         Src/bq_chain.c

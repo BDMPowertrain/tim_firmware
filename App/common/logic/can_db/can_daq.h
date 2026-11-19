@@ -298,7 +298,7 @@ struct can_daq_vcu_daq_status_t {
 /**
  * Signals in message BMS_ModuleSummary_00.
  *
- * Summary of module 0. Every 200 ms. ID = 0x610 + module. Same layout for every module. Cell and sensor numbers count from 0.
+ * Summary of module 0. Every 200 ms. ID = 0x610 + module. Same layout for every module. Cell and sensor numbers count from 0. Over the cells and sensors read validly: the cell half (bytes 0-3, cell numbers) or the temperature half (bytes 4-5, sensor numbers) with none read validly is all zeros. Odd modules on one 100 ms publish, even modules on the next.
  *
  * All signal values are as on the CAN bus.
  */
@@ -363,7 +363,7 @@ struct can_daq_bms_module_summary_00_t {
 /**
  * Signals in message BMS_CellVoltagesA_00.
  *
- * Voltages of cells 0-3 of module 0. Every 1 s. ID = 0x620 + 3 x module. Same layout for every module.
+ * Voltages of cells 0-3 of module 0. Every 1 s. ID = 0x620 + 3 x module. Same layout for every module. A cell not read is 0 V.
  *
  * All signal values are as on the CAN bus.
  */
@@ -400,7 +400,7 @@ struct can_daq_bms_cell_voltages_a_00_t {
 /**
  * Signals in message BMS_CellVoltagesB_00.
  *
- * Voltages of cells 4-7 of module 0. Every 1 s. ID = 0x621 + 3 x module. Same layout for every module.
+ * Voltages of cells 4-7 of module 0. Every 1 s. ID = 0x621 + 3 x module. Same layout for every module. A cell not read is 0 V.
  *
  * All signal values are as on the CAN bus.
  */
@@ -437,7 +437,7 @@ struct can_daq_bms_cell_voltages_b_00_t {
 /**
  * Signals in message BMS_CellTemps_00.
  *
- * Temperatures and bleed flags of module 0. Every 1 s. ID = 0x622 + 3 x module. 20 bytes (CAN FD): bytes 0-15 eight temperatures, byte 16 one bleed flag per cell (bit n = cell n is being bled by Balancing), bytes 17-19 spare. Same layout for every module.
+ * Temperatures and bleed flags of module 0. Every 1 s. ID = 0x622 + 3 x module. 20 bytes (CAN FD): bytes 0-15 eight temperatures, byte 16 one bleed flag per cell (bit n = cell n is being bled by Balancing), bytes 17-19 spare. Same layout for every module. A sensor not read validly (its device not read, or the reading outside 1300-2440 mV) is -3276.8 (raw 0x8000).
  *
  * All signal values are as on the CAN bus.
  */

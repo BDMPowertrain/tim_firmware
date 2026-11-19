@@ -540,6 +540,7 @@ int data_log_cmd(int argc, char **argv)
         [DATA_LOG_RING_IMU] = "imu",
         [DATA_LOG_RING_DAQ_RX] = "daq rx",
         [DATA_LOG_RING_DAQ_TX] = "daq tx",
+        [DATA_LOG_RING_SNAPSHOT] = "snapshot",
     };
 
     shell_printf("datalog: card %s\r\n", state_name(s.state));

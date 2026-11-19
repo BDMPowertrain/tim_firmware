@@ -5,7 +5,8 @@
         [--control-dbc can/control.dbc] [--daq-dbc can/daq.dbc]
 
 Writes <stem>.<type>.csv for each Record type the file holds (step, event,
-vcu_step, imu, daq_rx, daq_tx) into OUTDIR (default: beside the input) and
+vcu_step, imu, daq_rx, daq_tx, bms_pack, bms_snapshot) into OUTDIR (default:
+beside the input) and
 prints a summary: the file header, each type's Record count and the Records
 lost in gaps of its sequence numbers, Records skipped for a bad CRC, and the
 bytes of a torn last Record.
@@ -19,11 +20,18 @@ em_power_w) is left empty. Judge the 80 kW rule on a decoded step log with
     python tools/power_rule_windows.py <stem>.vcu_step.csv \\
         --time-column uptime_ms --power-column em_power_w
 
-The format is App/common/logic/Inc/data_log_record.h and, for the VCU's
-Records, App/vcu/logic/Inc/vcu_log.h; a change there changes this file in
-the same commit. tests/host checks they agree. Python 3.10 or later. The DBC
-decoding needs cantools (requirements.txt); a file with no VCU step or DAQ
-Records needs only the standard library.
+The BMS's Records: bms_pack.csv has every step's pack-level fields;
+bms_snapshot.csv has each snapshot's cell voltages (v_MM_C, V; empty if not
+read), sensor readings (t_MM_C_mv) and their temperatures by the firmware's
+own table (t_MM_C, C; empty outside 1300-2440 mV) and bleed flags (b_MM_C),
+module MM, cell C; its step_count matches that step's bms_pack row.
+
+The format is App/common/logic/Inc/data_log_record.h and, for each image's
+Records, App/vcu/logic/Inc/vcu_log.h and App/bms/logic/Inc/bms_log.h; a
+change there changes this file in the same commit. tests/host checks they
+agree. Python 3.10 or later. The DBC decoding needs cantools
+(requirements.txt); a file with no VCU step or DAQ Records needs only the
+standard library.
 """
 
 from __future__ import annotations
@@ -48,11 +56,16 @@ IMU = 4
 DAQ_RX = 5
 DAQ_TX = 6
 MAILBOXES = 7
+BMS_PACK = 8
+BMS_SNAPSHOT = 9
 TYPE_NAMES = {STEP: "step", EVENT: "event", VCU_STEP: "vcu_step", IMU: "imu",
-              DAQ_RX: "daq_rx", DAQ_TX: "daq_tx", MAILBOXES: "mailboxes"}
+              DAQ_RX: "daq_rx", DAQ_TX: "daq_tx", MAILBOXES: "mailboxes",
+              BMS_PACK: "bms_pack", BMS_SNAPSHOT: "bms_snapshot"}
 IMAGE_NAMES = {1: "VCU", 2: "BMS"}
 
-CAN_DIR = Path(__file__).resolve().parent.parent / "can"
+REPO = Path(__file__).resolve().parent.parent
+CAN_DIR = REPO / "can"
+CELL_TEMP_SCRIPT = REPO / "App" / "bms" / "logic" / "gen_cell_temp.py"
 
 # imu.h: the full scales imu.c configures (+/-8 g, +/-2000 dps).
 ACCEL_G_PER_LSB = 0.244 / 1000
@@ -73,6 +86,19 @@ INPUT_BITS = ["sdc_closed", "start_pressed", "can_running", "bus_off_latched",
 DECIDED_BITS = ["limiter_active", "lower_ceiling", "command_sent", "fault_clear_sent",
                 "status_sent", "brake_light", "fault_led", "pedal_check_due"]
 INV_COMMAND_ID = 0x0C0
+
+# bms_log.h
+BMS_PACK_SIZE = 52
+BMS_CELLS = 128
+BMS_SNAPSHOT_SIZE = BMS_PACK_SIZE + 4 * BMS_CELLS + 16
+BMS_INPUT_BITS = ["swept", "sdc_closed", "nfault_ok", "bms_ok_fb", "can_running",
+                  "bus_off_latched", "error_passive", "rx_overflowed"]
+BMS_DECIDED_BITS = ["bms_ok", "under_low_voltage_limit", "open_wire_due", "charger_valid",
+                    "current_valid", "bridge_read", "balance_command"]
+# bq_chain.h bq_chain_state_t and bms_charge.h bms_charge_state_t, in order.
+CHAIN_STATES = ["WAKE", "STACK_WAKE", "STACK_WAIT", "ADDRESS", "SYNC", "VERIFY",
+                "CONFIGURE", "PROTECT", "CLEAR", "RUNNING", "RETRY_WAIT"]
+CHARGE_STATES = ["OFF", "WAITING", "CHARGING", "COMPLETE"]
 
 
 def crc16(data: bytes) -> int:
@@ -350,6 +376,80 @@ class VcuStep:
         return out + boxes
 
 
+# ---- the BMS's Records -----------------------------------------------------
+
+_deci_celsius = None
+
+
+def cell_temp_c(mv: int) -> float | None:
+    """A sensor reading's temperature by the firmware's own table
+    (App/bms/logic/gen_cell_temp.py); None outside its range."""
+    global _deci_celsius
+    if _deci_celsius is None:
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("gen_cell_temp", CELL_TEMP_SCRIPT)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        _deci_celsius = (module.deci_celsius, module.MV_MIN, module.MV_MAX)
+    convert, lo, hi = _deci_celsius
+    return convert(mv) / 10 if lo <= mv <= hi else None
+
+
+def cell_name(index: int) -> str:
+    return f"{index // 8}.{index % 8}"
+
+
+def name_of(names: list[str], value: int) -> str:
+    return names[value] if value < len(names) else str(value)
+
+
+BMS_PACK_COLUMNS = (
+    STEP_COLUMNS + BMS_INPUT_BITS + BMS_DECIDED_BITS +
+    ["faults_active", "faults_seen", "chain_state", "charge_state", "balance_state",
+     "balance_reason", "devices_read", "bridge_fault", "cells_read", "sensors_read",
+     "pack_voltage_v", "min_cell_v", "max_cell_v", "min_cell", "max_cell",
+     "min_temp_c", "max_temp_c", "min_sensor", "max_sensor", "pack_current_a",
+     "discharge_limit_a", "charge_limit_a", "cell_spread_mv"])
+
+
+def bms_pack_row(r: Record) -> list:
+    p = r.payload
+    inputs, decided, active, seen, chain, charge, bal_state, bal_reason, devices, \
+        bridge, cells, sensors = struct.unpack_from("<BBHHBBBBHBBB", p, 12)
+    pack_mv, min_mv, max_mv, min_cell, max_cell, min_dc, max_dc, min_sensor, max_sensor, \
+        current, discharge, charge_limit, spread = struct.unpack_from("<IHHBBhhBBhHHH", p, 28)
+    return (step_row(r) +
+            [(inputs >> i) & 1 for i in range(len(BMS_INPUT_BITS))] +
+            [(decided >> i) & 1 for i in range(len(BMS_DECIDED_BITS))] +
+            [f"0x{active:04x}", f"0x{seen:04x}", name_of(CHAIN_STATES, chain),
+             name_of(CHARGE_STATES, charge), bal_state, bal_reason, f"0x{devices:04x}",
+             bridge, cells, sensors, pack_mv / 1000, min_mv / 1000, max_mv / 1000,
+             cell_name(min_cell), cell_name(max_cell), min_dc / 10, max_dc / 10,
+             cell_name(min_sensor), cell_name(max_sensor), current / 10, discharge / 10,
+             charge_limit / 10, spread])
+
+
+def cell_columns(prefix: str, suffix: str = "") -> list[str]:
+    return [f"{prefix}_{i // 8:02d}_{i % 8}{suffix}" for i in range(BMS_CELLS)]
+
+
+BMS_SNAPSHOT_COLUMNS = (["seq", "uptime_ms", "step_count"] + cell_columns("v") +
+                        cell_columns("t") + cell_columns("t", "_mv") + cell_columns("b"))
+
+
+def bms_snapshot_row(r: Record) -> list:
+    p = r.payload
+    (count,) = struct.unpack_from("<I", p, 0)
+    cells = struct.unpack_from(f"<{BMS_CELLS}H", p, BMS_PACK_SIZE)
+    temps = struct.unpack_from(f"<{BMS_CELLS}H", p, BMS_PACK_SIZE + 2 * BMS_CELLS)
+    bleed = p[BMS_PACK_SIZE + 4 * BMS_CELLS:]
+    return ([r.seq, r.uptime_ms, count] +
+            [mv / 1000 if mv else "" for mv in cells] +
+            [("" if (c := cell_temp_c(mv)) is None else c) for mv in temps] +
+            list(temps) +
+            [(bleed[i // 8] >> (i % 8)) & 1 for i in range(BMS_CELLS)])
+
+
 # ---- the file --------------------------------------------------------------
 
 def gaps(seqs: list[int]) -> tuple[int, int]:
@@ -398,6 +498,13 @@ def tables(d: Decoded, control_dbc: Path, daq_dbc: Path,
             out[t] = (DAQ_COLUMNS, [daq_row(r, db) for r in of(t)
                                     if len(r.payload) >= 5 and
                                     len(r.payload) == 5 + r.payload[4]])
+    if of(BMS_PACK):
+        out[BMS_PACK] = (BMS_PACK_COLUMNS, [bms_pack_row(r) for r in of(BMS_PACK)
+                                            if len(r.payload) == BMS_PACK_SIZE])
+    if of(BMS_SNAPSHOT):
+        out[BMS_SNAPSHOT] = (BMS_SNAPSHOT_COLUMNS,
+                             [bms_snapshot_row(r) for r in of(BMS_SNAPSHOT)
+                              if len(r.payload) == BMS_SNAPSHOT_SIZE])
     if of(VCU_STEP):
         maps = of(MAILBOXES)
         step = VcuStep(maps[0].payload if maps else None, load_dbc(control_dbc),

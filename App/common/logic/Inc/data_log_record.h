@@ -25,8 +25,8 @@
  * Record types and their payloads:
  *
  *   DATA_LOG_STEP  (1): the minimal step Record every image's Control step
- *     writes until its full Record exists: data_log_step_encode(). The BMS
- *     writes it for now.
+ *     writes until its full Record exists: data_log_step_encode(). Neither
+ *     image writes it now.
  *   DATA_LOG_EVENT (2): a copy of one Event, the 32 bytes the Event log
  *     stores (event_log.h, event_log_encode()), its own CRC included.
  *   DATA_LOG_VCU_STEP (3): the VCU's full step Record, from its Control
@@ -39,6 +39,12 @@
  *   DATA_LOG_MAILBOXES (7): what the mailboxes in a DATA_LOG_VCU_STEP are,
  *     written by the logger first in every file, sequence number 0:
  *     vcu_log_map_encode() (vcu_log.h).
+ *   DATA_LOG_BMS_PACK (8): the BMS's step Record, its pack-level fields,
+ *     from its Control step every step: bms_log_pack_encode().
+ *   DATA_LOG_BMS_SNAPSHOT (9): the BMS's full snapshot, those fields with
+ *     every cell voltage, sensor reading and bleed flag, from its Control
+ *     step every fifth Sweep through the snapshot ring:
+ *     bms_log_snapshot_encode() (both App/bms/logic/Inc/bms_log.h).
  *
  * This is logic (ADR 0002): no HAL, no RTOS, no clock.
  */
@@ -68,6 +74,8 @@ typedef enum {
     DATA_LOG_DAQ_RX    = 5,
     DATA_LOG_DAQ_TX    = 6,
     DATA_LOG_MAILBOXES = 7,
+    DATA_LOG_BMS_PACK     = 8,
+    DATA_LOG_BMS_SNAPSHOT = 9,
 } data_log_type_t;
 
 typedef struct {

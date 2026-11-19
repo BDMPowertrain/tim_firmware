@@ -71,6 +71,7 @@ add_host_test(test_reset_record logic_common common/test_reset_record.c)
 add_host_test(test_vcu_tx logic_vcu vcu/test_vcu_tx.c)
 add_host_test(test_vcu_daq logic_vcu vcu/test_vcu_daq.c)
 add_host_test(test_bms_daq logic_bms bms/test_bms_daq.c)
+add_host_test(test_bms_log logic_bms bms/test_bms_log.c)
 add_host_test(test_vcu_params logic_vcu vcu/test_vcu_params.c)
 add_host_test(test_vcu_sensors logic_vcu vcu/test_vcu_sensors.c)
 add_host_test(test_vcu_control logic_vcu vcu/test_vcu_control.c)
@@ -113,6 +114,15 @@ if(Python3_Interpreter_FOUND)
             -DDIR=${CMAKE_CURRENT_BINARY_DIR}
             -P ${CMAKE_CURRENT_SOURCE_DIR}/data_log_decoder_check.cmake)
     set_tests_properties(test_data_log_decoder PROPERTIES FIXTURES_REQUIRED data_log_sample)
+
+    # The BMS's Records (issue 69): the decoder on the file test_bms_log
+    # writes. Standard library only.
+    set_tests_properties(test_bms_log PROPERTIES FIXTURES_SETUP bms_log_sample)
+    add_test(NAME test_data_log_bms_decoder
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/data_log_bms_check.py
+            ${repo_root}/tools/data_log_decode.py
+            ${CMAKE_CURRENT_BINARY_DIR})
+    set_tests_properties(test_data_log_bms_decoder PROPERTIES FIXTURES_REQUIRED bms_log_sample)
 
     # The 80 kW rule's two windows (issue 60): the check itself, then the
     # traces the Power limiter's closed-loop test writes.
