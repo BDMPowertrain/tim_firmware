@@ -180,16 +180,16 @@ static void test_a_snapshot_is_due_on_every_fifth_sweep_only(void)
  * The host test test_data_log_bms_decoder runs tools/data_log_decode.py on
  * this file and checks what it makes of it
  * (tests/host/data_log_bms_check.py, which holds the expected values).
- * Both types come from the one step ring, so they share its sequence
- * numbers: here 0-3 pack, 4 snapshot, 5 lost, 6 pack. */
+ * Each type has its own ring and sequence numbers: here pack 0-4, 5 lost,
+ * 6, and snapshot 0 on pack 4's step. */
 
 static FILE *file;
-static uint32_t seq;
+static uint32_t seqs[16]; /* by Record type */
 
 static void put_record(uint8_t type, uint32_t uptime_ms, const void *payload, uint16_t len)
 {
     uint8_t rec[BMS_LOG_SNAPSHOT_SIZE + DATA_LOG_RECORD_OVERHEAD];
-    const record_head_t head = {.uptime_ms = uptime_ms, .seq = seq++, .len = len,
+    const record_head_t head = {.uptime_ms = uptime_ms, .seq = seqs[type]++, .len = len,
                                 .type = type};
     const size_t n = data_log_record_encode(rec, sizeof rec, &head, (const uint8_t *)payload);
 
@@ -202,10 +202,9 @@ static void put_step(uint32_t uptime_ms, bool snapshot)
     if (snapshot) {
         bms_log_snapshot_encode(b, &common, BQ_CHAIN_RUNNING, &in, &out);
         put_record(DATA_LOG_BMS_SNAPSHOT, uptime_ms, b, BMS_LOG_SNAPSHOT_SIZE);
-    } else {
-        bms_log_pack_encode(b, &common, BQ_CHAIN_RUNNING, &in, &out);
-        put_record(DATA_LOG_BMS_PACK, uptime_ms, b, BMS_LOG_PACK_SIZE);
     }
+    bms_log_pack_encode(b, &common, BQ_CHAIN_RUNNING, &in, &out);
+    put_record(DATA_LOG_BMS_PACK, uptime_ms, b, BMS_LOG_PACK_SIZE);
     common.step_count++;
 }
 
@@ -222,7 +221,7 @@ static void test_writes_a_bms_sample_file_with_both_record_types(void)
 
     file = fopen("bms_log_sample.tdl", "wb");
     TEST_ASSERT_NOT_NULL(file);
-    seq = 0u;
+    memset(seqs, 0, sizeof seqs);
     data_log_header_encode(hb, &h);
     TEST_ASSERT_EQUAL_size_t(sizeof hb, fwrite(hb, 1u, sizeof hb, file));
 
@@ -262,7 +261,7 @@ static void test_writes_a_bms_sample_file_with_both_record_types(void)
     put_step(4040u, false);
     put_step(4060u, false);
     put_step(4080u, true);
-    seq++; /* one Record lost at the ring */
+    seqs[DATA_LOG_BMS_PACK]++; /* one pack Record lost at its ring */
     common.step_count++;
     in.pack_current = (bms_current_t){.deci_a = -125, .valid = true};
     put_step(4120u, false);

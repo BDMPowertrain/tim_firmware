@@ -42,9 +42,9 @@ void bms_daq_build_status(const daq_status_t *in, uint8_t *frame)
 typedef struct {
     uint16_t mv[BQ_SWEEP_CELLS_PER_DEVICE];
     int16_t  dc[BQ_SWEEP_CELLS_PER_DEVICE];
-} module_t;
+} module_readings_t;
 
-static void module_of(const bq_sweep_t *s, uint8_t module, module_t *out)
+static void module_readings(const bq_sweep_t *s, uint8_t module, module_readings_t *out)
 {
     const bool read = (s->devices_read & (1u << module)) != 0u;
 
@@ -56,14 +56,16 @@ static void module_of(const bq_sweep_t *s, uint8_t module, module_t *out)
     }
 }
 
-/* 0.1 mV, the frames' unit; 6553 mV and above is held at the top. */
+/* The cell voltages' raw value: 0.1 mV (scale 0.0001 V in can/daq.dbc);
+   above 6553 mV is held at the top. */
 static uint16_t tenth_mv(uint16_t mv)
 {
-    return (mv >= UINT16_MAX / 10u) ? UINT16_MAX : (uint16_t)(mv * 10u);
+    return (mv > UINT16_MAX / 10u) ? UINT16_MAX : (uint16_t)(mv * 10u);
 }
 
-/* The summary's 8-bit temperature: 0.5 C above -40 C, rounded, held to
-   the signal's range. */
+/* The summary's 8-bit temperature (MaxTemp and MinTemp in can/daq.dbc,
+   scale 0.5, offset -40): 0.5 C above -40 C, rounded, held to the
+   signal's range. */
 static uint8_t summary_temp(int16_t dc)
 {
     const int32_t raw = ((int32_t)dc + 400 + 2) / 5;
@@ -73,7 +75,7 @@ static uint8_t summary_temp(int16_t dc)
     return (raw > 255) ? 255u : (uint8_t)raw;
 }
 
-static uint8_t *start(can_frame_t *f, uint32_t id, uint8_t len)
+static uint8_t *frame_init(can_frame_t *f, uint32_t id, uint8_t len)
 {
     memset(f, 0, sizeof *f);
     f->id = id;
@@ -82,7 +84,7 @@ static uint8_t *start(can_frame_t *f, uint32_t id, uint8_t len)
 }
 
 /* Over the cells and sensors read validly; with none, that half is 0. */
-static void build_summary(const module_t *m, uint8_t module, can_frame_t *f)
+static void build_summary(const module_readings_t *m, uint8_t module, can_frame_t *f)
 {
     struct can_daq_bms_module_summary_00_t sum = {0};
     uint8_t hi = 0, lo = 0, hot = 0, cool = 0;
@@ -112,13 +114,13 @@ static void build_summary(const module_t *m, uint8_t module, can_frame_t *f)
         sum.max_temp_sensor = hot;
         sum.min_temp_sensor = cool;
     }
-    uint8_t *d = start(f, CAN_DAQ_BMS_MODULE_SUMMARY_00_FRAME_ID + module,
+    uint8_t *d = frame_init(f, CAN_DAQ_BMS_MODULE_SUMMARY_00_FRAME_ID + module,
                        CAN_DAQ_BMS_MODULE_SUMMARY_00_LENGTH);
     (void)can_daq_bms_module_summary_00_pack(d, &sum, f->len);
 }
 
 /* The module's three dump frames into f[0..2]. */
-static void build_dump(const module_t *m, uint8_t module, uint8_t bleed, can_frame_t *f)
+static void build_dump(const module_readings_t *m, uint8_t module, uint8_t bleed, can_frame_t *f)
 {
     const uint32_t offset = DUMP_FRAMES_PER_MODULE * (uint32_t)module;
 
@@ -126,7 +128,7 @@ static void build_dump(const module_t *m, uint8_t module, uint8_t bleed, can_fra
         .cell0 = tenth_mv(m->mv[0]), .cell1 = tenth_mv(m->mv[1]),
         .cell2 = tenth_mv(m->mv[2]), .cell3 = tenth_mv(m->mv[3]),
     };
-    uint8_t *d = start(&f[0], CAN_DAQ_BMS_CELL_VOLTAGES_A_00_FRAME_ID + offset,
+    uint8_t *d = frame_init(&f[0], CAN_DAQ_BMS_CELL_VOLTAGES_A_00_FRAME_ID + offset,
                        CAN_DAQ_BMS_CELL_VOLTAGES_A_00_LENGTH);
     (void)can_daq_bms_cell_voltages_a_00_pack(d, &a, f[0].len);
 
@@ -134,7 +136,7 @@ static void build_dump(const module_t *m, uint8_t module, uint8_t bleed, can_fra
         .cell4 = tenth_mv(m->mv[4]), .cell5 = tenth_mv(m->mv[5]),
         .cell6 = tenth_mv(m->mv[6]), .cell7 = tenth_mv(m->mv[7]),
     };
-    d = start(&f[1], CAN_DAQ_BMS_CELL_VOLTAGES_B_00_FRAME_ID + offset,
+    d = frame_init(&f[1], CAN_DAQ_BMS_CELL_VOLTAGES_B_00_FRAME_ID + offset,
               CAN_DAQ_BMS_CELL_VOLTAGES_B_00_LENGTH);
     (void)can_daq_bms_cell_voltages_b_00_pack(d, &b, f[1].len);
 
@@ -146,7 +148,7 @@ static void build_dump(const module_t *m, uint8_t module, uint8_t bleed, can_fra
         .bleed4 = (uint8_t)((bleed >> 4) & 1u), .bleed5 = (uint8_t)((bleed >> 5) & 1u),
         .bleed6 = (uint8_t)((bleed >> 6) & 1u), .bleed7 = (uint8_t)((bleed >> 7) & 1u),
     };
-    d = start(&f[2], CAN_DAQ_BMS_CELL_TEMPS_00_FRAME_ID + offset, CAN_DAQ_BMS_CELL_TEMPS_00_LENGTH);
+    d = frame_init(&f[2], CAN_DAQ_BMS_CELL_TEMPS_00_FRAME_ID + offset, CAN_DAQ_BMS_CELL_TEMPS_00_LENGTH);
     (void)can_daq_bms_cell_temps_00_pack(d, &t, f[2].len);
 }
 
@@ -155,7 +157,7 @@ size_t bms_daq_build_frames(uint32_t publish, const bq_sweep_t *sweep,
                             can_frame_t *out, size_t max)
 {
     size_t n = 0;
-    module_t m;
+    module_readings_t m;
 
     for (uint8_t module = 0; module < BQ_SWEEP_DEVICES; module++) {
         const bool summary = (module % SUMMARY_PUBLISHES) == (publish % SUMMARY_PUBLISHES);
@@ -163,7 +165,7 @@ size_t bms_daq_build_frames(uint32_t publish, const bq_sweep_t *sweep,
         if (!summary && !dump) {
             continue;
         }
-        module_of(sweep, module, &m);
+        module_readings(sweep, module, &m);
         if (summary && n < max) {
             build_summary(&m, module, &out[n++]);
         }

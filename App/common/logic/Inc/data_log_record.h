@@ -16,10 +16,8 @@
  *     4 uptime (ms, u32), 8 sequence number (u32), 12 payload,
  *     then CRC-16 (crc16.h) of everything before it
  *
- * Each type has one producer and each ring its own sequence numbers
- * (record_ring.h), so a gap in one ring's numbers is a Record from it
- * lost. Every ring carries one type, but for the BMS's step ring's two
- * (below), whose gaps are judged together. A reader
+ * Each type has one producer and its own sequence numbers (record_ring.h),
+ * so a gap in one type's numbers is a Record of that type lost. A reader
  * that meets a bad CRC looks for the next sync byte that starts a whole
  * Record; a file cut off by a power loss or a pulled card ends in a torn
  * Record, which the reader reports and ignores.
@@ -41,12 +39,12 @@
  *   DATA_LOG_MAILBOXES (7): what the mailboxes in a DATA_LOG_VCU_STEP are,
  *     written by the logger first in every file, sequence number 0:
  *     vcu_log_map_encode() (vcu_log.h).
- *   DATA_LOG_BMS_PACK (8), DATA_LOG_BMS_SNAPSHOT (9): the BMS's step
- *     Records from its Control step, the pack-level fields every step and,
- *     every fifth Sweep in their place, those fields with every cell
- *     voltage, sensor reading and bleed flag: bms_log_pack_encode() and
- *     bms_log_snapshot_encode() (App/bms/logic/Inc/bms_log.h). They share
- *     the step ring's sequence numbers.
+ *   DATA_LOG_BMS_PACK (8): the BMS's step Record, its pack-level fields,
+ *     from its Control step every step: bms_log_pack_encode().
+ *   DATA_LOG_BMS_SNAPSHOT (9): the BMS's full snapshot, those fields with
+ *     every cell voltage, sensor reading and bleed flag, from its Control
+ *     step every fifth Sweep through the snapshot ring:
+ *     bms_log_snapshot_encode() (both App/bms/logic/Inc/bms_log.h).
  *
  * This is logic (ADR 0002): no HAL, no RTOS, no clock.
  */

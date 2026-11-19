@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Checks what tools/data_log_decode.py makes of the BMS sample file that
-test_bms_log writes (issue 69): both BMS Record types, their shared sequence
-numbers, and the cell temperatures from the sensors' millivolts.
+test_bms_log writes (issue 69): both BMS Record types, each type's gaps, and
+the cell temperatures from the sensors' millivolts.
 
     python data_log_bms_check.py DECODER DIR
 
@@ -38,17 +38,18 @@ def main() -> int:
 
     lines = done.stdout.splitlines()
     for line in ["file: image BMS, build 0000b115, boot 9, file 1, layout 1, opened at 4000 ms",
-                 # seq 0-3 and 6 pack, 4 snapshot: 5 lost, judged over both.
-                 "bms_pack: 5 records, 1 lost in 1 gaps",
-                 "bms_snapshot: 1 records, numbered with bms_pack",
+                 # pack 0-4 and 6: 5 lost; snapshot 0 alone.
+                 "bms_pack: 6 records, 1 lost in 1 gaps",
+                 "bms_snapshot: 1 records, 0 lost in 0 gaps",
                  "bad records: 0",
                  "torn tail: 0 bytes"]:
         expect(f"summary line {line!r}", line in lines, True)
 
-    # Every step's pack-level fields, the snapshot's included, in order.
+    # Every step's pack-level fields.
     pack = rows(out / "bms_log_sample.bms_pack.csv")
     expect("pack rows", [r["seq"] for r in pack], ["0", "1", "2", "3", "4", "6"])
-    expect("from a snapshot", [r["snapshot"] for r in pack], ["0", "0", "0", "0", "1", "0"])
+    expect("pack steps", [r["step_count"] for r in pack],
+           ["100", "101", "102", "103", "104", "106"])
     p0, p6 = pack[0], pack[5]
     for col, want in {
         "uptime_ms": "4000", "step_count": "100", "state": "1", "startup_ok": "1",
@@ -72,7 +73,7 @@ def main() -> int:
     expect("snapshot rows", len(snaps), 1)
     s = snaps[0] if snaps else {}
     for col, want in {
-        "seq": "4", "uptime_ms": "4080", "step_count": "104",
+        "seq": "0", "uptime_ms": "4080", "step_count": "104",
         "v_00_0": "3.9", "v_02_5": "3.95", "v_15_7": "3.9",
         "t_00_0": "25.0", "t_00_0_mv": "1860",
         "t_07_1": "", "t_07_1_mv": "3000",  # open: outside 1300-2440 mV

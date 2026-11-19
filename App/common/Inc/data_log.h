@@ -48,8 +48,8 @@ typedef struct {
     uint16_t    preamble_len;
 } data_log_def_t;
 
-/* The largest Record payload the logger takes from a ring: the BMS's
-   snapshot Record (580 bytes) is the largest today. */
+/* The largest Record payload the logger takes from a ring: room for the
+   BMS's snapshot Record (BMS_LOG_SNAPSHOT_SIZE, asserted in its tasks.c). */
 #define DATA_LOG_PAYLOAD_MAX 600u
 
 /* Opens the rings and creates the status lock. Call from tasks_init()

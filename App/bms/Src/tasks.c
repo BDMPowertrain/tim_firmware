@@ -58,14 +58,18 @@ static const events_task_args_t eventTaskArgs = {
     .image = PARAMS_IMAGE_BMS,
 };
 
-/* The Data log's step ring (ADR 0021, issue 69): 16 full snapshots deep.
-   Each slot holds one step's Record, a pack Record or, every fifth Sweep,
-   a snapshot (bms_log.h), so the ring holds 320 ms of 20 ms steps. About
-   9.5 KB. */
-#define STEP_RECORDS 16u
+/* The Data log's rings from the step (ADR 0021, issue 69, bms_log.h): the
+   pack Record every step, 128 deep (2.56 s of 20 ms steps, 8 KB), and the
+   full snapshot every fifth Sweep, 16 deep (1.6 s, about 9.5 KB), in a
+   ring of its own so the pack Records do not take snapshot-sized slots. */
+#define STEP_RECORDS     128u
+#define SNAPSHOT_RECORDS 16u
 
-static uint32_t stepRecords[RECORD_RING_STORAGE_SIZE(STEP_RECORDS, BMS_LOG_SNAPSHOT_SIZE) /
+static uint32_t stepRecords[RECORD_RING_STORAGE_SIZE(STEP_RECORDS, BMS_LOG_PACK_SIZE) /
                             sizeof(uint32_t)];
+static uint32_t snapshotRecords[RECORD_RING_STORAGE_SIZE(SNAPSHOT_RECORDS,
+                                                         BMS_LOG_SNAPSHOT_SIZE) /
+                                sizeof(uint32_t)];
 
 _Static_assert(BMS_LOG_SNAPSHOT_SIZE <= DATA_LOG_PAYLOAD_MAX,
                "the logger takes the BMS's snapshot Record");
@@ -76,7 +80,9 @@ static const data_log_def_t dataLogDef = {
     .image = PARAMS_IMAGE_BMS,
     .startup_state = CAN_CONTROL_BMS_STATUS_STATE_STARTUP_CHOICE,
     .rings = {
-        [DATA_LOG_RING_STEP] = {stepRecords, sizeof stepRecords, BMS_LOG_SNAPSHOT_SIZE},
+        [DATA_LOG_RING_STEP] = {stepRecords, sizeof stepRecords, BMS_LOG_PACK_SIZE},
+        [DATA_LOG_RING_SNAPSHOT] = {snapshotRecords, sizeof snapshotRecords,
+                                    BMS_LOG_SNAPSHOT_SIZE},
     },
 };
 

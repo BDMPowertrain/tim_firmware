@@ -253,6 +253,21 @@ static void test_a_dump_of_a_module_not_read_holds_no_reading(void)
     TEST_ASSERT_EQUAL_INT16(INT16_MIN, tt.temp7);
 }
 
+static void test_a_dump_holds_a_cell_at_the_top_of_the_signal_and_caps_above_it(void)
+{
+    even_pack();
+    sweep.cell_mv[0] = 6553u; /* 6.5530 V: raw 65530 */
+    sweep.cell_mv[1] = 6600u; /* above 6.5535 V: held at raw 65535 */
+
+    const size_t n = build(dump_publish(0u));
+    const can_frame_t *a = find(n, CAN_DAQ_BMS_CELL_VOLTAGES_A_00_FRAME_ID);
+    TEST_ASSERT_NOT_NULL(a);
+    struct can_daq_bms_cell_voltages_a_00_t va;
+    (void)can_daq_bms_cell_voltages_a_00_unpack(&va, a->data, a->len);
+    TEST_ASSERT_EQUAL_UINT16(65530u, va.cell0);
+    TEST_ASSERT_EQUAL_UINT16(65535u, va.cell1);
+}
+
 static void test_no_publish_gives_more_frames_than_asked_for(void)
 {
     even_pack();
@@ -273,6 +288,7 @@ int main(void)
     RUN_TEST(test_a_dump_holds_every_cell_voltage_of_its_module);
     RUN_TEST(test_a_dump_holds_temperatures_and_bleed_flags);
     RUN_TEST(test_a_dump_of_a_module_not_read_holds_no_reading);
+    RUN_TEST(test_a_dump_holds_a_cell_at_the_top_of_the_signal_and_caps_above_it);
     RUN_TEST(test_no_publish_gives_more_frames_than_asked_for);
     return UNITY_END();
 }

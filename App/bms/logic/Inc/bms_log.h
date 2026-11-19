@@ -1,17 +1,14 @@
 /*
  * The BMS's Data log Records (issue 69, ADR 0021): what its Control step
- * saw and decided, one Record per step into the step ring, which is 16
- * snapshot Records deep. A step with a Sweep that is the fifth since the
- * last snapshot writes the snapshot Record; every other step writes the
- * pack Record. The snapshot starts with the pack Record's payload, so the
- * pack-level fields are there for every step. The BMS's card is the only
+ * saw and decided. Every step writes the pack Record to the step ring; a
+ * step whose Sweep is every fifth (10 Hz) also writes the snapshot Record
+ * to the snapshot ring, 16 deep (1.6 s). The snapshot starts with the same
+ * step's pack payload, so it stands alone. The BMS's card is the only
  * record of a charge, since no VCU is present then.
  *
- * Both types come from the one ring and share its sequence numbers, so a
- * Record lost from it is a gap in the two together. The file format around
- * them is data_log_record.h; the decoder is tools/data_log_decode.py,
- * changed in the same commit as any layout here (test_bms_log checks the
- * two agree).
+ * The file format around them is data_log_record.h; the decoder is
+ * tools/data_log_decode.py, changed in the same commit as any layout here
+ * (test_bms_log checks the two agree).
  *
  * DATA_LOG_BMS_PACK payload, BMS_LOG_PACK_SIZE bytes, little-endian:
  *   0   the DATA_LOG_STEP payload (data_log_step_encode()): step count,

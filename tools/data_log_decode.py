@@ -20,13 +20,11 @@ em_power_w) is left empty. Judge the 80 kW rule on a decoded step log with
     python tools/power_rule_windows.py <stem>.vcu_step.csv \\
         --time-column uptime_ms --power-column em_power_w
 
-The BMS's step Records: bms_pack.csv has every step's pack-level fields, the
-snapshots' included (column snapshot = 1); bms_snapshot.csv has each
-snapshot's cell voltages (v_MM_C, V; empty if not read), sensor readings
-(t_MM_C_mv) and their temperatures by the firmware's own table (t_MM_C, C;
-empty outside 1300-2440 mV) and bleed flags (b_MM_C), module MM, cell C. The
-two types share the step ring's sequence numbers, so their gaps are judged
-together, on the bms_pack line.
+The BMS's Records: bms_pack.csv has every step's pack-level fields;
+bms_snapshot.csv has each snapshot's cell voltages (v_MM_C, V; empty if not
+read), sensor readings (t_MM_C_mv) and their temperatures by the firmware's
+own table (t_MM_C, C; empty outside 1300-2440 mV) and bleed flags (b_MM_C),
+module MM, cell C; its step_count matches that step's bms_pack row.
 
 The format is App/common/logic/Inc/data_log_record.h and, for each image's
 Records, App/vcu/logic/Inc/vcu_log.h and App/bms/logic/Inc/bms_log.h; a
@@ -64,9 +62,6 @@ TYPE_NAMES = {STEP: "step", EVENT: "event", VCU_STEP: "vcu_step", IMU: "imu",
               DAQ_RX: "daq_rx", DAQ_TX: "daq_tx", MAILBOXES: "mailboxes",
               BMS_PACK: "bms_pack", BMS_SNAPSHOT: "bms_snapshot"}
 IMAGE_NAMES = {1: "VCU", 2: "BMS"}
-# Types written to one ring, which share its sequence numbers: their gaps
-# are judged together and reported on the first type's line.
-SHARED_SEQ = [(BMS_PACK, BMS_SNAPSHOT)]
 
 REPO = Path(__file__).resolve().parent.parent
 CAN_DIR = REPO / "can"
@@ -414,7 +409,7 @@ BMS_PACK_COLUMNS = (
      "balance_reason", "devices_read", "bridge_fault", "cells_read", "sensors_read",
      "pack_voltage_v", "min_cell_v", "max_cell_v", "min_cell", "max_cell",
      "min_temp_c", "max_temp_c", "min_sensor", "max_sensor", "pack_current_a",
-     "discharge_limit_a", "charge_limit_a", "cell_spread_mv", "snapshot"])
+     "discharge_limit_a", "charge_limit_a", "cell_spread_mv"])
 
 
 def bms_pack_row(r: Record) -> list:
@@ -431,7 +426,7 @@ def bms_pack_row(r: Record) -> list:
              bridge, cells, sensors, pack_mv / 1000, min_mv / 1000, max_mv / 1000,
              cell_name(min_cell), cell_name(max_cell), min_dc / 10, max_dc / 10,
              cell_name(min_sensor), cell_name(max_sensor), current / 10, discharge / 10,
-             charge_limit / 10, spread, int(r.type == BMS_SNAPSHOT)])
+             charge_limit / 10, spread])
 
 
 def cell_columns(prefix: str, suffix: str = "") -> list[str]:
@@ -475,17 +470,11 @@ def summary(d: Decoded) -> str:
         f"{' dirty' if h.dirty else ''}, boot {h.boot}, file {h.file}, "
         f"layout {h.layout}, opened at {h.opened_ms} ms"
     ]
-    present = {r.type for r in d.records}
-    for t in sorted(present):
-        name = TYPE_NAMES.get(t, f"type {t}")
-        n = sum(1 for r in d.records if r.type == t)
-        ring = next((g for g in SHARED_SEQ if t in g), (t,))
-        first = next(x for x in ring if x in present)
-        if t != first:
-            lines.append(f"{name}: {n} records, numbered with {TYPE_NAMES[first]}")
-            continue
-        lost, count = gaps([r.seq for r in d.records if r.type in ring])
-        lines.append(f"{name}: {n} records, {lost} lost in {count} gaps")
+    for t in sorted({r.type for r in d.records}):
+        seqs = [r.seq for r in d.records if r.type == t]
+        lost, count = gaps(seqs)
+        lines.append(f"{TYPE_NAMES.get(t, f'type {t}')}: {len(seqs)} records, "
+                     f"{lost} lost in {count} gaps")
     lines.append(f"bad records: {d.bad}")
     lines.append(f"torn tail: {d.torn} bytes")
     return "\n".join(lines) + "\n"
@@ -509,12 +498,9 @@ def tables(d: Decoded, control_dbc: Path, daq_dbc: Path,
             out[t] = (DAQ_COLUMNS, [daq_row(r, db) for r in of(t)
                                     if len(r.payload) >= 5 and
                                     len(r.payload) == 5 + r.payload[4]])
-    # Every step's pack-level fields, a snapshot's included, in file order.
-    packs = [r for r in d.records
-             if (r.type == BMS_PACK and len(r.payload) == BMS_PACK_SIZE) or
-             (r.type == BMS_SNAPSHOT and len(r.payload) == BMS_SNAPSHOT_SIZE)]
-    if packs:
-        out[BMS_PACK] = (BMS_PACK_COLUMNS, [bms_pack_row(r) for r in packs])
+    if of(BMS_PACK):
+        out[BMS_PACK] = (BMS_PACK_COLUMNS, [bms_pack_row(r) for r in of(BMS_PACK)
+                                            if len(r.payload) == BMS_PACK_SIZE])
     if of(BMS_SNAPSHOT):
         out[BMS_SNAPSHOT] = (BMS_SNAPSHOT_COLUMNS,
                              [bms_snapshot_row(r) for r in of(BMS_SNAPSHOT)

@@ -10,8 +10,11 @@
    One ring (record_ring.h) per producer, each with that one writer and the
    logger as its one reader, no lock and no masked section:
    - STEP, written by the Control step once per step: the third way out of
-     the step (ADR 0010). 64 Records on the VCU (640 ms), 16 on the BMS
-     (320 ms, each slot sized for its snapshot Record).
+     the step (ADR 0010). 64 Records on the VCU (640 ms), 128 on the BMS
+     (2.56 s).
+   - SNAPSHOT, written by the Control step too, with its larger Records
+     at a lower rate, so neither sizes the other's slots: on the BMS, the
+     full snapshot every fifth Sweep, 16 deep (1.6 s, ADR 0021).
    - EVENT, written by the Event writer with a copy of each Event as
      stored (event_log_encode()), DATA_LOG_EVENT_RING_DEPTH deep. Its
      storage is this file's own.
@@ -45,6 +48,7 @@ typedef enum {
     DATA_LOG_RING_IMU,
     DATA_LOG_RING_DAQ_RX,
     DATA_LOG_RING_DAQ_TX,
+    DATA_LOG_RING_SNAPSHOT,
     DATA_LOG_RING_COUNT
 } data_log_ring_id_t;
 

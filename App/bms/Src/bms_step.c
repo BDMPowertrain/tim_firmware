@@ -12,6 +12,7 @@
 #include "bus_term.h"
 #include "cell_monitor.h"
 #include "control_bus.h"
+#include "data_log_ring.h"
 #include "events.h"
 #include "flash_bank2.h"
 #include "main.h"
@@ -287,22 +288,25 @@ void bms_step_read_pack(bms_pack_t *dst)
     masked_copy(dst, &published, sizeof *dst);
 }
 
-_Static_assert(BMS_LOG_SNAPSHOT_SIZE <= CONTROL_STEP_RECORD_MAX,
-               "the BMS's snapshot Record fits the runner's buffer");
+_Static_assert(BMS_LOG_PACK_SIZE <= CONTROL_STEP_RECORD_MAX,
+               "the BMS's pack Record fits the runner's buffer");
 
-/* The step Record (issue 69, bms_log.h): the pack Record every step, the
-   snapshot in its place every fifth Sweep, from the step's own statics,
-   after the last phase. */
+/* The step Record (issue 69, bms_log.h): the pack Record, every step, from
+   the step's own statics, after the last phase; the runner pushes it to
+   the step ring. On a snapshot's step the snapshot also goes, to its own
+   ring: the step is that ring's one writer too. */
 static uint16_t step_record(const data_log_step_t *step, uint8_t *buf, size_t cap,
                             uint8_t *type)
 {
-    if (cap < BMS_LOG_SNAPSHOT_SIZE) {
+    static uint8_t snapshot[BMS_LOG_SNAPSHOT_SIZE]; /* off the step's stack */
+
+    if (cap < BMS_LOG_PACK_SIZE) {
         return 0u;
     }
     if (bms_log_snapshot_due(swept, sweeps)) {
-        bms_log_snapshot_encode(buf, step, bq_chain_state(&chain), &in, &out);
-        *type = DATA_LOG_BMS_SNAPSHOT;
-        return (uint16_t)BMS_LOG_SNAPSHOT_SIZE;
+        bms_log_snapshot_encode(snapshot, step, bq_chain_state(&chain), &in, &out);
+        (void)data_log_push(DATA_LOG_RING_SNAPSHOT, DATA_LOG_BMS_SNAPSHOT, in.now_ms,
+                            snapshot, (uint16_t)sizeof snapshot);
     }
     bms_log_pack_encode(buf, step, bq_chain_state(&chain), &in, &out);
     *type = DATA_LOG_BMS_PACK;
