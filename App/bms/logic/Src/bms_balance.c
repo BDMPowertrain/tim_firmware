@@ -141,7 +141,7 @@ static void apply_result(bms_balance_t *b, const bms_balance_in_t *in, bms_balan
 
 static bool sweep_whole(const bq_sweep_t *s)
 {
-    if (s->devices_read != (uint16_t)((1u << BQ_SWEEP_DEVICES) - 1u)) {
+    if (s->devices_read != BQ_SWEEP_ALL_DEVICES) {
         return false;
     }
     for (size_t i = 0u; i < BQ_SWEEP_CELLS; i++) {
@@ -223,15 +223,15 @@ static void decide(bms_balance_t *b, const bms_balance_in_t *in, bms_balance_out
     const bq_sweep_t *s = in->sweep;
     int16_t hot = 0;
 
-    if (!hottest(s, &hot)) {
-        return; /* a sensor not read validly: nothing chosen this second */
-    }
     const uint16_t dieRead = b->die_read;
     b->die_read = 0u; /* each decision takes its own pause's */
 
     if ((uint32_t)b->min_mv + BMS_BALANCE_LOW_CELL_MV < b->target_mv) {
         stop_for_good(b, out, BMS_BALANCE_LOW_CELL, 0u);
         return;
+    }
+    if (!hottest(s, &hot)) {
+        return; /* a sensor not read validly: nothing chosen this second */
     }
 
     b->cells_hot = b->cells_hot ? hot >= BMS_BALANCE_CELLS_COOL_DC
@@ -398,7 +398,11 @@ void bms_balance_step(bms_balance_t *b, const bms_balance_in_t *in, bms_balance_
     if (b->complete_seen && !b->ended &&
         (uint32_t)(in->now_ms - b->complete_ms) >= BMS_BALANCE_TIME_LIMIT_MS) {
         b->ended = true;
-        if (b->state != BMS_BALANCE_DONE && b->state != BMS_BALANCE_STOPPED) {
+        if (b->state == BMS_BALANCE_DONE) {
+            /* Done in time: it stays DONE, and the end is logged. */
+            change(b, out, BMS_BALANCE_DONE, BMS_BALANCE_TIME_LIMIT, 0u);
+            b->reason = BMS_BALANCE_NONE; /* the frame's reason is for PAUSED and STOPPED */
+        } else if (b->state != BMS_BALANCE_STOPPED) {
             stop_for_good(b, out, BMS_BALANCE_TIME_LIMIT, 0u);
         }
     }
@@ -412,7 +416,7 @@ void bms_balance_step(bms_balance_t *b, const bms_balance_in_t *in, bms_balance_
                                 &b->allowed_timing, &b->allowed_since_ms, in->now_ms,
                                 BMS_BALANCE_RESTART_MS);
 
-    const bool may_run = in->charge_mode && b->gate && b->state != BMS_BALANCE_STOPPED &&
+    const bool mayRun = in->charge_mode && b->gate && b->state != BMS_BALANCE_STOPPED &&
                          !b->ended && interlock;
     if (!in->charge_mode) {
         change(b, out, BMS_BALANCE_OFF, BMS_BALANCE_NONE, 0u);
@@ -423,16 +427,16 @@ void bms_balance_step(bms_balance_t *b, const bms_balance_in_t *in, bms_balance_
     } else if (!interlock) {
         change(b, out, BMS_BALANCE_PAUSED, b->interlock_reason, 0u);
     }
-    if (!may_run) {
+    if (!mayRun) {
         b->set_due = false;
         if (b->fet_stage != BMS_FET_CHECK_IDLE) {
             abandon_fet_check(b);
         }
     }
 
-    if (b->stop_due || (!may_run && b->maybe_on)) {
+    if (b->stop_due || (!mayRun && b->maybe_on)) {
         send(b, out, BQ_BALANCE_STOP, in->now_ms); /* in the same step */
-    } else if (may_run) {
+    } else if (mayRun) {
         run(b, in, whole, out);
     }
 

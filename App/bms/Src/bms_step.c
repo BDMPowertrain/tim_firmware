@@ -120,7 +120,7 @@ static void phase_sweep(control_step_ctx_t *ctx)
     swept = bq_chain_done(&chain, ctx->now_ms, link.ok, link.resp, link.len, &pack.sweep);
     if (swept) {
         sweeps++;
-        if (pack.sweep.devices_read != (uint16_t)((1u << BQ_SWEEP_DEVICES) - 1u)) {
+        if (pack.sweep.devices_read != BQ_SWEEP_ALL_DEVICES) {
             sweepsMissing++;
         }
     }

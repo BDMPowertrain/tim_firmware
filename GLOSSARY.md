@@ -159,6 +159,10 @@ _Avoid_: Equalising, bleeding (that is what one cell does), top-up (that is a se
 The cell voltage, a fixed distance under the **Charge target**, that the highest cell must reach once before **Balancing** is allowed in a charge. Below it, voltage differences between cells do not yet show which cell holds more charge.
 _Avoid_: Start balancing voltage, balance threshold
 
+**Settled Sweep**:
+A **Sweep** taken with every balancing FET off for at least the balancing pause. While **Balancing** bleeds, only the settled Sweep of each second chooses the cells to bleed and feeds the **Charge limit** taper and the end of the charge; every Sweep is still judged for the BMS faults. With no cell bleeding, every Sweep is settled.
+_Avoid_: Paused sweep, clean sweep, rested reading (that is the reading 60 s after Charge complete)
+
 **Cell spread**:
 The highest cell voltage minus the lowest, taken from one **Sweep** with no cell being bled. It is what **Balancing** reduces and how the BMS knows balancing is finished.
 _Avoid_: Delta, imbalance, mismatch

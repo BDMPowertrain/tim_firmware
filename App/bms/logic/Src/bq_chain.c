@@ -473,7 +473,7 @@ void bq_chain_open_wire_done(bq_chain_t *c, bool ok, const uint8_t *resp, size_t
             return;
         }
     }
-    out->verdict = (out->devices_read == (uint16_t)((1u << BQ_SWEEP_DEVICES) - 1u))
+    out->verdict = (out->devices_read == BQ_SWEEP_ALL_DEVICES)
                        ? BQ_OPEN_WIRE_PASS
                        : BQ_OPEN_WIRE_UNKNOWN;
 }
@@ -601,7 +601,7 @@ static void judge_fet_check(const bq_balance_cmd_t *cmd, const uint8_t *resp, si
             return;
         }
     }
-    out->fet = (out->devices_read == (uint16_t)((1u << BQ_SWEEP_DEVICES) - 1u))
+    out->fet = (out->devices_read == BQ_SWEEP_ALL_DEVICES)
                    ? BQ_FET_CHECK_PASS
                    : BQ_FET_CHECK_UNKNOWN;
 }

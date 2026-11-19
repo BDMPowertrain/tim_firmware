@@ -30,7 +30,8 @@
  * one of them for the BMS faults.
  *
  * Choosing, on the settled Sweep, once the Balancing gate has latched:
- *   - nothing unless the Sweep read every cell and every sensor validly;
+ *   - nothing unless the Sweep read every cell, and nothing but the
+ *     low-cell stop unless it read every sensor validly;
  *   - a session starts at a Cell spread over BMS_BALANCE_START_SPREAD_MV
  *     and is done at BMS_BALANCE_DONE_SPREAD_MV or less (DONE); a later
  *     spread over the start begins another;
@@ -75,7 +76,8 @@
  *                     BMS_BALANCE_LOW_CELL_MV under the Charge target
  *   TIME_LIMIT        BMS_BALANCE_TIME_LIMIT_MS after Charge complete,
  *                     counted through pauses, not DONE: no convergence.
- *                     A DONE balancing then stays DONE.
+ *                     A DONE balancing then stays DONE, with an Event
+ *                     (DONE, TIME_LIMIT) for the end; no session starts.
  *   FET_CHECK_FAILED  the FET check
  *   CONFIG_REJECTED   a device refused a set (BAL_STAT[INVALID_CBCONF])
  * None is a BMS fault: the cell voltage faults remain the protection.
@@ -108,9 +110,12 @@
 #define BMS_BALANCE_TIME_LIMIT_MS    (12u * 60u * 60u * 1000u) /* after Charge complete */
 #define BMS_BALANCE_RESTART_MS       3000u /* the interlock held, to resume */
 #define BMS_BALANCE_PERIOD_MS        1000u /* the decision: the open-wire check's */
-/* Every FET off this long before the settled Sweep: the pause. The
-   tap-wire error goes with the current; the cell's own relaxation at
-   under 0.2 A is about 1 mV. To be confirmed on the bench (ADR 0020). */
+/* The pause: the settled Sweep is the first one this long after the
+   step that sent the stop. The stop goes at the end of that step, after
+   its Sweep and work, so every FET has been off for this less that step's
+   run time (at least 45 ms at the 15 ms plan budget). The tap-wire error
+   goes with the current; the cell's own relaxation at under 0.2 A is
+   about 1 mV. To be confirmed on the bench (ADR 0020). */
 #define BMS_BALANCE_PAUSE_MS         60u
 #define BMS_BALANCE_BOARD_HOT_DC     950  /* die temperature: pause the board */
 #define BMS_BALANCE_BOARD_COOL_DC    850  /* resume it at or under */

@@ -671,6 +671,17 @@ static void test_the_lowest_cell_more_than_200_mv_under_the_target_stops_it(void
     TEST_ASSERT_FALSE(any_on());
 }
 
+/* A sensor reading out of range chooses nothing, but does not hold off
+   the low-cell stop. */
+static void test_an_invalid_sensor_does_not_hold_off_the_low_cell_stop(void)
+{
+    run_to_first_set();
+    sweep.temp_mv[3] = 0u;
+    sweep.cell_mv[0] = 3899u;
+    step_until_state(BMS_BALANCE_STOPPED);
+    TEST_ASSERT_EQUAL_UINT8(BMS_BALANCE_LOW_CELL, out.reason);
+}
+
 static void test_a_failed_fet_check_stops_balancing_with_the_fet_named(void)
 {
     spread_pack();
@@ -731,10 +742,15 @@ static void test_a_balance_done_by_the_12_hours_stays_done(void)
     in.charge_complete = true;
     steps(5000u);
     TEST_ASSERT_EQUAL_UINT8(BMS_BALANCE_DONE, out.state);
+    clear_counts();
     now += BMS_BALANCE_TIME_LIMIT_MS;
     step();
     TEST_ASSERT_EQUAL_UINT8(BMS_BALANCE_DONE, out.state);
     TEST_ASSERT_FALSE(bms_balance_stopped(&b));
+    /* The end of balancing is logged: DONE, with the time limit. */
+    TEST_ASSERT_EQUAL_UINT(1u, eventsSeen);
+    TEST_ASSERT_EQUAL_UINT8(BMS_BALANCE_DONE, lastEvent.to);
+    TEST_ASSERT_EQUAL_UINT8(BMS_BALANCE_TIME_LIMIT, lastEvent.reason);
 
     spread_pack(); /* no session after the time is up */
     clear_counts();
@@ -797,6 +813,7 @@ int main(void)
     RUN_TEST(test_every_hot_board_is_paused_board_hot);
     RUN_TEST(test_every_board_pauses_at_45_c_cell_temperature);
     RUN_TEST(test_the_lowest_cell_more_than_200_mv_under_the_target_stops_it);
+    RUN_TEST(test_an_invalid_sensor_does_not_hold_off_the_low_cell_stop);
     RUN_TEST(test_a_failed_fet_check_stops_balancing_with_the_fet_named);
     RUN_TEST(test_a_fet_check_not_read_whole_is_run_again);
     RUN_TEST(test_a_rejected_configuration_stops_balancing);

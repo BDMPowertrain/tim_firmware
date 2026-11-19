@@ -24,4 +24,5 @@ Balancing is permitted only while the shutdown circuit sense reads closed, BMS_O
 - Firmware pauses a board at 95 C die temperature (resume 85 C) and all boards at 45 C cell temperature. The monitor's own 105 C pause is the backstop; its thermistor-based pause cannot work with the Enepaq sensors.
 - No balancing failure is a BMS fault. A failed balancing-FET check (run once per charge), a rejected configuration or a spread that never converges stops balancing and is logged; the cell voltage faults remain the protection.
 - Every balancing number is a compile-time constant. They are not protection thresholds, but they are tuned by reflash, not stored.
+- The implementation (issue 68) adds two constants of its own: the pause is 60 ms from the step that sends the stop to the settled sweep (at least 45 ms with every FET off), and the 45 C cell pause resumes under 43 C so that a reading on the line does not pause and resume every second. Both are bench-tunable like the rest.
 - While bleeding, the 20 ms protective sweeps carry the tap-wire error. The bench must measure it before the margin to the 4.195 V over-voltage fault is trusted.
