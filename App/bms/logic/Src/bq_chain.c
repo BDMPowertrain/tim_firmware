@@ -16,16 +16,21 @@
 #define REG_CONTROL1        0x0309u
 #define REG_CONTROL2        0x030Au
 #define REG_ADC_CTRL1       0x030Du
+#define REG_ADC_CTRL2       0x030Eu /* then ADC_CTRL3 */
 #define REG_CB_CELL16_CTRL  0x0318u /* to CB_CELL9_CTRL at 0x031F */
 #define REG_CB_CELL8_CTRL   0x0320u /* to CB_CELL1_CTRL at 0x0327 */
 #define REG_OVUV_CTRL       0x032Cu /* then OTUT_CTRL */
 #define REG_BAL_CTRL2       0x032Fu
 #define REG_FAULT_RST1      0x0331u /* then FAULT_RST2 */
+#define REG_DIAG_CBFET_CTRL1 0x0338u /* then DIAG_CBFET_CTRL2 */
 #define REG_DIAG_COMP_CTRL2 0x033Bu
 #define REG_DIAG_COMP_CTRL3 0x033Cu
 #define REG_OTP_ECC_DATAIN1 0x0343u /* to DATAIN8 at 0x034A */
 #define REG_ADC_STAT2       0x0528u
+#define REG_BAL_STAT        0x052Bu
 #define REG_FAULT_COMP_VCOW1 0x0548u /* then VCOW2 */
+#define REG_FAULT_COMP_CBFET1 0x054Eu /* then CBFET2 */
+#define REG_DIETEMP1        0x05AEu /* _HI, then _LO */
 
 /* The bridge's (BQ79600-Q1 data sheet SLUSDS1A 7.5). */
 #define REG_BRIDGE_DEV_CONF1  0x2001u
@@ -68,6 +73,16 @@
 #define FAULT_RST1_ALL      0xFFu
 #define FAULT_RST2_ALL      0x7Fu
 #define FAULT_RST_BRIDGE_ALL 0xFFu
+
+/* Balancing (issue 68), SLUSE81F 7.3.3, 7.3.6.4.6.3, 7.5.4.4. */
+#define BAL_STAT_INVALID_CBCONF 0x80u
+#define CTRL3_CBFET_GO       0x40u /* CBFET_CTRL_GO: the configured check FETs on, the rest off */
+#define CTRL3_CBFET_COMPARE  0x09u /* COMP_ADC_SEL 100, COMP_ADC_GO */
+#define ADC_CTRL2_AUX_ALL    0x00u /* AUX_CELL_SEL: every active cell */
+#define ADC_CTRL3_AUX_CONTINUOUS_GO 0x06u /* AUX_MODE continuous, AUX_GO */
+#define ADC_STAT2_DRDY_CBFET 0x02u
+#define DIETEMP_NOT_CONVERTED 0x8000u
+#define DIETEMP_COUNTS_PER_DC 4 /* 0.025 C a count */
 
 /* The open-wire check (issue 64), SLUSE81F 7.5.4.11. */
 #define OVUV_STOP           0x04u /* OVUV_CTRL: GO with OVUV_MODE 00, do not run */
@@ -391,10 +406,11 @@ bool bq_chain_plan_open_wire(bq_chain_t *c, bq_plan_t *plan)
     return true;
 }
 
-/* Each device's one-register answer from reg, into value[d - 1]; a bit in
-   the result for each device whose frame came whole. */
+/* Each device's answer of count bytes (1 or 2) from reg, big-endian, into
+   value[d - 1]; a bit in the result for each device whose frame came
+   whole. */
 static uint16_t read_each(const uint8_t *resp, size_t len, size_t *pos, uint16_t reg,
-                          size_t count, uint8_t value[BQ_SWEEP_DEVICES])
+                          size_t count, uint16_t value[BQ_SWEEP_DEVICES])
 {
     uint16_t read = 0u;
     bq_response_t r;
@@ -406,7 +422,8 @@ static uint16_t read_each(const uint8_t *resp, size_t len, size_t *pos, uint16_t
         }
         *pos = at;
         if (r.dev >= 1u && r.dev <= BQ_SWEEP_DEVICES && r.len == count) {
-            value[r.dev - 1u] = r.data[count - 1u]; /* the last byte */
+            value[r.dev - 1u] = (count == 2u) ? (uint16_t)((r.data[0] << 8) | r.data[1])
+                                              : r.data[0];
             read |= (uint16_t)(1u << (r.dev - 1u));
         }
     }
@@ -416,8 +433,8 @@ static uint16_t read_each(const uint8_t *resp, size_t len, size_t *pos, uint16_t
 void bq_chain_open_wire_done(bq_chain_t *c, bool ok, const uint8_t *resp, size_t len,
                              bq_open_wire_t *out)
 {
-    uint8_t stat[BQ_SWEEP_DEVICES] = {0};
-    uint8_t vcow[BQ_SWEEP_DEVICES] = {0};
+    uint16_t stat[BQ_SWEEP_DEVICES] = {0};
+    uint16_t vcow[BQ_SWEEP_DEVICES] = {0}; /* VCOW1 high, VCOW2 low */
     size_t pos = 0u;
 
     memset(out, 0, sizeof *out);
@@ -426,7 +443,7 @@ void bq_chain_open_wire_done(bq_chain_t *c, bool ok, const uint8_t *resp, size_t
     }
 
     /* ADC_STAT2's answers, then FAULT_COMP_VCOW1..2's, each top first.
-       VCOW2, the last byte, holds cells 1 to 8; VCOW1, cells 9 to 16, is
+       VCOW2, the low byte, holds cells 1 to 8; VCOW1, cells 9 to 16, is
        never set with 8 active cells. A frame cut short ends the decoding,
        as nothing after it can be framed. */
     const uint16_t statRead = read_each(resp, len, &pos, REG_ADC_STAT2, 1u, stat);
@@ -438,10 +455,11 @@ void bq_chain_open_wire_done(bq_chain_t *c, bool ok, const uint8_t *resp, size_t
         bool failed = false;
         uint16_t cell = 0u;
 
-        if ((vcowRead & bit) != 0u && vcow[d - 1u] != 0u) {
+        const uint8_t open = (uint8_t)vcow[d - 1u];
+        if ((vcowRead & bit) != 0u && open != 0u) {
             failed = true;
             for (uint16_t k = 0u; k < BQ_SWEEP_CELLS_PER_DEVICE && cell == 0u; k++) {
-                if ((vcow[d - 1u] & (1u << k)) != 0u) {
+                if ((open & (1u << k)) != 0u) {
                     cell = (uint16_t)((d - 1u) * BQ_SWEEP_CELLS_PER_DEVICE + k + 1u);
                 }
             }
@@ -458,6 +476,172 @@ void bq_chain_open_wire_done(bq_chain_t *c, bool ok, const uint8_t *resp, size_t
     out->verdict = (out->devices_read == (uint16_t)((1u << BQ_SWEEP_DEVICES) - 1u))
                        ? BQ_OPEN_WIRE_PASS
                        : BQ_OPEN_WIRE_UNKNOWN;
+}
+
+/* The FET check's FETs off: none configured, then CBFET_CTRL_GO (SLUSE81F
+   7.5.4.11.8). This also leaves the VC sinks off and no comparison chosen. */
+static void check_fets_off(bq_plan_t *plan)
+{
+    static const uint8_t none[2] = {0x00u, 0x00u};
+
+    (void)add_write(plan, BQ_STACK_WRITE, 0u, REG_DIAG_CBFET_CTRL1, none, sizeof none);
+    (void)add_byte(plan, BQ_STACK_WRITE, 0u, REG_DIAG_COMP_CTRL3, CTRL3_CBFET_GO);
+}
+
+static void plan_balance_stop(bq_plan_t *plan)
+{
+    static const uint8_t zeros[8] = {0};
+
+    (void)add_write(plan, BQ_BROADCAST_WRITE, 0u, REG_CB_CELL16_CTRL, zeros, sizeof zeros);
+    (void)add_write(plan, BQ_BROADCAST_WRITE, 0u, REG_CB_CELL8_CTRL, zeros, sizeof zeros);
+    (void)add_byte(plan, BQ_BROADCAST_WRITE, 0u, REG_BAL_CTRL2, BAL_CTRL2_BAL_GO);
+    check_fets_off(plan);
+    (void)add_stack_read(plan, REG_DIETEMP1, 2u);
+}
+
+/* CB_CELL8_CTRL comes first, so byte k is cell 8 - k. */
+static void plan_balance_set(const bq_balance_cmd_t *cmd, bq_plan_t *plan)
+{
+    for (uint8_t dev = 1u; dev <= BQ_SWEEP_DEVICES; dev++) {
+        uint8_t timers[BQ_SWEEP_CELLS_PER_DEVICE];
+        for (size_t k = 0u; k < BQ_SWEEP_CELLS_PER_DEVICE; k++) {
+            const unsigned cell = BQ_SWEEP_CELLS_PER_DEVICE - 1u - k; /* 0-based */
+            timers[k] = ((cmd->cells[dev - 1u] & (1u << cell)) != 0u) ? BQ_BALANCE_TIMER_10S
+                                                                       : 0u;
+        }
+        (void)add_write(plan, BQ_SINGLE_WRITE, dev, REG_CB_CELL8_CTRL, timers, sizeof timers);
+    }
+    (void)add_byte(plan, BQ_BROADCAST_WRITE, 0u, REG_BAL_CTRL2, BAL_CTRL2_BAL_GO);
+    (void)add_stack_read(plan, REG_BAL_STAT, 1u);
+}
+
+static void plan_fet_on(const bq_balance_cmd_t *cmd, bq_plan_t *plan)
+{
+    const uint8_t aux[2] = {ADC_CTRL2_AUX_ALL, ADC_CTRL3_AUX_CONTINUOUS_GO};
+    const uint8_t fets[2] = {0x00u, cmd->fet_cells}; /* CBFET16..9, CBFET8..1 */
+
+    (void)add_write(plan, BQ_STACK_WRITE, 0u, REG_ADC_CTRL2, aux, sizeof aux);
+    (void)add_write(plan, BQ_STACK_WRITE, 0u, REG_DIAG_CBFET_CTRL1, fets, sizeof fets);
+    (void)add_byte(plan, BQ_STACK_WRITE, 0u, REG_DIAG_COMP_CTRL3, CTRL3_CBFET_GO);
+}
+
+static void plan_fet_read(bq_plan_t *plan)
+{
+    check_fets_off(plan);
+    (void)add_stack_read(plan, REG_ADC_STAT2, 1u);
+    bq_command_t *fails = add_stack_read(plan, REG_FAULT_COMP_CBFET1, 2u);
+    if (fails != NULL) {
+        fails->append = true;
+    }
+}
+
+bool bq_chain_plan_balance(const bq_chain_t *c, const bq_balance_cmd_t *cmd, bq_plan_t *plan)
+{
+    memset(plan, 0, sizeof *plan);
+    if (c->state != BQ_CHAIN_RUNNING) {
+        return false;
+    }
+    switch (cmd->op) {
+    case BQ_BALANCE_STOP:
+        plan_balance_stop(plan);
+        return true;
+    case BQ_BALANCE_SET:
+        plan_balance_set(cmd, plan);
+        return true;
+    case BQ_BALANCE_FET_ON:
+        plan_fet_on(cmd, plan);
+        return true;
+    case BQ_BALANCE_FET_COMPARE:
+        (void)add_byte(plan, BQ_STACK_WRITE, 0u, REG_DIAG_COMP_CTRL3, CTRL3_CBFET_COMPARE);
+        return true;
+    case BQ_BALANCE_FET_READ:
+        plan_fet_read(plan);
+        return true;
+    case BQ_BALANCE_NONE:
+    default:
+        return false;
+    }
+}
+
+/* The FET check's answer: ADC_STAT2's, then FAULT_COMP_CBFET1..2's. */
+static void judge_fet_check(const bq_balance_cmd_t *cmd, const uint8_t *resp, size_t len,
+                            bq_balance_result_t *out)
+{
+    uint16_t stat[BQ_SWEEP_DEVICES] = {0};
+    uint16_t fails[BQ_SWEEP_DEVICES] = {0}; /* CBFET16..9 high, CBFET8..1 low */
+    size_t pos = 0u;
+
+    const uint16_t statRead = read_each(resp, len, &pos, REG_ADC_STAT2, 1u, stat);
+    const uint16_t failRead = read_each(resp, len, &pos, REG_FAULT_COMP_CBFET1, 2u, fails);
+    out->devices_read = statRead & failRead;
+
+    for (uint8_t d = 1u; d <= BQ_SWEEP_DEVICES; d++) {
+        const uint16_t bit = (uint16_t)(1u << (d - 1u));
+        /* An aborted comparison sets every bit, CBFET16..9 included, and
+           those are never set with 8 active cells. */
+        const uint16_t failed = (uint16_t)(fails[d - 1u] & (0xFF00u | cmd->fet_cells));
+        bool bad = false;
+        uint16_t cell = 0u;
+
+        if ((failRead & bit) != 0u && failed != 0u) {
+            bad = true;
+            for (uint16_t k = 0u; k < BQ_SWEEP_CELLS_PER_DEVICE && cell == 0u; k++) {
+                if ((failed & cmd->fet_cells & (1u << k)) != 0u) {
+                    cell = (uint16_t)((d - 1u) * BQ_SWEEP_CELLS_PER_DEVICE + k + 1u);
+                }
+            }
+        } else if ((out->devices_read & bit) != 0u &&
+                   (stat[d - 1u] & ADC_STAT2_DRDY_CBFET) == 0u) {
+            bad = true; /* did not finish */
+        }
+        if (bad) {
+            out->fet = BQ_FET_CHECK_FAIL;
+            out->fet_device = d;
+            out->fet_cell = cell;
+            return;
+        }
+    }
+    out->fet = (out->devices_read == (uint16_t)((1u << BQ_SWEEP_DEVICES) - 1u))
+                   ? BQ_FET_CHECK_PASS
+                   : BQ_FET_CHECK_UNKNOWN;
+}
+
+void bq_chain_balance_done(const bq_balance_cmd_t *cmd, bool ok, const uint8_t *resp, size_t len,
+                           bq_balance_result_t *out)
+{
+    uint16_t value[BQ_SWEEP_DEVICES] = {0};
+    size_t pos = 0u;
+
+    memset(out, 0, sizeof *out);
+    out->ok = ok;
+    out->fet = BQ_FET_CHECK_UNKNOWN;
+
+    switch (cmd->op) {
+    case BQ_BALANCE_STOP: {
+        const uint16_t read = read_each(resp, len, &pos, REG_DIETEMP1, 2u, value);
+        for (uint8_t d = 0u; d < BQ_SWEEP_DEVICES; d++) {
+            if ((read & (1u << d)) != 0u && value[d] != DIETEMP_NOT_CONVERTED) {
+                out->die_dc[d] = (int16_t)((int16_t)value[d] / DIETEMP_COUNTS_PER_DC);
+                out->devices_read |= (uint16_t)(1u << d);
+            }
+        }
+        break;
+    }
+    case BQ_BALANCE_SET:
+        out->devices_read = read_each(resp, len, &pos, REG_BAL_STAT, 1u, value);
+        for (uint8_t d = 0u; d < BQ_SWEEP_DEVICES; d++) {
+            if ((out->devices_read & (1u << d)) != 0u &&
+                (value[d] & BAL_STAT_INVALID_CBCONF) != 0u) {
+                out->rejected |= (uint16_t)(1u << d);
+            }
+        }
+        break;
+    case BQ_BALANCE_FET_READ:
+        judge_fet_check(cmd, resp, len, out);
+        break;
+    default: /* writes only: nothing read */
+        break;
+    }
 }
 
 bq_chain_state_t bq_chain_state(const bq_chain_t *c)
