@@ -238,6 +238,7 @@ extern "C" {
 #define CAN_CONTROL_BMS_STATUS_PARAMETERS_DEFAULTED_NAME "ParametersDefaulted"
 #define CAN_CONTROL_BMS_STATUS_NOT_DUAL_BANK_NAME "NotDualBank"
 #define CAN_CONTROL_BMS_STATUS_LAST_RESET_NOT_POWER_ON_NAME "LastResetNotPowerOn"
+#define CAN_CONTROL_BMS_STATUS_BALANCING_STOPPED_NAME "BalancingStopped"
 #define CAN_CONTROL_BMS_STATUS_BUS_OFF_LATCHED_NAME "BusOffLatched"
 #define CAN_CONTROL_BMS_STATUS_ERROR_PASSIVE_NAME "ErrorPassive"
 #define CAN_CONTROL_BMS_STATUS_RECEIVE_OVERFLOW_NAME "ReceiveOverflow"
@@ -603,6 +604,15 @@ struct can_control_bms_status_t {
      * Offset: 0
      */
     uint8_t last_reset_not_power_on;
+
+    /**
+     * Balancing STOPPED until a power cycle: a failed FET check, a rejected configuration, the lowest cell too far under the target, or no convergence in the 12 hours after Charge complete. The reason is in BMS_Balancing and the Event log. Not a BMS fault (ADR 0020).
+     *
+     * Range: 0..1 (0..1 -)
+     * Scale: 1
+     * Offset: 0
+     */
+    uint8_t balancing_stopped;
 
     /**
      * Third bus-off without 1 s clean; retrying once per second.
@@ -2377,6 +2387,28 @@ bool can_control_bms_status_last_reset_not_power_on_is_in_range(uint8_t value);
  * @return true if in range, false otherwise.
  */
 bool can_control_bms_status_last_reset_not_power_on_is_in_phys_range(float value);
+
+/**
+ * Check that given signal is in allowed range.
+ *
+ * @param[in] value Signal to check.
+ *
+ * @return true if in range, false otherwise.
+ */
+bool can_control_bms_status_balancing_stopped_is_in_range(uint8_t value);
+
+/**
+ * Check that given physical value is in allowed range before encoding.
+ *
+ * Use this BEFORE calling _encode() to avoid silent integer overflow:
+ *   encode(-1.0) on a [0,100] signal wraps to 255 and passes is_in_range().
+ *   is_in_phys_range(-1.0) correctly returns false.
+ *
+ * @param[in] value Physical signal value to check.
+ *
+ * @return true if in range, false otherwise.
+ */
+bool can_control_bms_status_balancing_stopped_is_in_phys_range(float value);
 
 /**
  * Check that given signal is in allowed range.

@@ -154,6 +154,7 @@ int can_control_bms_status_pack(
     dst_p[6] |= pack_left_shift_u8(src_p->parameters_defaulted, 4u, 0x10u);
     dst_p[6] |= pack_left_shift_u8(src_p->not_dual_bank, 5u, 0x20u);
     dst_p[6] |= pack_left_shift_u8(src_p->last_reset_not_power_on, 6u, 0x40u);
+    dst_p[6] |= pack_left_shift_u8(src_p->balancing_stopped, 7u, 0x80u);
     dst_p[7] |= pack_left_shift_u8(src_p->bus_off_latched, 0u, 0x01u);
     dst_p[7] |= pack_left_shift_u8(src_p->error_passive, 1u, 0x02u);
     dst_p[7] |= pack_left_shift_u8(src_p->receive_overflow, 2u, 0x04u);
@@ -200,6 +201,7 @@ int can_control_bms_status_unpack(
     dst_p->parameters_defaulted = unpack_right_shift_u8(src_p[6], 4u, 0x10u);
     dst_p->not_dual_bank = unpack_right_shift_u8(src_p[6], 5u, 0x20u);
     dst_p->last_reset_not_power_on = unpack_right_shift_u8(src_p[6], 6u, 0x40u);
+    dst_p->balancing_stopped = unpack_right_shift_u8(src_p[6], 7u, 0x80u);
     dst_p->bus_off_latched = unpack_right_shift_u8(src_p[7], 0u, 0x01u);
     dst_p->error_passive = unpack_right_shift_u8(src_p[7], 1u, 0x02u);
     dst_p->receive_overflow = unpack_right_shift_u8(src_p[7], 2u, 0x04u);
@@ -514,6 +516,16 @@ bool can_control_bms_status_last_reset_not_power_on_is_in_range(uint8_t value)
 }
 
 bool can_control_bms_status_last_reset_not_power_on_is_in_phys_range(float value)
+{
+    return ((value >= 0.0f) && (value <= 1.0f));
+}
+
+bool can_control_bms_status_balancing_stopped_is_in_range(uint8_t value)
+{
+    return (value <= 1u);
+}
+
+bool can_control_bms_status_balancing_stopped_is_in_phys_range(float value)
 {
     return ((value >= 0.0f) && (value <= 1.0f));
 }

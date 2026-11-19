@@ -69,6 +69,10 @@ typedef enum {
     EVENT_CHARGE        = 97, /* event_data_charge(): the charge changed state */
     EVENT_CHARGE_RESTED = 98, /* event_data_charge_rested(): after Charge complete */
     EVENT_CHARGER_FLAGS = 99, /* event_data_charger_flags(): no flag is a BMS fault */
+
+    /* Balancing (ADR 0020, bms_balance.h). No balancing failure is a BMS
+       fault. */
+    EVENT_BALANCING = 100, /* event_data_balancing(): balancing changed state */
 } event_code_t;
 
 /* "boot", "overrun" and so on, for the shell; "?" for a code not here. */
@@ -272,6 +276,23 @@ typedef struct {
 /* 0 flags before (u8), 1 flags now (u8), 2 charge state (u8), 4 output
    voltage (u16, 0.1 V), 6 output current (u16, 0.1 A). */
 void event_data_charger_flags(uint8_t data[EVENT_DATA_SIZE], const event_charger_flags_t *flags);
+
+typedef struct {
+    uint8_t  from;      /* BMS_Balancing State (can/control.dbc) */
+    uint8_t  to;
+    uint8_t  reason;    /* BMS_Balancing Reason */
+    uint16_t spread_mv; /* the Cell spread at the change; 0 when not known */
+    event_charge_cells_t cells; /* the last settled Sweep's */
+    /* FET_CHECK_FAILED: device << 8 | its FET 1 to 8, 0 if the device did
+       not finish; CONFIG_REJECTED: bit d - 1 for each device that refused
+       the set; otherwise 0. */
+    uint16_t detail;
+} event_balancing_t;
+
+/* 0 from (u8), 1 to (u8), 2 reason (u8), 4 highest cell (u16, mV), 6 its
+   cell (u16), 8 lowest cell (u16, mV), 10 its cell (u16), 12 the Cell
+   spread (u16, mV), 14 detail (u16). */
+void event_data_balancing(uint8_t data[EVENT_DATA_SIZE], const event_balancing_t *b);
 
 /* 0 VCU state (u8). */
 void event_data_em_violation(uint8_t data[EVENT_DATA_SIZE], uint8_t state);
