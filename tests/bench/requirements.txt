@@ -1,0 +1,8 @@
+# The bench scripts' Python packages (issue 70), pinned alongside cantools
+# and python-can, which come from the repo's requirements.txt. Only a bench
+# PC needs this file; CI and the image build do not.
+#
+#     pip install -r tests/bench/requirements.txt
+-r ../../requirements.txt
+pyserial==3.5           # the TIM shell on USART1 (--shell PORT)
+python-ics==1!26.3.17   # a ValueCAN through python-can's "neovi" interface; unverified on the bench ValueCAN

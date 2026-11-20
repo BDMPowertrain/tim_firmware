@@ -153,6 +153,13 @@ undo provisioning.
   tools/power_rule_windows.py is the one check of the 80 kW rule's two
   windows (EV.3.4.1): the Power limiter's host closed-loop test, bench
   logs and car logs are all judged by it, never by a copy.
+- docs/spec/bench-test-plan.md is the bench test plan: every Bench case
+  (stable ID, rig, edges, budget, pass criterion) and Bench measurement. A
+  case's script is tests/bench/<ID>_<name>.py (python-can and the DBC
+  files, tests/bench/requirements.txt); its pure helpers,
+  tests/bench/benchlib.py, have a host test. Each run writes a result
+  file into tests/bench/results/, committed. A person runs them at the
+  bench, never CI. A change that adds a bench case adds its row there.
 - targets/<image>/tim.ioc is the source of truth for that image's pin and
   peripheral config. Both projects must name the same firmware package.
 - The BMS project follows the BMS pin map (issue 19): clock, FreeRTOS,

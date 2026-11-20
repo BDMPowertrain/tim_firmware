@@ -56,6 +56,7 @@ add_host_test(test_event_flood logic_common common/test_event_flood.c)
 add_host_test(test_event_log logic_common common/test_event_log.c common/ram_flash.c)
 add_host_test(test_pedal_check_record logic_common common/test_pedal_check_record.c common/ram_flash.c)
 add_host_test(test_params logic_common common/test_params.c common/ram_flash.c)
+add_host_test(test_bench_bank2 logic_common common/test_bench_bank2.c common/ram_flash.c)
 add_host_test(test_frame_queue logic_common common/test_frame_queue.c)
 add_host_test(test_daq_retry logic_common common/test_daq_retry.c)
 add_host_test(test_daq_status logic_common common/test_daq_status.c)
@@ -123,6 +124,15 @@ if(Python3_Interpreter_FOUND)
             ${repo_root}/tools/data_log_decode.py
             ${CMAKE_CURRENT_BINARY_DIR})
     set_tests_properties(test_data_log_bms_decoder PROPERTIES FIXTURES_REQUIRED bms_log_sample)
+
+    # The bench scripts' shared helpers (issue 70) against the bank 2 dump
+    # test_bench_bank2 writes with the real storage code. Standard library
+    # only.
+    set_tests_properties(test_bench_bank2 PROPERTIES FIXTURES_SETUP bench_bank2_sample)
+    add_test(NAME test_benchlib
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_benchlib.py
+            ${CMAKE_CURRENT_BINARY_DIR})
+    set_tests_properties(test_benchlib PROPERTIES FIXTURES_REQUIRED bench_bank2_sample)
 
     # The 80 kW rule's two windows (issue 60): the check itself, then the
     # traces the Power limiter's closed-loop test writes.
