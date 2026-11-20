@@ -12,10 +12,12 @@ between the two writes (or --during picks one):
 
 Pass, each run: the board starts again; the BMS is not in FAULT_HELD (a
 power loss is a Power-on reset) and the VCU is in GLV_ON; the sentinel in
-force (`param dump`) is X or Y, never anything else. A cut that tore a
-write shows as a copy that is not good in `param dump` or as a storage
-repaired Event after the start; the case needs at least one such run, or
-it proved nothing and fails. By hand a cut rarely lands inside 45 ms: a
+force (`param dump`) is X or Y after a save run, and unchanged after an
+Event run. A cut that tore a write shows as a copy good before and not
+after it in `param dump` (a torn Parameter copy is skipped, not
+repaired), or as a storage repaired Event after the start (a torn Event
+log page is repaired, #18). The case needs at least one torn run, or it
+proved nothing and fails. By hand a cut rarely lands inside 45 ms: a
 relay on the supply driven at the moment of the save is the better switch
 (who operates the switch is open, see the plan). Issue 72 holds the ECC
 NMI checks that go with this case.
@@ -64,16 +66,18 @@ def main() -> int:
             if "param: saved" not in rig.shell.command("param save", wait_s=2.0):
                 sys.exit("param save refused: on the VCU it needs GLV_ON")
             rig.shell.command(f"param set {name} {y}")
-        _, copies_before = param_dump(rig, name)
+        value_before, copies_before = param_dump(rig, name)
+        mark = rig.control.now()
+        sender = None
         if during == "save":
-            mark = rig.control.now()
             rig.shell.send("param save")
-            rig.operator.do("CUT the TIM's power NOW, wait 2 s, restore it.")
         else:
-            mark = rig.control.now()
+            # Sending stops by itself when the bus refuses a frame (no ACK
+            # once the board is off): stim.failed says so, which is expected.
             sender = threading.Thread(target=stim.send, args=(EVENTS,), daemon=True)
             sender.start()
-            rig.operator.do("CUT the TIM's power NOW, wait 2 s, restore it.")
+        rig.operator.do("CUT the TIM's power NOW, wait 2 s, restore it.")
+        if sender is not None:
             sender.join()
         gap = rig.wait_reset(mark, timeout_s=15.0)
         if gap is None:
@@ -93,13 +97,15 @@ def main() -> int:
         ok = (state != "FAULT_HELD") if rig.image == "bms" else (state == "GLV_ON")
         if during == "save":
             ok = ok and value in (x, y)
+        else:
+            ok = ok and value == value_before
         note = (f"{during}: ended {state}, {name} {value}, copies {copies[0]}/{copies[1]}, "
                 f"repair Events {len(repaired)}{', TORN' if torn else ''}")
         runs.append(bl.Run(None, ok, note))
         print(f"run {n + 1}: {'ok' if ok else 'FAILED'} {note}")
     rig.notes.append(f"runs whose cut tore a write: {torn_runs}")
     if torn_runs == 0:
-        runs.append(bl.Run(None, False, "no cut landed mid-write: the case proved nothing"))
+        rig.case_failures.append("no cut landed mid-write: the case proved nothing")
     return rig.finish("pass or fail", None, runs)
 
 

@@ -7,8 +7,9 @@ reads the Event log while the board runs) and the shell.
 Each run, with the flood guard's burst refilled first (65 s quiet):
   1. `param save`: the older Parameter copy is erased and written (on the
      VCU only in GLV_ON, which a bare TIM is in).
-  2. 70 Events from the bus (rig.EventStimulus) in 0.7 s: more than a
-     page holds, so at least one Event log page is erased back to back
+  2. 70 Events from the bus (rig.EventStimulus, one a step: about 0.7 s
+     on the VCU, 1.4 s on the BMS): the guard admits its burst of 64, a
+     page's worth, so at least one Event log page is erased back to back
      with the writes. The page numbers before and after prove it.
 Pass, each run: a page was opened, no Overrun (`step`), no Control bus
 frame skipped for a full slot (`bus`), and no late or skipped frame on the
@@ -44,13 +45,15 @@ def main() -> int:
         start = rig.control.now()
         reply = rig.shell.command("param save", wait_s=2.0)
         stim.send(EVENTS)
+        if stim.failed:
+            sys.exit(f"The Event stimulus {stim.failed}")
         time.sleep(3.0)
         end = rig.control.now()
         pages_after = bl.event_log_page_numbers(ocd.bank2())
         overruns_after, skipped_after = rig.overruns(), rig.tx_skipped()
 
         frames = [f for f in rig.control.since(start) if f.t <= end]
-        judged = bl.judge_control_bus(frames, rig.image)
+        judged = bl.judge_control_bus(frames, rig.layout)
         opened = max(pages_after, default=0) - max(pages_before, default=0)
         saved = "param: saved" in reply
         notes = [f"pages opened {opened}", "saved" if saved else "param save not confirmed"]

@@ -31,7 +31,10 @@ assumption never reads as a passed test.
    `tests/bench/results/`, committed: case ID, image git commit, board
    serial, date, all 20 times, the worst, PASS, FAIL or INCOMPLETE, and a
    scope screenshot for a scope-timed case (`--scope-screenshot`). The Rig A
-   scripts write it as `<ID>_<image>_<UTC time>.json`.
+   scripts write it as `<ID>_<image>_<UTC time>.json`. A check of the case
+   as a whole (a scope left on normal trigger over all 20 runs, or COM-12
+   needing one torn write) goes in the file's `case_failures`, never as an
+   extra run.
 5. **When:** the full plan for an image passes on the exact commit that goes
    on the car. After a change, the cases it touches are re-run before merge,
    by the author's judgement. Nothing here runs in CI.
@@ -104,9 +107,9 @@ frame on the bus (0x080 BMS, 0x090 VCU).
 
 | ID | Case | Stimulus | Start edge | End edge | Budget | Pass criterion | Recorded |
 |---|---|---|---|---|---|---|---|
-| COM-01 | Hang command | `hang confirm` | Last status frame before the hang | VCU: first 0x0C0 after the reset. BMS: NRST low (scope); BMS_OK itself is BMS-21 | BMS 100 ms (expected at most about 85 ms measured this way). VCU 99 ms *new* (the inverter's own timeout) | Worst of 20 at or under the budget. VCU: no 0x0C0 after the command carries Enable=1, the first after the reset carries Enable=0 | 20 times; VCU from the bus, BMS from the scope |
+| COM-01 | Hang command | `hang confirm` | Last status frame before the hang | VCU: first 0x0C0 after the reset. BMS: NRST low (scope); BMS_OK itself is BMS-21 | BMS 100 ms (expected at most about 85 ms measured this way). VCU 99 ms *new* (the inverter's own timeout) | Worst of 20 at or under the budget. VCU: no 0x0C0 after the command carries Enable=1, the first after the reset carries Enable=0 (on Rig A the VCU is in GLV_ON, so only the time and the first frame prove anything; the bench commands are refused in Ready to Drive) | 20 times; VCU from the bus, BMS from the scope |
 | COM-02 | Crash command | `crash confirm` | As COM-01 | As COM-01 (pins floating at the reset) | As COM-01 | As COM-01, and `lastreset` gives a software reset with the Crash record "crash command in shellTask" and a Breadcrumb | 20 times; `lastreset` per run |
-| COM-03 | Three Overruns in a second | GDB moves the step's clock on by one period at the end of three steps running (below) | The third Overrun | The fault bit in the status frame | Pass or fail | `step` counts 3 Overruns. BMS: an ordinary BMS fault (InternalActive), cleared after 1 s clean. VCU: TimingFault Torque cut; its recovery on pedal release is VCU-16 | How long the BMS fault was set; the Overrun count |
+| COM-03 | Three Overruns in a second | GDB moves the step's clock on by one period at the end of three steps running (below) | The third Overrun | The fault bit in the status frame | Pass or fail | `step` counts 3 Overruns. BMS: an ordinary BMS fault (InternalActive), set for 1.0 to 1.1 s (BMS-11), plus one status period. VCU: TimingFault Torque cut; its recovery on pedal release is VCU-16 | How long the BMS fault was set; the Overrun count |
 | COM-04 | DAQ bus shorted *new* | A switch shorts the DAQ bus's CANH to CANL for 60 s | Switch closed | Switch opened | No late or skipped frame (status gap 30 ms) | No control-step Overrun and no Control bus frame skipped or late over the 60 s | Worst status frame gap per run; Overrun and `tx_skipped` counts |
 | COM-05 | DAQ send queue flooded *new* | The CAN interface holds the DAQ bus with 64-byte FD frames at ID 0x001 for 60 s | Flood started | Flood stopped | As COM-04 | As COM-04, and the TIM's own DAQ frame rate fell by at least half, or the run did not flood the queue and fails | As COM-04, and the TIM's DAQ frames a second before and during |
 | COM-06 | Watchdog reset | `hang confirm` | The reset | The status frame 3 s after the first one | Pass or fail | BMS ends in FAULT_HELD, VCU in GLV_ON; both report LastResetNotPowerOn. BMS_OK never goes high during the reset (scope on MCU_BMS_OK, normal trigger on a rise) | Last status frame to first after it, per run; end state |
@@ -114,17 +117,19 @@ frame on the bus (0x080 BMS, 0x090 VCU).
 | COM-08 | NRST pin reset | A switch from NRST to ground | As COM-06 | As COM-06 | Pass or fail | As COM-06 | As COM-06 |
 | COM-09 | Power cycle | The supply's switch off, then on | As COM-06 | As COM-06 | Pass or fail | BMS starts normally (not FAULT_HELD), VCU in GLV_ON; neither reports LastResetNotPowerOn. BMS_OK never high | As COM-06 |
 | COM-10 | Brown-out reset | The supply lowered below 2.8 V (to 2.5 V) and back, on a provisioned board | As COM-06 | As COM-06 | Pass or fail | As COM-09 ("BOR flag set" is a Power-on reset, ADR 0011) | As COM-06; the thresholds are M-16 |
-| COM-11 | Step timing while bank 2 is erased (#18 1) | `param save`, then 70 Events from the bus in 0.7 s so an Event log page is erased back to back with the writes | `param save` sent | 3 s after the last Event | No late or skipped frame (status gap 30 ms) | An Event log page was opened, the save succeeded, no Overrun, no frame late or skipped: proves the bank split (ADR 0014) | Worst status frame gap per run; pages opened |
-| COM-12 | Power removed during a write (#18 2) | The supply cut during a `param save`, or while Events are written; alternate runs | The cut | The status frame 3 s after the start | Pass or fail | The board starts; the previous Parameter set (or the new one, if the save finished) is in force, never anything else; a torn Event log page is repaired with a storage repaired Event; the BMS does not end in FAULT_HELD. At least one run must tear a write, or the case proved nothing and fails | Per run: copy states, value in force, repair Events, torn or not |
+| COM-11 | Step timing while bank 2 is erased (#18 1) | `param save`, then 70 Events from the bus, one a step, so the guard's burst of 64 fills a page and an Event log page is erased back to back with the writes | `param save` sent | 3 s after the last Event | No late or skipped frame (status gap 30 ms) | An Event log page was opened, the save succeeded, no Overrun, no frame late or skipped: proves the bank split (ADR 0014) | Worst status frame gap per run; pages opened |
+| COM-12 | Power removed during a write (#18 2) | The supply cut during a `param save`, or while Events are written; alternate runs | The cut | The status frame 3 s after the start | Pass or fail | The board starts; the previous Parameter set (or the new one, if the save finished) is in force, never anything else, and an Event run leaves it unchanged; a torn Parameter copy is skipped, and a torn Event log page is repaired with a storage repaired Event; the BMS does not end in FAULT_HELD. At least one run must tear a write, or the case proved nothing and fails | Per run: copy states, value in force, repair Events, torn or not |
 | COM-13 | A normal flash leaves bank 2 untouched (#18 3) | OpenOCD `program <elf> verify`, core halted throughout | Bank 2 dumped before | Bank 2 dumped after | Pass or fail | The two dumps are identical, and bank 2 held something | Bytes that differed |
 | COM-14 | Both Parameter copies corrupted (#18 4) | OpenOCD flips one bit in each copy inside its CRC, then puts them back | Board started on the corrupted copies | The status frame 3 s later | Pass or fail | ParametersDefaulted set; the VCU reaches GLV_ON and sends no Enable=1; after the copies are put back, ParametersDefaulted clears. The start procedure's refusal is VCU-19 | Per run: state and flags, corrupted and restored |
-| COM-15 | Event flood (#18 6) | 1000 Events asked for from the bus in 10 s | The first Event | 3 s after the last | Pass or fail | At least 64 written, no stretch over the guard (a burst of 64, then one a second), and an "N events dropped" Event | Per run: Events written; the closest two after the burst |
+| COM-15 | Event flood (#18 6) | 300 Events asked for from the bus, one a step | The first Event | 3 s after the last | Pass or fail | At least 64 written, no stretch over the guard (a burst of 64, then one a second), and an "N events dropped" Event | Per run: Events written; the closest two after the burst |
 
-**Events from the bus** (COM-11, COM-12, COM-15). Each frame becomes one
-Event through the real path: on the VCU, INV_FaultCodes with new fault
-bits (an inverter fault Event each); on the BMS, CHG_Status with a changed
-flag (a charger flags Event each). On the BMS this puts it in Charge mode
-until a power cycle, which is harmless on Rig A.
+**Events from the bus** (COM-11, COM-12, COM-15). A changed value becomes
+one Event through the real path: on the VCU, INV_FaultCodes with new fault
+bits (an inverter fault Event each); on the BMS, CHG_Status with changed
+flags (a charger flags Event each). The step reads the newest frame once a
+step, so at most one Event a step comes of it; every frame carries a value
+none of the last 30 had, so every step sees a change. On the BMS this puts
+it in Charge mode until a power cycle, which is harmless on Rig A.
 
 **COM-03's stimulus** (chosen here). A debugger halt cannot cause an
 Overrun, because the RTOS tick and the cycle counter stop with the core. So
@@ -200,8 +205,8 @@ and this plan says so.
 
 | ID | Case | Stimulus | Start edge | End edge | Budget | Pass criterion | Recorded |
 |---|---|---|---|---|---|---|---|
-| BMS-23 | Charger timeout keeps BMS_OK up | `charger_sim.py --silent-after 10` | The last status | Charge WAITING | 5 s | BMS_OK stays high, stop requests keep coming, the charge restarts about 3 s after the charger returns | Pass or fail; the times |
-| BMS-24 | Charger ignores its request | `charger_sim.py --over 1.5` | The excess current | BMS_OK low (charger disobeys) | 5 s | As BMS-01 | As BMS-01 |
+| BMS-23 | Charger timeout keeps BMS_OK up | `charger_sim.py --silent-after 10` | The last status | Charge WAITING | 5.1 s (the 5 s timeout plus up to five Sweeps, chosen here) | BMS_OK stays high, stop requests keep coming, the charge restarts about 3 s after the charger returns | Pass or fail; the times |
+| BMS-24 | Charger ignores its request | `charger_sim.py --over 1.5` | The first CHG_Status reporting the excess | BMS_OK low (charger disobeys) | 5.1 s (the 5 s timer plus up to five Sweeps, chosen here) | As BMS-01 | As BMS-01 |
 | BMS-25 | The charge ends at the target | A charge to the end on real cells | Highest cell at the Charge target | Charge complete | Pass or fail | Charge complete arrives (no hovering at the target), the rested-cells Event 60 s later | Pass or fail; the log |
 
 **Balancing** (Rig B on real cells), the cases from
@@ -328,4 +333,5 @@ this plan holds the cases and budgets they prove.
 - **Chosen while writing this plan (#70), open to change:** the 1.5-period
   late rule (Rules, 8); COM-03's stimulus; timing the BMS hang and crash on
   Rig A to NRST; COM-05 counting as flooded only if the TIM's DAQ rate
-  halves; COM-12 failing without a torn write.
+  halves; COM-12 failing without a torn write; the 0.1 s allowance on
+  BMS-23 and BMS-24, whose trips come after a 5 s timer by definition.

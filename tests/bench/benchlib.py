@@ -173,17 +173,6 @@ class Frame:
     data: bytes
 
 
-STATUS_ID = {"bms": 0x080, "vcu": 0x090}
-INV_COMMAND_ID = 0x0C0
-
-# The frames each image sends on every step or every second step, with
-# their period in ms: these are judged late. The rest (BMS_Limits and the
-# other 100 ms frames) are sent in one slot of five and only counted.
-EVERY_STEP_MS = {
-    "bms": {0x080: 20.0, 0x082: 20.0},
-    "vcu": {0x0C0: 10.0, 0x090: 20.0},
-}
-
 # Late: a gap between two frames of one ID over 1.5 periods (chosen in
 # issue 70; the plan states it).
 LATE_FACTOR = 1.5
@@ -191,18 +180,27 @@ LATE_FACTOR = 1.5
 # A reset shows as a gap of at least this many periods.
 RESET_GAP_PERIODS = 3
 
-E2E_IDS = (0x080, 0x081, 0x082, 0x090)  # Profile 11 counter 0 to 14
-E2E_COUNTER_MODULO = 15
-INV_COUNTER_MODULO = 16
 
+@dataclass
+class BusLayout:
+    """What judging the Control bus needs to know of its frames. Never
+    written here: rig.bus_layout() reads it from can/control.dbc (ADR 0003).
 
-def frame_counter(frame: Frame) -> int | None:
-    """The frame's own counter, or None for a frame without one."""
-    if frame.can_id in E2E_IDS:
-        return frame.data[1] & 0x0F
-    if frame.can_id == INV_COMMAND_ID:
-        return frame.data[5] >> 4
-    return None
+    periods_ms: the frames the image sends every step or every second step,
+        by ID, with their period; these are judged late. The rest (sent in
+        one slot of five) are only counted.
+    counters: by ID, the frame's counter as (start bit, length, number of
+        values), little-endian (Intel) as every counter of ours is."""
+    periods_ms: dict[int, float]
+    counters: dict[int, tuple[int, int, int]]
+
+    def counter(self, frame: Frame) -> int | None:
+        """The frame's own counter, or None for a frame without one."""
+        layout = self.counters.get(frame.can_id)
+        if layout is None:
+            return None
+        start, length, _ = layout
+        return (int.from_bytes(frame.data, "little") >> start) & ((1 << length) - 1)
 
 
 @dataclass
@@ -216,11 +214,10 @@ class BusJudgement:
         return not self.late and not self.skipped
 
 
-def judge_control_bus(frames: list[Frame], image: str) -> BusJudgement:
+def judge_control_bus(frames: list[Frame], layout: BusLayout) -> BusJudgement:
     """Judges one recording of the Control bus: every frame with a counter
-    must step it by one, and every every-step frame must come within
+    must step it by one, and every frame with a period must come within
     LATE_FACTOR periods of the one before."""
-    periods = EVERY_STEP_MS[image]
     last: dict[int, Frame] = {}
     worst: dict[int, float] = {}
     late = []
@@ -230,15 +227,16 @@ def judge_control_bus(frames: list[Frame], image: str) -> BusJudgement:
         last[f.can_id] = f
         if prev is None:
             continue
-        counter = frame_counter(f)
+        counter = layout.counter(f)
         if counter is not None:
-            modulo = INV_COUNTER_MODULO if f.can_id == INV_COMMAND_ID else E2E_COUNTER_MODULO
-            if counter != (frame_counter(prev) + 1) % modulo:
+            values = layout.counters[f.can_id][2]
+            if counter != (layout.counter(prev) + 1) % values:
                 skipped.append((f.can_id, f.t))
-        if f.can_id in periods:
+        period = layout.periods_ms.get(f.can_id)
+        if period is not None:
             gap_ms = round((f.t - prev.t) * 1000.0, 3)
             worst[f.can_id] = max(worst.get(f.can_id, 0.0), gap_ms)
-            if gap_ms > periods[f.can_id] * LATE_FACTOR:
+            if gap_ms > period * LATE_FACTOR:
                 late.append((f.can_id, f.t, gap_ms))
     return BusJudgement(worst, late, skipped)
 
@@ -312,6 +310,13 @@ def parse_last_reset(text: str) -> str | None:
     return m.group(1) if m else None
 
 
+def parse_breadcrumb(text: str) -> str | None:
+    """The Breadcrumb from `lastreset` ("step N, ..."), or None if it says
+    no control step ran or is missing."""
+    m = re.search(r"breadcrumb:\s+(step [^\r\n]+)", text)
+    return m.group(1) if m else None
+
+
 def parse_crash_record(text: str) -> str | None:
     """The Crash record from `lastreset` ("<cause> in <task>"), or None."""
     m = re.search(r"crash record:\s+(.+?)(?:, (?:at|address)|\r|\n|$)", text)
@@ -347,6 +352,9 @@ class Result:
     date: str = field(default_factory=lambda: datetime.now(timezone.utc)
                       .isoformat(timespec="seconds"))
     notes: list[str] = field(default_factory=list)
+    # A check of the case as a whole that failed, such as a scope that saw
+    # BMS_OK rise in one of the runs: the case fails, no run is added.
+    case_failures: list[str] = field(default_factory=list)
     scope_screenshot: str | None = None
 
     @property
@@ -361,8 +369,9 @@ class Result:
     @property
     def verdict(self) -> str:
         """PASS: RUNS runs, each judged ok, the worst at or under the
-        budget with no margin. INCOMPLETE: fewer runs. FAIL otherwise."""
-        failed = not all(r.ok for r in self.runs) or (
+        budget with no margin, and no case failure. INCOMPLETE: fewer runs.
+        FAIL otherwise."""
+        failed = bool(self.case_failures) or not all(r.ok for r in self.runs) or (
             self.budget_ms is not None and self.worst_ms is not None
             and self.worst_ms > self.budget_ms)
         if failed:

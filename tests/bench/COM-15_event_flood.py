@@ -2,9 +2,10 @@
 """COM-15 Event flood (docs/spec/bench-test-plan.md), Rig A, both images.
 Needs the ST-Link (OpenOCD reads the Event log while the board runs).
 
-Each run, with the guard's burst refilled first (65 s quiet): 1000 Events
-asked for from the bus in 10 s (rig.EventStimulus: 100 a second), then
-3 s to settle. The Events the run added are read from bank 2.
+Each run, with the guard's burst refilled first (65 s quiet): 300 Events
+asked for from the bus, one a control step (rig.EventStimulus: about 6 s
+on the VCU, 9 s on the BMS), then 3 s to settle. The Events the run
+added are read from bank 2.
 Pass, each run: the burst was used (at least 64 Events written), no
 stretch holds more than the guard lets through (a burst of 64 plus one a
 second, benchlib.flood_excess), and an "N events dropped" Event was
@@ -20,7 +21,7 @@ import benchlib as bl
 import rig as r
 
 REFILL_S = 65.0
-EVENTS = 1000
+EVENTS = 300
 
 
 def main() -> int:
@@ -35,6 +36,8 @@ def main() -> int:
         rig.wait_running()
         before = ocd.bank2()
         stim.send(EVENTS)
+        if stim.failed:
+            sys.exit(f"The Event stimulus {stim.failed}")
         time.sleep(3.0)
         added = r.new_events(before, ocd.bank2())
         admitted = [e for e in added if e.code != bl.EVENT_EVENTS_DROPPED]

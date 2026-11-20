@@ -34,12 +34,12 @@ def check(rig: r.Rig, mark: float, defaulted: bool) -> tuple[bool, str]:
     if end is None:
         return False, "no status frame"
     state = rig.state_name(end)
-    flag = rig.status(end)["ParametersDefaulted"] == 1
+    flag = rig.decode(end)["ParametersDefaulted"] == 1
     ok = flag == defaulted
     note = f"{state}, ParametersDefaulted {int(flag)}"
     if rig.image == "vcu" and defaulted:
-        enabled = [f for f in rig.control.since(gap[1]) if f.can_id == bl.INV_COMMAND_ID
-                   and rig.status(f)["InverterEnable"] == 1]
+        enabled = [f for f in rig.control.since(gap[1]) if f.can_id == rig.inv_command_id
+                   and rig.decode(f)["InverterEnable"] == 1]
         ok = ok and state == "GLV_ON" and not enabled
         note += f", Enable=1 frames {len(enabled)}"
     return ok, note

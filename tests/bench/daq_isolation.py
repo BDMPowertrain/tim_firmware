@@ -90,7 +90,7 @@ def run_case(stimulus: str) -> int:
                 ok = False
                 notes.append("not flooded: the adapter did not hold the bus")
         frames = [f for f in rig.control.since(start) if f.t <= end]
-        judged = bl.judge_control_bus(frames, rig.image)
+        judged = bl.judge_control_bus(frames, rig.layout)
         overruns_after, skipped_after = rig.overruns(), rig.tx_skipped()
         if overruns is None or overruns_after != overruns:
             ok = False

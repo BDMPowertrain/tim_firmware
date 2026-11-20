@@ -103,11 +103,20 @@ def inverter_frames(times_s, counters):
     return [bl.Frame(t, 0x0C0, bytes([0, 0, 0, 0, 0, c << 4, 0, 0])) for t, c in zip(times_s, counters)]
 
 
+# The layouts as can/control.dbc has them today, written out here as the
+# test's own source of truth: periods of the frames sent every step or
+# every second step, and each counter's (start bit, length, values).
+BMS = bl.BusLayout(periods_ms={0x080: 20.0, 0x082: 20.0},
+                   counters={0x080: (8, 4, 15), 0x081: (8, 4, 15), 0x082: (8, 4, 15)})
+VCU = bl.BusLayout(periods_ms={0x0C0: 10.0, 0x090: 20.0},
+                   counters={0x090: (8, 4, 15), 0x0C0: (44, 4, 16)})
+
+
 class ControlBusFrames(unittest.TestCase):
     def test_a_steady_bus_has_no_late_or_skipped_frame(self):
         frames = e2e_frames(0x080, [0.000, 0.020, 0.040, 0.060], [13, 14, 0, 1])
 
-        j = bl.judge_control_bus(frames, "bms")
+        j = bl.judge_control_bus(frames, BMS)
         self.assertEqual([], j.late)
         self.assertEqual([], j.skipped)
         self.assertAlmostEqual(20.0, j.worst_gap_ms[0x080])
@@ -116,24 +125,24 @@ class ControlBusFrames(unittest.TestCase):
         # BMS_Status every 20 ms: 30 ms is the limit, 31 ms is late.
         frames = e2e_frames(0x080, [0.000, 0.030, 0.061], [0, 1, 2])
 
-        j = bl.judge_control_bus(frames, "bms")
+        j = bl.judge_control_bus(frames, BMS)
         self.assertEqual([(0x080, 0.061, 31.0)], [(i, t, round(g, 3)) for i, t, g in j.late])
 
     def test_a_counter_that_does_not_step_by_one_is_a_skipped_frame(self):
         frames = e2e_frames(0x090, [0.00, 0.02, 0.04], [14, 0, 2])
 
-        self.assertEqual([(0x090, 0.04)], bl.judge_control_bus(frames, "vcu").skipped)
+        self.assertEqual([(0x090, 0.04)], bl.judge_control_bus(frames, VCU).skipped)
 
     def test_the_inverter_command_counter_wraps_at_16(self):
         frames = inverter_frames([0.00, 0.01, 0.02, 0.03], [14, 15, 0, 2])
 
-        self.assertEqual([(0x0C0, 0.03)], bl.judge_control_bus(frames, "vcu").skipped)
+        self.assertEqual([(0x0C0, 0.03)], bl.judge_control_bus(frames, VCU).skipped)
 
-    def test_frames_the_image_does_not_send_every_step_are_not_judged(self):
-        # BMS_Limits comes once in five steps: not judged for lateness.
+    def test_frames_without_a_period_in_the_layout_are_not_judged_late(self):
+        # BMS_Limits comes once in five steps: counted, not judged late.
         frames = e2e_frames(0x081, [0.0, 0.1, 0.3], [0, 1, 2])
 
-        self.assertEqual([], bl.judge_control_bus(frames, "bms").late)
+        self.assertEqual([], bl.judge_control_bus(frames, BMS).late)
 
     def test_the_reset_is_the_first_gap_of_several_periods_after_the_mark(self):
         frames = e2e_frames(0x080, [0.00, 0.02, 0.04, 0.16, 0.18], [0, 1, 2, 0, 1])
@@ -186,6 +195,14 @@ class ShellText(unittest.TestCase):
         self.assertEqual("software", bl.parse_last_reset(text))
         self.assertEqual("crash command in shellTask", bl.parse_crash_record(text))
 
+    def test_lastreset_gives_the_breadcrumb(self):
+        text = ("last reset:   watchdog (RCC_CSR 0x24000000)\r\n"
+                "breadcrumb:   step 4152, in phase 2 (judge), 0 overruns\r\n")
+        self.assertEqual("step 4152, in phase 2 (judge), 0 overruns", bl.parse_breadcrumb(text))
+
+    def test_a_breadcrumb_with_no_step_is_none(self):
+        self.assertIsNone(bl.parse_breadcrumb("breadcrumb:   no control step ran\r\n"))
+
     def test_no_crash_record(self):
         self.assertIsNone(bl.parse_crash_record("crash record: none\r\n"))
 
@@ -215,6 +232,12 @@ class Verdict(unittest.TestCase):
 
     def test_a_case_with_no_budget_passes_on_its_runs(self):
         self.assertEqual("PASS", result([None] * 20, budget_ms=None).verdict)
+
+    def test_a_failure_of_the_whole_case_fails_it_without_adding_a_run(self):
+        r = result([80.0] * 20)
+        r.case_failures.append("MCU_BMS_OK went high during a reset")
+
+        self.assertEqual(("FAIL", 20), (r.verdict, len(r.times_ms)))
 
     def test_the_result_file_holds_what_the_plan_asks_for(self):
         r = result([float(n) for n in range(20)])

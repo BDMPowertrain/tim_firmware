@@ -27,10 +27,29 @@ CONTROL_DBC = REPO / "can" / "control.dbc"
 DAQ_DBC = REPO / "can" / "daq.dbc"
 RESULTS = Path(__file__).resolve().parent / "results"
 
-STATUS_PERIOD_S = 0.020  # BMS_Status and VCU_Status
-DAQ_STATUS_ID = {"bms": 0x280, "vcu": 0x290}
 SETTLE_S = 3.0  # after a start, before the state is read: the BMS on Rig A
                 # leaves STARTUP for FAULT after 2 s with no chain
+
+STATUS_FRAME = {"bms": "BMS_Status", "vcu": "VCU_Status"}
+SENDER = {"bms": "BMS", "vcu": "VCU"}
+COUNTER_SIGNALS = ("Counter", "RollingCounter")
+EVERY_STEP_MAX_MS = 20  # sent every step or every second step: judged late
+
+
+def bus_layout(db, image: str) -> bl.BusLayout:
+    """The Control bus layout benchlib judges by, read from the DBC (ADR
+    0003): the image's frames with a period of 20 ms or less, and every
+    frame's counter signal with its number of values."""
+    periods = {m.frame_id: float(m.cycle_time) for m in db.messages
+               if SENDER[image] in m.senders and m.cycle_time
+               and m.cycle_time <= EVERY_STEP_MAX_MS}
+    counters = {}
+    for m in db.messages:
+        for sig in m.signals:
+            if sig.name in COUNTER_SIGNALS:
+                assert sig.byte_order == "little_endian", sig
+                counters[m.frame_id] = (sig.start, sig.length, int(sig.maximum) + 1)
+    return bl.BusLayout(periods, counters)
 
 
 def parser(case: str, title: str, *, debugger: bool = False, daq: bool = False,
@@ -200,29 +219,35 @@ class Rig:
                                    bitrate=500000, data_bitrate=2000000)
             self.daq = Recorder(self.daq_bus)
         self.image = self._which_image()
-        self.status_id = bl.STATUS_ID[self.image]
+        status = self.control_db.get_message_by_name(STATUS_FRAME[self.image])
+        self.status_id = status.frame_id
+        self.status_period_s = status.cycle_time / 1000.0
+        command = self.control_db.get_message_by_name("INV_Command")
+        self.inv_command_id = command.frame_id
+        self.inv_period_s = command.cycle_time / 1000.0
+        self.layout = bus_layout(self.control_db, self.image)
         self.notes: list[str] = []
+        self.case_failures: list[str] = []
         print(f"{args.case}: {args.title}; the board runs the {self.image.upper()} image")
 
     def _which_image(self) -> str:
-        f = self.control.wait(lambda f: f.can_id in bl.STATUS_ID.values(), 5.0)
+        ids = {self.control_db.get_message_by_name(name).frame_id: image
+               for image, name in STATUS_FRAME.items()}
+        f = self.control.wait(lambda f: f.can_id in ids, 5.0)
         if f is None:
             sys.exit("No BMS_Status or VCU_Status on the Control bus in 5 s: is the TIM "
                      "running, and the bus terminated at both ends?")
-        return "bms" if f.can_id == bl.STATUS_ID["bms"] else "vcu"
+        return ids[f.can_id]
 
     # Decoding -------------------------------------------------------------
 
-    def status(self, frame: bl.Frame) -> dict:
+    def decode(self, frame: bl.Frame) -> dict:
+        """Any Control bus frame's signals, raw values for choices."""
         return self.control_db.decode_message(frame.can_id, frame.data, decode_choices=False)
 
     def state_name(self, frame: bl.Frame) -> str:
         msg = self.control_db.get_message_by_frame_id(frame.can_id)
         return str(msg.decode(frame.data)["State"])
-
-    def latest_status(self, after: float = 0.0) -> bl.Frame | None:
-        frames = [f for f in self.control.since(after) if f.can_id == self.status_id]
-        return frames[-1] if frames else None
 
     def wait_running(self, timeout_s: float = 10.0) -> bl.Frame:
         """Waits until status frames come and the board has settled."""
@@ -238,7 +263,7 @@ class Rig:
         deadline = time.monotonic() + timeout_s
         while time.monotonic() < deadline:
             gap = bl.reset_gap(self.control.since(mark - 1.0), self.status_id, mark,
-                               STATUS_PERIOD_S)
+                               self.status_period_s)
             if gap is not None:
                 return gap
             time.sleep(0.05)
@@ -265,6 +290,7 @@ class Rig:
         result = bl.Result(case=self.args.case, title=self.args.title, image=self.image,
                            image_commit=self.args.commit, board=self.args.board, budget=budget,
                            budget_ms=budget_ms, runs=runs, notes=self.notes,
+                           case_failures=self.case_failures,
                            scope_screenshot=self.args.scope_screenshot)
         path = bl.write_result(result, self.args.results)
         self.control.close()
@@ -276,6 +302,8 @@ class Rig:
         for i, r in enumerate(runs, 1):
             if not r.ok or r.note:
                 print(f"  run {i}: {'ok' if r.ok else 'FAILED'} {r.note}")
+        for failure in result.case_failures:
+            print(f"  case: FAILED {failure}")
         print(f"Result: {path}  (commit it)")
         return 0 if result.verdict == "PASS" else 1
 
@@ -362,51 +390,69 @@ class GdbSession:
 
 
 # ---------------------------------------------------------------------------
-# Events from outside the board: each frame below is one Event, written
-# through the real path (no fault-injection code, spec #36 story 66).
+# Events from outside the board, written through the real path (no
+# fault-injection code, spec #36 story 66):
 #   VCU: INV_FaultCodes with new fault bits, an inverter fault Event each
 #        (vcu_control.c, record_inverter_fault()).
-#   BMS: CHG_Status with a changed flag, a charger flags Event each
+#   BMS: CHG_Status with changed flags, a charger flags Event each
 #        (bms_charge.c). The charger heard puts the BMS in Charge mode
 #        until a power cycle; on Rig A it has no cells to charge.
+# The step reads the newest frame of its mailbox once a step, so at most
+# one Event a step comes of it, however fast the frames: each frame
+# carries a value no frame of the last 30 had, so every step sees a change.
 
 STIMULUS_FIRST_GOOD = 3  # a mailbox is VALID after 3 good frames
+STIMULUS_RATE_HZ = 100.0
+CHARGER_FLAG_VALUES = 31  # the five flags, never all clear
+CHARGER_FLAGS = ("HardwareFailure", "OverTemperature", "InputVoltageWrong", "StartingState",
+                 "CommTimeout")
 
 
 class EventStimulus:
     def __init__(self, rig: Rig):
         self.rig = rig
-        db = rig.control_db
-        if rig.image == "vcu":
-            self.msg = db.get_message_by_name("INV_FaultCodes")
-        else:
-            self.msg = db.get_message_by_name("CHG_Status")
+        name = "INV_FaultCodes" if rig.image == "vcu" else "CHG_Status"
+        self.msg = rig.control_db.get_message_by_name(name)
+        self.step_s = rig.status_period_s if rig.image == "bms" else rig.inv_period_s
         self.bus = rig.control.bus
+        self.n = 0
+        self.failed: str | None = None  # why sending stopped, if it did
 
-    def _frame(self, n: int):
+    def frames_for(self, events: int) -> int:
+        """Frames to send for at least `events` Events: one a step."""
+        per_step = max(1, round(STIMULUS_RATE_HZ * self.step_s)) + 1  # one for jitter
+        return STIMULUS_FIRST_GOOD + events * per_step
+
+    def _frame(self, value: int):
         if self.rig.image == "vcu":
-            data = self.msg.encode({"PostFaults": n + 1, "RunFaults": 0})
+            data = self.msg.encode({"PostFaults": value, "RunFaults": 0})
         else:
-            data = self.msg.encode({"OutputVoltage": 0, "OutputCurrent": 0,
-                                    "HardwareFailure": n & 1, "OverTemperature": 0,
-                                    "InputVoltageWrong": 0, "StartingState": 0,
-                                    "CommTimeout": 0})
+            flags = value % CHARGER_FLAG_VALUES + 1
+            signals = {"OutputVoltage": 0, "OutputCurrent": 0}
+            signals.update({n: (flags >> i) & 1 for i, n in enumerate(CHARGER_FLAGS)})
+            data = self.msg.encode(signals)
         return self.rig.can.Message(arbitration_id=self.msg.frame_id,
                                     is_extended_id=self.msg.is_extended_frame, data=data)
 
-    def send(self, events: int, rate_hz: float = 100.0) -> None:
-        """Sends enough frames for `events` Events, rate_hz frames a second.
-        The first frames make the mailbox VALID; each later one carries a
-        change."""
-        n = 0
-        if self.rig.image == "vcu":
-            for _ in range(STIMULUS_FIRST_GOOD):
-                self.bus.send(self._frame(0))
-                time.sleep(1.0 / rate_hz)
-            n = 1
-        for i in range(events + (0 if self.rig.image == "vcu" else STIMULUS_FIRST_GOOD)):
-            self.bus.send(self._frame(n + i))
-            time.sleep(1.0 / rate_hz)
+    def send(self, events: int) -> int:
+        """Sends enough frames for at least `events` Events, at
+        STIMULUS_RATE_HZ on a deadline (not a sleep each, which Windows
+        stretches). Returns the frames sent; stops early, with `failed`
+        set, if the bus refuses one (the board lost power, say)."""
+        period = 1.0 / STIMULUS_RATE_HZ
+        due = time.perf_counter()
+        total = self.frames_for(events)
+        for i in range(total):
+            self.n += 1
+            try:
+                self.bus.send(self._frame(self.n))
+            except self.rig.can.CanError as e:
+                self.failed = f"stopped after {i} frames: {e}"
+                return i
+            due += period
+            while time.perf_counter() < due:
+                time.sleep(max(0.0, min(0.002, due - time.perf_counter())))
+        return total
 
 
 def new_events(before: bytes, after: bytes) -> list[bl.Event]:
@@ -444,7 +490,7 @@ def reset_case(rig: Rig, stimulus, held: bool, not_power_on: bool, budget: str) 
             runs.append(bl.Run(None, False, "no status frame after the reset"))
             continue
         state = rig.state_name(end)
-        reported = rig.status(end)["LastResetNotPowerOn"] == 1
+        reported = rig.decode(end)["LastResetNotPowerOn"] == 1
         if rig.image == "bms":
             ok = (state == "FAULT_HELD") == held
         else:
@@ -459,5 +505,5 @@ def reset_case(rig: Rig, stimulus, held: bool, not_power_on: bool, budget: str) 
             "during these resets?")
         rig.notes.append(f"MCU_BMS_OK never high during the resets: {never_high}")
         if not never_high:
-            runs.append(bl.Run(None, False, "MCU_BMS_OK went high during a reset"))
+            rig.case_failures.append("MCU_BMS_OK went high during a reset")
     return rig.finish(budget, None, runs)
