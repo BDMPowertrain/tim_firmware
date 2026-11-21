@@ -17,7 +17,8 @@ One preset builds both images (ADR 0001): build/<preset>/vcu/tim.elf and
 build/<preset>/bms/tim.elf. Both are named tim.elf, so check the folder
 before flashing. CI (.github/workflows/build.yml) runs the Debug and Release
 presets and the host tests, and checks the generated CAN code, on every push
-and pull request to dev.
+and pull request to dev and main. Work goes into dev by pull request; main
+holds only releases tested on hardware (docs/releasing.md).
 
 The configure fails if the two CubeMX projects name different firmware
 packages. The link fails if an image exceeds 224 KB (ADR 0014,

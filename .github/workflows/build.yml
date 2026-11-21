@@ -1,14 +1,14 @@
 name: build
 
 # Builds both images (ADR 0001) and runs the host tests (ADR 0002) on every
-# push and pull request to dev. CubeMX never runs here: generated code is
-# committed.
+# push and pull request to dev and main (docs/releasing.md). CubeMX never
+# runs here: generated code is committed.
 
 on:
   push:
-    branches: [dev]
+    branches: [dev, main]
   pull_request:
-    branches: [dev]
+    branches: [dev, main]
 
 permissions:
   contents: read
